@@ -372,7 +372,16 @@ func decodeCSI(buf []byte) (Key, int, bool) {
 			return Key{Type: KeyF12}, consumed, true
 		}
 	}
-	return Key{Type: KeyEsc}, consumed, true
+	// Unknown CSI sequence -- swallow it as a no-op KeyChar with rune 0
+	// instead of synthesizing KeyEsc. Many terminals (macOS Terminal.app,
+	// iTerm2, modern xterm) emit vendor-specific CSI sequences on startup
+	// or in response to mode queries (bracketed-paste markers, terminal
+	// status reports, etc.). Returning KeyEsc here makes any modal that
+	// treats Esc as "cancel" -- the avatar selector, the editor, the
+	// upload dialog -- close immediately when the terminal sends one of
+	// those sequences. The user sees the modal flash and then a
+	// "cancelled" message and has no idea why.
+	return Key{Type: KeyChar, Rune: 0}, consumed, true
 }
 
 // decodeSS3 handles `ESC O X` sequences.

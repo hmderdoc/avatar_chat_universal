@@ -357,10 +357,8 @@ func run() error {
 }
 
 func greet(conn io.Writer, user *dropfile.User, bbsID, cfgPath, dataDir string, numCollections int) {
-	fmt.Fprintf(conn, "\r\n\x1b[1;36mavatar_chat_universal\x1b[0m P3 -- chat client\r\n")
+	fmt.Fprintf(conn, "\r\n\x1b[1;36mavatar_chat_universal\x1b[0m\r\n")
 	fmt.Fprintf(conn, "Hello, \x1b[1;33m%s\x1b[0m, from %s!\r\n", user.DisplayName(), bbsID)
-	fmt.Fprintf(conn, "Drop file: %s   user record: %d   node: %d   sec: %d   time-left: %dm\r\n",
-		user.Source, user.UserRecord, user.Node, user.SecurityLevel, user.TimeLeftMin)
 	fmt.Fprintf(conn, "Loaded %d avatar collections.\r\n", numCollections)
 	_ = cfgPath
 	_ = dataDir

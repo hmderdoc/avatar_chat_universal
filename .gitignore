@@ -1,0 +1,24 @@
+# Build artifacts
+avatar_chat_universal
+avatar_chat_universal.exe
+avatar_chat_server
+avatar_chat_server.exe
+dist/
+
+# Runtime data (per-user avatars, etc.)
+data/
+
+# Local sysop overrides
+avatars/sysop/
+ansi_gallery/
+
+# Tracing / debugging
+*.trace
+*.log
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

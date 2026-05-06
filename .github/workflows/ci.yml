@@ -1,0 +1,24 @@
+# Runs `go build` + `go test` on every push and PR. Keeps tagged
+# releases honest by ensuring main is always green.
+
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Build
+        run: go build ./...
+      - name: Test
+        run: go test ./... -timeout 90s
+      - name: Vet
+        run: go vet ./...

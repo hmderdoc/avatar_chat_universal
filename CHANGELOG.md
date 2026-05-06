@@ -7,7 +7,7 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ## [Unreleased]
 
-## [0.1.1] - 2026-05-06
+## [0.1.2] - 2026-05-06
 
 ### Fixed
 
@@ -107,6 +107,6 @@ relative to a clean checkout.
   displays bitmaps that other clients post but there's no built-in
   encoder yet.
 
-[Unreleased]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.1.1...HEAD
-[0.1.1]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.1.0...v0.1.1
+[Unreleased]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.1.0...v0.1.2
 [0.1.0]: https://github.com/hmderdoc/avatar_chat_universal/releases/tag/v0.1.0

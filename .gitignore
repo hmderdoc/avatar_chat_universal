@@ -1,9 +1,11 @@
-# Build artifacts
-avatar_chat_universal
-avatar_chat_universal.exe
-avatar_chat_server
-avatar_chat_server.exe
-dist/
+# Build artifacts (root-level only -- leading slash anchors so we don't
+# accidentally exclude cmd/avatar_chat_universal/ etc., which match the
+# bare name everywhere in the tree).
+/avatar_chat_universal
+/avatar_chat_universal.exe
+/avatar_chat_server
+/avatar_chat_server.exe
+/dist/
 
 # Runtime data (per-user avatars, etc.)
 data/

@@ -7,6 +7,38 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-05-06
+
+### Fixed
+
+- **Standalone mode crash on Windows** (`make tty raw: The parameter is
+  incorrect.`). `golang.org/x/term`'s `MakeRaw` issues a single
+  `SetConsoleMode` call that combines clearing cooked-mode flags with
+  setting `ENABLE_VIRTUAL_TERMINAL_INPUT`; legacy ConHost (older Win10
+  builds, Server 2016, VT-disabled environments) rejects the combined
+  call. The Windows TTY setup is now in-house and does it in two passes:
+  the mandatory raw-input mode first, then VT input/output as best-effort
+  follow-ups so a VT-incapable host still gets a working raw stdin.
+  Reported by Shurato (Heavenly Sphere BBS) on EleBBS Win32.
+- **Splash screen ordering**: the splash now renders first, before the
+  greeting and avatar selector. Previously it sat between
+  `session.Connect` and the chat UI, so first-time users (no saved
+  avatar) never saw it and returning users only caught it briefly on
+  the way into chat. The artwork is also now compiled into the binary
+  via `go:embed` so a misconfigured / missing `splash.ans` can't
+  silently disable it. Sysops who want a custom splash drop their
+  replacement at the repo root and rebuild.
+
+### Changed
+
+- `splash_path` config key removed (artwork is embedded). Set
+  `splash_timeout_seconds = 0` to skip the splash entirely.
+- CI Go version bumped to 1.25 to match `go.mod`.
+- Distribution tarballs now include the full doc set (README, INSTALL,
+  CONFIG, THEMING, AVATARS, SCREENSAVER, CONTRIBUTING, CHANGELOG, LICENSE),
+  the bundled themes, and pre-created `avatars/sysop/` and `ansi_gallery/`
+  directories with stub READMEs telling sysops what to drop where.
+
 ## [0.1.2] - 2026-05-06
 
 ### Fixed

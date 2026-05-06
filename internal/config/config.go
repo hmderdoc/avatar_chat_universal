@@ -40,8 +40,7 @@ type Config struct {
 	FigletColors   bool     // enable rainbow color cycling on figlet text
 	FigletMove     bool     // enable bouncing motion (vs static centered)
 
-	SplashPath           string // path to ANSI splash screen shown before chat opens; empty = skip
-	SplashTimeoutSeconds int    // auto-dismiss after N seconds; user can press a key to skip earlier
+	SplashTimeoutSeconds int // auto-dismiss splash after N seconds; user can press a key to skip earlier. 0 = skip splash entirely.
 
 	AnsiGalleryDir       string // directory of .ans/.bin files for the ansi_gallery idle animation; empty = disable
 	IdleInterleaveAnsi   bool   // insert a single piece of gallery art between every procedural idle animation
@@ -71,7 +70,6 @@ func Default() *Config {
 		FigletMessages:       []string{"Avatar Chat"},
 		MotdChannel:          "motd",
 		OutputCharset:        "cp437",
-		SplashPath:           "splash.ans",
 		SplashTimeoutSeconds: 5,
 		Theme:                "futurewave",
 		Raw:                  map[string]string{},
@@ -154,8 +152,6 @@ func Load(path string) (*Config, error) {
 			cfg.FigletColors = parseBool(val, cfg.FigletColors)
 		case "idle_figlet_move":
 			cfg.FigletMove = parseBool(val, cfg.FigletMove)
-		case "splash_path":
-			cfg.SplashPath = val
 		case "splash_timeout_seconds":
 			cfg.SplashTimeoutSeconds = atoiOr(val, cfg.SplashTimeoutSeconds)
 		case "ansi_gallery_dir":

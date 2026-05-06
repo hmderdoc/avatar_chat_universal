@@ -30,30 +30,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.25'
       - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: '0'
         run: |
-          set -e
-          OUT="dist/${GOOS}_${GOARCH}"
-          mkdir -p "$OUT"
-          EXT=""
-          if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
-          go build -trimpath -ldflags='-s -w' \
-            -o "$OUT/avatar_chat_universal$EXT" ./cmd/avatar_chat_universal
-          go build -trimpath -ldflags='-s -w' \
-            -o "$OUT/avatar_chat_server$EXT" ./cmd/avatar_chat_server
-          cp avatar_chat.ini INSTALL.md README.md LICENSE "$OUT/"
-          # Bundle bundled themes + a placeholder splash so a fresh
-          # extract is launchable without sysop hunting.
-          mkdir -p "$OUT/themes"
-          cp -r themes/*.ini "$OUT/themes/" 2>/dev/null || true
-          cp splash.ans "$OUT/" 2>/dev/null || true
-          tar czf "dist/avatar_chat_universal_${GOOS}_${GOARCH}.tar.gz" \
-            -C dist "${GOOS}_${GOARCH}"
+          # Delegate to the Makefile so `make dist-<plat>` produces
+          # exactly what a local sysop would get -- the GHA workflow
+          # and `make dist` cannot drift apart.
+          make dist-${{ matrix.goos }}_${{ matrix.goarch }}
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.goos }}_${{ matrix.goarch }}

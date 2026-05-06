@@ -140,14 +140,13 @@ full catalog. Quick list:
 
 ## Splash screen
 
-| Key                       | Default       | Notes                                                                                |
-| ------------------------- | ------------- | ------------------------------------------------------------------------------------ |
-| `splash_path`             | `splash.ans`  | Path to a SAUCE-tagged `.ans` or `.bin` file shown on entry. Empty = no splash.       |
-| `splash_timeout_seconds`  | `5`           | Auto-dismiss after N seconds (any keypress also dismisses).                           |
+| Key                       | Default | Notes                                                                              |
+| ------------------------- | ------- | ---------------------------------------------------------------------------------- |
+| `splash_timeout_seconds`  | `5`     | Auto-dismiss after N seconds (any keypress also dismisses). Set to `0` to skip.    |
 
-The splash is parsed (not byte-dumped) into a Frame, centered, and
-strobed through R/G/B every 80ms while displayed. Charset auto-converts
-based on `output_charset`.
+The bundled splash artwork is compiled into the binary. It's parsed (not
+byte-dumped) into a Frame, centered, and strobed through R/G/B every 80ms
+while displayed. Charset auto-converts based on `output_charset`.
 
 ---
 

@@ -1,31 +1,37 @@
 package ui
 
 import (
+	_ "embed"
 	"io"
-	"os"
 	"time"
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
 )
 
-// ShowSplash loads an ANSI or BIN graphic from path, parses it into a
-// 2D char/attr grid (via ansi.LoadFile -- handles SAUCE, SGR, cursor
-// positioning), centers the grid in (width x height), and renders it
-// through the standard Frame pipeline so charset conversion (CP437 ->
-// UTF-8 when needed) and proper cell positioning happen for free.
+// Splash artwork is sourced from the repo root (./splash.ans). The
+// Makefile copies it here before each build so go:embed (which can only
+// read paths at-or-below this file) can pick it up. To customize, drop
+// your replacement at the repo's top-level splash.ans and rebuild --
+// don't edit this copy directly, it gets overwritten.
 //
-// Dismissed by any keypress or after timeout. Missing file = no-op.
-// EOF (user disconnected) is surfaced so the caller can exit cleanly.
-func ShowSplash(conn io.Writer, in *ansi.Input, path string, width, height int, charset ansi.Charset, timeout time.Duration) error {
-	if path == "" {
+//go:embed splash.ans
+var embeddedSplash []byte
+
+// ShowSplash renders the splash artwork compiled into the binary,
+// centered in (width x height), via the standard Frame pipeline (SGR
+// colors, SAUCE-aware sizing, CP437->UTF-8 charset translation as
+// needed). Set timeout to zero (or negative) to skip the splash
+// entirely.
+//
+// Dismissed by any keypress (after a brief minimum-visible window so
+// in-flight keystrokes from a previous screen can't insta-dismiss it)
+// or after timeout. EOF (user disconnected) is surfaced so the caller
+// can exit cleanly.
+func ShowSplash(conn io.Writer, in *ansi.Input, width, height int, charset ansi.Charset, timeout time.Duration) error {
+	if timeout <= 0 || len(embeddedSplash) == 0 {
 		return nil
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		// Missing splash is fine; just skip.
-		return nil
-	}
-	frame, err := ansi.LoadFile(path, data)
+	frame, err := ansi.LoadFile("splash.ans", embeddedSplash)
 	if err != nil || frame == nil {
 		return nil
 	}
@@ -48,14 +54,29 @@ func ShowSplash(conn io.Writer, in *ansi.Input, path string, width, height int, 
 		return err
 	}
 
+	// Drain any queued keypresses left over from the prior screen
+	// (e.g. the Enter the user just pressed to confirm an avatar
+	// selection). Without this, the strobe loop's first in.Next would
+	// instantly return that stale key and dismiss the splash before the
+	// user ever sees it.
+	for {
+		_, ok, err := in.Next(0)
+		if err != nil || !ok {
+			break
+		}
+	}
+
 	// Strobe loop: snapshot the original cells, then on every tick rewrite
 	// each colored cell's FG/BG to one of red/green/blue (CGA 4/2/1) and
 	// re-render. The Frame's dirty-diff renderer means most ticks emit
 	// only attribute changes, not full cell repaints. Stops on any key
-	// or when the splash timeout elapses.
+	// after a short "must show" window, or when the splash timeout
+	// elapses.
 	const strobeTick = 80 * time.Millisecond
+	const minVisible = 600 * time.Millisecond
 	orig := frame.Snapshot()
-	deadline := time.Now().Add(timeout)
+	start := time.Now()
+	deadline := start.Add(timeout)
 	tick := 0
 	dismissed := false
 	for !dismissed && time.Now().Before(deadline) {
@@ -73,8 +94,13 @@ func ShowSplash(conn io.Writer, in *ansi.Input, path string, width, height int, 
 		}
 		if ok {
 			_ = k
-			dismissed = true
-			break
+			// Ignore dismissal during the first ~600ms so the user
+			// actually gets to see the splash; an in-flight keystroke
+			// from the previous screen shouldn't kill it instantly.
+			if time.Since(start) >= minVisible {
+				dismissed = true
+				break
+			}
 		}
 		tick++
 		frame.CycleColors(orig, tick)

@@ -20,7 +20,6 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/theme"
 	"github.com/hmderdoc/avatar_chat_universal/internal/ui"
 	"github.com/hmderdoc/avatar_chat_universal/internal/upload"
-	"golang.org/x/term"
 )
 
 func main() {
@@ -103,6 +102,16 @@ func run() error {
 	collections, err := loadCollections(cfg, *sysopAvatarDir)
 	if err != nil {
 		return err
+	}
+
+	// Splash first, before anything else the user sees. Auto-dismisses
+	// after splash_timeout_seconds (any keypress also dismisses). Set
+	// timeout to 0 to skip. Artwork is compiled into the binary.
+	splashTimeout := time.Duration(cfg.SplashTimeoutSeconds) * time.Second
+	if serr := ui.ShowSplash(conn, input, cols, rows, charset, splashTimeout); serr != nil {
+		if errors.Is(serr, io.EOF) {
+			return nil
+		}
 	}
 
 	greet(conn, user, bbsID, *configPath, *dataDir, len(collections))
@@ -304,26 +313,6 @@ func run() error {
 		}
 		return result.Base64(), nil
 	}
-	// Splash screen before chat opens. Auto-dismisses after the configured
-	// timeout, or earlier if the user presses any key. Missing file is fine.
-	if cfg.SplashPath != "" {
-		splashPath := cfg.SplashPath
-		if !filepath.IsAbs(splashPath) {
-			if wd, werr := os.Getwd(); werr == nil {
-				splashPath = filepath.Join(wd, splashPath)
-			}
-		}
-		splashTimeout := time.Duration(cfg.SplashTimeoutSeconds) * time.Second
-		if splashTimeout <= 0 {
-			splashTimeout = 5 * time.Second
-		}
-		if serr := ui.ShowSplash(conn, input, splashPath, cols, rows, charset, splashTimeout); serr != nil {
-			if errors.Is(serr, io.EOF) {
-				return nil
-			}
-		}
-	}
-
 	// One-shot terminal size probe. The drop file's reported dimensions
 	// are sometimes wrong (BBS client reconfigured between login and door
 	// launch); the CPR response tells us what the terminal actually is.
@@ -579,18 +568,9 @@ func standaloneUser(userOverride, bbsOverride string) *dropfile.User {
 	}
 }
 
-// setupRawTTY puts os.Stdin into raw mode so single keystrokes flow into
-// the input pump without the terminal's line-buffering or echo. Returns a
-// restore func the caller must defer; if stdin isn't a TTY (e.g. piped
-// input under tests) it's a no-op so the binary still runs.
-func setupRawTTY() (restore func(), err error) {
-	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
-		return func() {}, nil
-	}
-	state, err := term.MakeRaw(fd)
-	if err != nil {
-		return nil, fmt.Errorf("make tty raw: %w", err)
-	}
-	return func() { _ = term.Restore(fd, state) }, nil
-}
+// setupRawTTY is implemented per-platform: tty_unix.go (POSIX) wraps
+// term.MakeRaw, tty_windows.go does its own SetConsoleMode dance because
+// term.MakeRaw on Windows insists on ENABLE_VIRTUAL_TERMINAL_INPUT, which
+// legacy ConHost (older Win10 builds, Server 2016, VT-disabled environments)
+// rejects with ERROR_INVALID_PARAMETER -- killing standalone mode for
+// users whose Windows can't speak VT input.

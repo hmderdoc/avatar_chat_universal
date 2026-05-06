@@ -7,6 +7,25 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-05-06
+
+### Fixed
+
+- Avatar selector (and any other modal that treats Esc as cancel) no
+  longer immediately closes itself on terminals that emit
+  vendor-specific CSI sequences on startup. The input parser was
+  falling back to `KeyEsc` for any unrecognized CSI; it now returns a
+  no-op character. Reported on macOS Terminal.app and on EleBBS Win32.
+
+### Changed
+
+- `idle_timeout_seconds` default bumped from 10 to 60. The 10-second
+  default was a development convenience.
+- Removed developer-debug greeting line that exposed drop-file
+  internals (`Drop file: ... user record: ... time-left: -1m`).
+
+## [0.1.0] - 2026-05-06
+
 Initial pre-1.0 development. Everything below is "what works today"
 relative to a clean checkout.
 
@@ -88,4 +107,6 @@ relative to a clean checkout.
   displays bitmaps that other clients post but there's no built-in
   encoder yet.
 
-[Unreleased]: https://github.com/hmderdoc/avatar_chat_universal/commits/main
+[Unreleased]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/hmderdoc/avatar_chat_universal/releases/tag/v0.1.0

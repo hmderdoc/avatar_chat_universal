@@ -19,9 +19,10 @@ import (
 // Category indicates whether an animation is meant to render BEHIND the
 // chat content (background — opaque, replaces the transcript area) or
 // ABOVE it (foreground — transparent, overlays specific cells while the
-// chat shows through everywhere else). Foreground animations require the
-// transparent-cell layering work that's not yet implemented; for now
-// every ported animation is Background.
+// chat shows through everywhere else). The compositor in ui/app.go
+// layers bg < transcript < fg so foreground animations naturally see the
+// chat under them where they don't paint. Current foreground animations:
+// avatars_float, figlet_message.
 type Category int
 
 const (

@@ -137,11 +137,32 @@ func run() error {
 			rec = &avatar.Record{Avatar: picked.Clone()}
 		case avatar.SelectorDisable:
 			rec = &avatar.Record{Disabled: true}
-		case avatar.SelectorUpload, avatar.SelectorEditor:
-			ansi.Reset(conn)
-			ansi.ClearScreen(conn)
-			fmt.Fprintf(conn, "Upload/editor flow not available pre-chat. Use /avatar from chat instead.\r\n")
-			rec = &avatar.Record{Disabled: true}
+		case avatar.SelectorUpload:
+			a, uerr := runAvatarUpload(conn, input)
+			if uerr != nil {
+				ansi.Reset(conn)
+				ansi.ClearScreen(conn)
+				fmt.Fprintf(conn, "Upload failed: %v\r\n", uerr)
+				fmt.Fprintf(conn, "Falling back to disabled. Use /avatar in chat to retry.\r\n")
+				rec = &avatar.Record{Disabled: true}
+			} else {
+				rec = &avatar.Record{Avatar: a.Clone()}
+			}
+		case avatar.SelectorEditor:
+			a, eerr := runAvatarEditor(conn, input, cols, rows, charset, collections, nil)
+			if eerr != nil || a == nil {
+				ansi.Reset(conn)
+				ansi.ClearScreen(conn)
+				if eerr != nil {
+					fmt.Fprintf(conn, "Editor exited: %v\r\n", eerr)
+				} else {
+					fmt.Fprintf(conn, "Editor exited without saving.\r\n")
+				}
+				fmt.Fprintf(conn, "Falling back to disabled. Use /avatar in chat to retry.\r\n")
+				rec = &avatar.Record{Disabled: true}
+			} else {
+				rec = &avatar.Record{Avatar: a.Clone()}
+			}
 		default: // SelectorCancelled
 			ansi.Reset(conn)
 			ansi.ClearScreen(conn)
@@ -265,25 +286,9 @@ func run() error {
 		return "", "cancelled", nil
 	}
 	app.OnAvatarUpload = func() (string, error) {
-		var data []byte
-		err := input.WithRawAccess(conn, func() error {
-			received, _, zerr := upload.ReceiveZMODEM(conn, 4096)
-			if zerr != nil {
-				return zerr
-			}
-			data = received
-			return nil
-		})
+		a, err := runAvatarUpload(conn, input)
 		if err != nil {
 			return "", err
-		}
-		// Take the first 120 bytes; senders may pad to a power-of-two block.
-		if len(data) < avatar.Bytes {
-			return "", fmt.Errorf("received %d bytes, need %d", len(data), avatar.Bytes)
-		}
-		a := avatar.Avatar(data[:avatar.Bytes])
-		if err := a.Validate(); err != nil {
-			return "", fmt.Errorf("invalid avatar: %w", err)
 		}
 		if err := store.Write(user.DisplayName(), &avatar.Record{Avatar: a.Clone()}); err != nil {
 			return "", err
@@ -296,22 +301,19 @@ func run() error {
 		if rec, _ := store.Read(user.DisplayName()); rec != nil && len(rec.Avatar) == avatar.Bytes {
 			baseline = rec.Avatar.Clone()
 		}
-		ed := avatar.NewEditor(conn, input, cols, rows, baseline, collections)
-		ed.Charset = charset
-		action, result, eerr := ed.Run()
-		if eerr != nil {
-			return "", eerr
-		}
-		if action != avatar.EditorSaved {
-			return "", nil
-		}
-		if err := result.Validate(); err != nil {
-			return "", fmt.Errorf("invalid avatar: %w", err)
-		}
-		if err := store.Write(user.DisplayName(), &avatar.Record{Avatar: result.Clone()}); err != nil {
+		a, err := runAvatarEditor(conn, input, cols, rows, charset, collections, baseline)
+		if err != nil {
 			return "", err
 		}
-		return result.Base64(), nil
+		if a == nil {
+			// User cancelled without saving. Empty string signals "no change"
+			// to the chat-side caller (matches the prior closure behavior).
+			return "", nil
+		}
+		if err := store.Write(user.DisplayName(), &avatar.Record{Avatar: a.Clone()}); err != nil {
+			return "", err
+		}
+		return a.Base64(), nil
 	}
 	// One-shot terminal size probe. The drop file's reported dimensions
 	// are sometimes wrong (BBS client reconfigured between login and door
@@ -343,6 +345,53 @@ func run() error {
 	ansi.ClearScreen(conn)
 	fmt.Fprintf(conn, "Goodbye, %s.\r\n", user.DisplayName())
 	return nil
+}
+
+// runAvatarUpload runs a Zmodem receive against conn and returns the validated
+// 120-byte avatar. Used by both the pre-chat selector and the in-chat
+// /avatar upload command so the two paths can't drift apart.
+func runAvatarUpload(conn termio.Conn, input *ansi.Input) (avatar.Avatar, error) {
+	var data []byte
+	err := input.WithRawAccess(conn, func() error {
+		received, _, zerr := upload.ReceiveZMODEM(conn, 4096)
+		if zerr != nil {
+			return zerr
+		}
+		data = received
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Take the first 120 bytes; senders may pad to a power-of-two block.
+	if len(data) < avatar.Bytes {
+		return nil, fmt.Errorf("received %d bytes, need %d", len(data), avatar.Bytes)
+	}
+	a := avatar.Avatar(data[:avatar.Bytes])
+	if err := a.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid avatar: %w", err)
+	}
+	return a.Clone(), nil
+}
+
+// runAvatarEditor opens the in-door drawing editor seeded with `baseline`
+// (pass nil for a blank canvas). Returns the saved avatar on EditorSaved,
+// or (nil, nil) if the user cancelled without saving. Used by both the
+// pre-chat selector and the in-chat /avatar (manager) flow.
+func runAvatarEditor(conn termio.Conn, input *ansi.Input, cols, rows int, charset ansi.Charset, collections []*avatar.Collection, baseline avatar.Avatar) (avatar.Avatar, error) {
+	ed := avatar.NewEditor(conn, input, cols, rows, baseline, collections)
+	ed.Charset = charset
+	action, result, err := ed.Run()
+	if err != nil {
+		return nil, err
+	}
+	if action != avatar.EditorSaved {
+		return nil, nil
+	}
+	if err := result.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid avatar: %w", err)
+	}
+	return result.Clone(), nil
 }
 
 func greet(conn io.Writer, user *dropfile.User, bbsID, cfgPath, dataDir string, numCollections int) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"syscall"
 	"time"
@@ -18,11 +19,18 @@ import (
 // as constants; we hard-code the well-known numerics rather than pulling in
 // syscall just for this. WSA error codes are stable and documented by MS.
 const (
-	wsaeTimedOut    = 10060
-	wsaeConnReset   = 10054
+	wsaeWouldBlock  = 10035
 	wsaeConnAborted = 10053
+	wsaeConnReset   = 10054
 	wsaeShutdown    = 10058
+	wsaeTimedOut    = 10060
 )
+
+// FIONBIO is the BSD-style "set non-blocking I/O" ioctl, fed through Winsock's
+// WSAIoctl. The numeric encoding is fixed (IOC_IN | sizeof(u_long)<<16 | 'f'<<8
+// | 126) -- always 0x8004667e on every Win32. We pass mode = 0 to *clear*
+// non-blocking, i.e. force blocking-with-SO_RCVTIMEO.
+const fionbio uint32 = 0x8004667E
 
 type socketConn struct {
 	handle windows.Handle
@@ -44,11 +52,42 @@ type socketConn struct {
 // We assume the BBS that handed us this socket has already done WSAStartup;
 // every Win32 BBS that passes a SOCKET via DOOR32.SYS must have, otherwise
 // the socket wouldn't be usable in this process.
+//
+// We force the socket into BLOCKING mode at adopt time. EleBBS (and likely
+// other Win32 BBSes that use a select loop on the listener) hands us a socket
+// that's still in non-blocking mode, which makes WSARecv return immediately
+// with WSAEWOULDBLOCK ("A non-blocking socket operation could not be
+// completed immediately") instead of waiting -- crashing whoever read first.
+// The door owns the connection now; blocking + SO_RCVTIMEO is the model the
+// rest of the code is written against.
 func NewSocketFD(fd int) (Conn, error) {
 	if fd <= 0 {
 		return nil, fmt.Errorf("termio: invalid Winsock handle %d", fd)
 	}
-	return &socketConn{handle: windows.Handle(uintptr(fd))}, nil
+	h := windows.Handle(uintptr(fd))
+	if err := setSocketBlocking(h); err != nil {
+		// Non-fatal: surface the warning so the operator can see it, but
+		// hand back a working Conn anyway. The defensive WSAEWOULDBLOCK
+		// path in Read keeps the door functional even if FIONBIO failed --
+		// the input pump just retries. Failing the whole call here would
+		// be worse than running degraded.
+		fmt.Fprintf(os.Stderr, "termio: warning: could not switch socket to blocking mode: %v\n", err)
+	}
+	return &socketConn{handle: h}, nil
+}
+
+// setSocketBlocking clears the non-blocking flag via FIONBIO. We use WSAIoctl
+// rather than the legacy ioctlsocket() because golang.org/x/sys/windows
+// exposes WSAIoctl directly; the FIONBIO opcode is identical between them.
+func setSocketBlocking(h windows.Handle) error {
+	var mode uint32 // 0 = blocking
+	var bytesReturned uint32
+	return windows.WSAIoctl(
+		h, fionbio,
+		(*byte)(unsafe.Pointer(&mode)), uint32(unsafe.Sizeof(mode)),
+		nil, 0,
+		&bytesReturned, nil, 0,
+	)
 }
 
 func (c *socketConn) Read(p []byte) (int, error) {
@@ -65,7 +104,11 @@ func (c *socketConn) Read(p []byte) (int, error) {
 		// method; the chat client treats io.EOF as a clean disconnect.
 		if errno, ok := mapErrno(err); ok {
 			switch errno {
-			case wsaeTimedOut:
+			case wsaeTimedOut, wsaeWouldBlock:
+				// WSAEWOULDBLOCK shouldn't happen after setSocketBlocking
+				// succeeds at adopt time. Treat it as a timeout anyway so a
+				// belt-and-braces non-blocking socket can't crash the door --
+				// the input pump will just retry.
 				return 0, timeoutError{}
 			case wsaeConnReset, wsaeConnAborted, wsaeShutdown:
 				return 0, io.EOF

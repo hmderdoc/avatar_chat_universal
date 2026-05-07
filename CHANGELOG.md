@@ -7,6 +7,30 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-05-06
+
+### Fixed
+
+- **Windows socket-mode door crash on first read** (`selector: A non-blocking
+  socket operation could not be completed immediately.`). EleBBS (and other
+  Win32 BBSes that drive their listener through a select loop) hands the
+  spawned door a SOCKET still configured for non-blocking I/O. v0.1.4 assumed
+  the socket was already in blocking mode and relied on `SO_RCVTIMEO` for
+  read deadlines, so `WSARecv` returned `WSAEWOULDBLOCK` (10035) immediately
+  on the first read and the door died right after rendering the avatar
+  selector. We now flip the socket to blocking mode via `WSAIoctl`/`FIONBIO`
+  at adopt time, and `Read` defensively maps any residual `WSAEWOULDBLOCK`
+  to a Timeout-bearing error so the input pump retries instead of crashing.
+  Reported by Shurato (Heavenly Sphere BBS) on EleBBS.
+
+### Added
+
+- Pre-chat avatar selector now wires through to real Upload and Editor
+  flows. Previously, picking either option from the first-run selector
+  bounced you to "disabled" with a "use /avatar from chat instead" message
+  -- both flows are now shared with the in-chat `/avatar` paths so they
+  can't drift apart.
+
 ## [0.1.4] - 2026-05-06
 
 ### Added

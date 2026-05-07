@@ -7,6 +7,20 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-05-06
+
+### Added
+
+- **Windows socket I/O mode** (DOOR32.SYS comm type 1, 2, 3). Previously
+  deferred and stubbed -- now implemented natively against Winsock via
+  `golang.org/x/sys/windows`. Required for any Windows BBS that hands the
+  door a SOCKET handle instead of stdio (EleBBS, Mystic Win32, Synchronet
+  Windows in non-stdio configs). The implementation does its own
+  WSARecv/WSASend with `SO_RCVTIMEO` driving `SetReadDeadline`, since
+  Winsock SOCKET handles can't be adopted by Go's `net.FileConn` the way
+  *nix file descriptors can. Reported by Shurato (Heavenly Sphere BBS) on
+  EleBBS, where socket mode is the only available option.
+
 ## [0.1.3] - 2026-05-06
 
 ### Fixed

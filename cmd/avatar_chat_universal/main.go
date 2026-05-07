@@ -68,6 +68,16 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	// config.Load silently returns defaults when the file is missing.
+	// Surface that on stderr (which BBSes typically log) so a sysop who
+	// expected their .ini to take effect sees the actual lookup result
+	// instead of staring at default behavior.
+	if _, statErr := os.Stat(*configPath); os.IsNotExist(statErr) {
+		fmt.Fprintf(os.Stderr,
+			"avatar_chat_universal: config file not found at %s; using built-in defaults. "+
+				"Place avatar_chat.ini next to the binary, or pass -config <path>.\n",
+			*configPath)
+	}
 
 	conn, err := openConn(*ioMode, user)
 	if err != nil {
@@ -81,7 +91,7 @@ func run() error {
 
 	input := ansi.NewInput(conn)
 
-	bbsID := resolveBBSID(cfg, user)
+	bbsID := resolveBBSID(*bbsFlag, cfg, user)
 	store := &avatar.Store{Root: *dataDir, BBSID: bbsID}
 
 	// Standalone mode (no drop file) defaults to UTF-8 since regular
@@ -435,7 +445,14 @@ func resolveCharset(flagVal, cfgVal string) ansi.Charset {
 	}
 }
 
-func resolveBBSID(cfg *config.Config, user *dropfile.User) string {
+// resolveBBSID picks the displayed origin label in priority order:
+// CLI -bbs flag wins (one-shot override), then cfg.BBSID (the durable
+// sysop choice), then dropfile-derived BBSID-with-sysop, then bare
+// BBSID, then $HOSTNAME, then "unknown".
+func resolveBBSID(cliBBS string, cfg *config.Config, user *dropfile.User) string {
+	if cliBBS != "" {
+		return cliBBS
+	}
 	if cfg.BBSID != "" {
 		return cfg.BBSID
 	}
@@ -505,7 +522,27 @@ func openConn(mode string, user *dropfile.User) (termio.Conn, error) {
 	}
 }
 
+// defaultConfigPath looks up avatar_chat.ini in the locations a sysop is
+// likely to put it. CWD wins if it has a config (preserves historical
+// behavior and lets a sysop run multiple instances from different dirs);
+// otherwise the binary's own directory is checked, because Mystic and
+// other BBSes typically set CWD to the BBS root before exec'ing a door
+// instead of the door's install directory. Returns the CWD path even
+// when nothing exists, so config.Load's missing-file path fires and
+// run()'s downstream warning has a sensible filename to print.
 func defaultConfigPath() string {
+	if cwd, err := os.Getwd(); err == nil {
+		p := filepath.Join(cwd, "avatar_chat.ini")
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	if exe, err := os.Executable(); err == nil {
+		p := filepath.Join(filepath.Dir(exe), "avatar_chat.ini")
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
 	if cwd, err := os.Getwd(); err == nil {
 		return filepath.Join(cwd, "avatar_chat.ini")
 	}
@@ -583,9 +620,16 @@ func scanAnsiGallery(dir string) []string {
 
 // standaloneUser synthesizes a User struct when there's no drop file --
 // the door is being launched as a regular CLI app instead of through a
-// BBS. Username falls back to $USER then "guest"; BBS name falls back to
-// $HOSTNAME then "standalone". CommType is stdio so openConn picks the
-// terminal-pipe path automatically.
+// BBS. Username falls back to $USER then "guest"; SystemName falls back
+// to $HOSTNAME then "standalone". CommType is stdio so openConn picks
+// the terminal-pipe path automatically.
+//
+// BBSID is left as the synthetic "standalone" sentinel and SysopName is
+// blank, so resolveBBSID's CLI-flag and cfg.BBSID branches fire first
+// and only fall through to the synthetic value when the sysop has
+// configured nothing. Crucially, SysopName is blank (not "local") so
+// the "BBSID-Sysop" composition branch doesn't fire and produce
+// "standalone-local" — that label was a long-standing wart.
 func standaloneUser(userOverride, bbsOverride string) *dropfile.User {
 	name := userOverride
 	if name == "" {
@@ -604,7 +648,7 @@ func standaloneUser(userOverride, bbsOverride string) *dropfile.User {
 	return &dropfile.User{
 		BBSID:         "standalone",
 		SystemName:    bbs,
-		SysopName:     "local",
+		SysopName:     "",
 		Handle:        name,
 		RealName:      name,
 		UserRecord:    0,

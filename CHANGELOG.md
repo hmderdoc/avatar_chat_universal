@@ -7,6 +7,42 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-05-07
+
+### Fixed
+
+- **Standalone origin no longer shows `standalone-local`.** `standaloneUser`
+  was hardcoding `BBSID="standalone"` + `SysopName="local"`, and `-bbs`
+  flowed only into `SystemName` (which the displayed origin doesn't
+  consult). Result: setting `-bbs "My BBS"` had no visible effect. Fixed
+  by clearing the synthetic `SysopName` and threading `-bbs` through
+  `resolveBBSID` as a CLI override that wins over both the dropfile and
+  `cfg.BBSID`. Reported by MeaTLoTioN running standalone under Mystic.
+
+- **`avatar_chat.ini` not picked up under Mystic.** `defaultConfigPath`
+  resolved to `<cwd>/avatar_chat.ini` only, but Mystic (and likely other
+  BBSes) sets CWD to the BBS root before exec'ing the door — so the
+  door's local `.ini` was never seen and `bbs_id`/`sysop`/etc. silently
+  fell back to defaults. Lookup now tries CWD first, then
+  `<binary_dir>/avatar_chat.ini`. When neither exists, a one-line stderr
+  warning surfaces the missing-file path so a sysop sees the actual
+  lookup result instead of staring at default behavior.
+
+- **Cryptic `fcntl: bad file descriptor` from `net.FileConn`.** The
+  socket-mode wrapper now wraps the underlying error in a message that
+  names the fd, says explicitly that the BBS may not be inheriting it,
+  and points the sysop at `-io stdio` as the workaround. Same surface
+  failure, much more actionable error text.
+
+### Documentation
+
+- **Mystic install page**: `*F` in the Cmd line was wrong — corrected to
+  `%PDOOR32.SYS` (Mystic's `%P` resolves to `/path/to/mystic/tempN/`).
+  Added a Standalone-fallback subsection covering the `-bbs`/`-user`
+  invocation. Added troubleshooting rows for the new stderr config
+  warning, `socket fd N not usable`, and the `standalone-local` origin
+  case. Reported by MeaTLoTioN.
+
 ## [0.1.5] - 2026-05-06
 
 ### Fixed

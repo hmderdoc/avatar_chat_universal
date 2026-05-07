@@ -109,18 +109,44 @@ Put the binary somewhere stable, e.g. `/mystic/doors/avatar_chat_universal/`.
 
 `Edit door menu` → add a new entry:
 
-| Field      | Value                                                                |
-| ---------- | -------------------------------------------------------------------- |
-| Name       | `Avatar Chat Universal`                                              |
-| Cmd        | `/mystic/doors/avatar_chat_universal/avatar_chat_universal -dropfile *F` |
-| Type       | `Shell`                                                              |
-| Drop File  | `DOOR32.SYS`                                                         |
-| OS         | `Same as Mystic`                                                     |
+| Field      | Value                                                                            |
+| ---------- | -------------------------------------------------------------------------------- |
+| Name       | `Avatar Chat Universal`                                                          |
+| Cmd        | `/mystic/doors/avatar_chat_universal/avatar_chat_universal -dropfile %PDOOR32.SYS` |
+| Type       | `Shell`                                                                          |
+| Drop File  | `DOOR32.SYS`                                                                     |
+| OS         | `Same as Mystic`                                                                 |
 
-`*F` is Mystic's drop-file path expansion (lowercase `*f` works too on
-most Mystic versions; check yours).
+`%P` is Mystic's per-user temp directory (e.g. `/mystic/temp2/` for
+node 2). Concatenate the dropfile name onto it as shown — Mystic
+substitutes `%P` and the door receives the full path
+`/mystic/temp2/DOOR32.SYS`. Older docs that used `*F` were wrong for
+Mystic; that placeholder belongs to other BBS softwares.
 
-### 3. Add to a theme menu
+If the door fails with `socket fd N not usable in this process` after
+the user is dropped into it, your Mystic build isn't inheriting the
+user socket fd to the child. Add `-io stdio` to the Cmd line — the
+door will read/write through stdin/stdout (which Mystic always wires
+up) instead of the fd in DOOR32.SYS. See
+[Troubleshooting](#troubleshooting).
+
+### 3. Standalone fallback
+
+If the door32.sys path is troublesome on your Mystic build, you can
+also run the door without a drop file:
+
+```
+/mystic/doors/avatar_chat_universal/avatar_chat_universal \
+    -bbs "Your BBS Name" -charset cp437 -user %U
+```
+
+The `-bbs` flag overrides the displayed origin label, `-user %U` pulls
+in the Mystic-substituted username, and the door uses stdio I/O.
+Avatars don't persist across users in this mode unless you also set
+`bbs_id =` in `avatar_chat.ini` (place it next to the binary, not at
+the Mystic root, so it's found regardless of Mystic's CWD).
+
+### 4. Add to a theme menu
 
 Edit `theme/<theme>/doors.mnu` and add a menu entry pointing at the door
 you just registered.
@@ -268,7 +294,7 @@ A short checklist after first launch:
 | ------------------------- | ----------------------------- | --------------------------------------------------------------------------------------- |
 | `-dropfile <path>`        | (empty → standalone mode)     | DOOR32.SYS or DOOR.SYS path. Required for door mode; omit for standalone.               |
 | `-io stdio\|socket`       | auto                          | Override I/O mode. Auto picks `socket` for telnet/raw comm types in DOOR32, else `stdio`.|
-| `-config <path>`          | `<bin dir>/avatar_chat.ini`   | Door config (chat host/port, theme, splash, etc.). See [CONFIG.md](CONFIG.md).          |
+| `-config <path>`          | `<cwd>/avatar_chat.ini` if present, else `<bin dir>/avatar_chat.ini` | Door config (chat host/port, theme, splash, etc.). See [CONFIG.md](CONFIG.md). The binary-dir fallback matters for BBSes (notably Mystic) that set CWD to the BBS root before exec. |
 | `-data <path>`            | `<bin dir>/data`              | Per-user persistence directory.                                                         |
 | `-sysop-avatars <path>`   | (config value)                | Override `sysop_avatars_dir`.                                                           |
 | `-charset cp437\|utf8`    | (config value)                | Override `output_charset`.                                                              |
@@ -285,7 +311,10 @@ A short checklist after first launch:
 | Symptom                                                 | Likely cause                                                                                         |
 | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | "drop file is required" on launch                       | Missing `-dropfile %f` on the command line.                                                          |
-| Door exits "load config" with a path that doesn't exist | `-config` defaults to next-to-binary. Pass `-config /full/path/avatar_chat.ini` if your BBS launches from a different cwd. |
+| Door exits "load config" with a path that doesn't exist | `-config` resolves to `<cwd>/avatar_chat.ini` first, then `<bin dir>/avatar_chat.ini`. Pass `-config /full/path/avatar_chat.ini` if your BBS launches from a directory neither contains. |
+| Stderr says "config file not found at … using built-in defaults"; `bbs_id`/`sysop` etc. ignored | `.ini` lookup couldn't find the file at either default location. Drop `avatar_chat.ini` next to the binary, or pass `-config <path>` explicitly. |
+| `socket fd N not usable in this process` / `bad file descriptor` at startup | Your BBS isn't inheriting the user socket fd to the door. Add `-io stdio` to the launch command — the door will use stdin/stdout instead. Common with some Linux Mystic builds. |
+| Origin in chat shows `standalone-local` instead of your BBS name | You're in standalone mode (no `-dropfile`) and didn't set `-bbs` or `bbs_id`. Either pass `-bbs "Your BBS Name"` on the command line, or set `bbs_id = yourbbs` in `avatar_chat.ini`. |
 | All glyphs are mojibake                                 | Charset mismatch. See [CONFIG.md](CONFIG.md) `output_charset`.                                       |
 | Esc key takes ~75ms to dismiss menus                    | The input pump waits to disambiguate Esc-alone from CSI sequences. Working as designed.              |
 | Splash garbled / warped                                 | The splash file is CP437 art and your terminal is UTF-8 (or vice versa). The ini's `output_charset` controls this. |

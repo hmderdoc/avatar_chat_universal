@@ -7,6 +7,58 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-05-07
+
+### Fixed
+
+- **Arrow keys / PgUp / PgDn / Esc didn't dispatch to the input pump
+  when launched locally with `-dropfile`** -- the OS line-edit layer
+  was eating them as cmd-history scrollback (Windows console) or
+  readline shortcuts (Unix shells). `setupRawTTY()` was gated on
+  standalone-only; now fires for any stdio I/O mode, so local-test
+  launches with `-dropfile` work correctly. BBS-spawned door-mode
+  runs over an inherited socket are unaffected (the gate keys on
+  resolved I/O mode, not standalone).
+
+- **Avatars rendered as colored question marks in stdio dropfile mode
+  on local consoles** -- charset auto-default to UTF-8 was also
+  standalone-only. Now defaults to UTF-8 whenever stdio mode + stdout
+  is a local terminal (per-platform `isLocalConsole()` probe). BBS-
+  spawned door-mode keeps the cfg-supplied default (typically CP437,
+  correct for SyncTERM/NetRunner remote clients).
+
+### Added
+
+- **Legacy windows/386 build path for Windows XP** via Go 1.10 + the
+  new `make dist-windows-xp` target. Output:
+  `dist/windows_386_xp/avatar_chat_universal.exe`. Major BBS sysops
+  on XP can drop the binary alongside their dropfile config and run.
+
+  Implementation in `compat/_legacy/`:
+  - Hand-rolled minimal `golang.org/x/sys/windows` shim (~210 lines
+    wrapping the 11 Win32 calls the door uses, via Go 1.10's stdlib
+    `syscall.Syscall*` against kernel32.dll / ws2_32.dll).
+  - `build-windows-xp.sh` handles the GOPATH dance (Go 1.10 is pre-
+    modules), clones go-colorable / go-isatty / x/term at HEAD into
+    a temp GOPATH, runs the cross-compile.
+
+  See `compat/_legacy/README.md` for prerequisites and details.
+
+### Changed
+
+- **Source restricted to a Go-1.10-compatible feature subset** so the
+  same source compiles cleanly on both modern Go (1.26 verified) and
+  Go 1.10 (XP target). This locks the project's surface against
+  `errors.Is/As`, `fmt.Errorf %w`, `//go:embed` (without build-tag
+  splits), `io/fs`, `time.UnixMilli`, generics, `any`,
+  `strings.ReplaceAll`, `os.ReadFile`, `io.ReadAll`,
+  `filepath.WalkDir`, and 0o-prefix octal literals. The two files
+  that genuinely need `//go:embed` (avatar bundle, splash artwork)
+  are split into modern + legacy build-tagged pairs:
+  `internal/avatar/bundle_{embed,disk}.go` and
+  `internal/ui/splash_{embed,disk}.go`. Same public API, modern Go
+  uses embed, Go 1.10 reads from disk relative to the binary.
+
 ## [0.1.7] - 2026-05-07
 
 ### Fixed

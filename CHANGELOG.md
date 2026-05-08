@@ -7,6 +7,36 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-05-07
+
+### Fixed
+
+- **Garbage output on legacy Windows consoles in standalone mode.** On
+  Win10 builds without `ENABLE_VIRTUAL_TERMINAL_PROCESSING` (older Win10,
+  Server 2016, LTSB/LTSC, some 32-bit Win10), our ANSI escape sequences
+  rendered as literal `^[[31m` characters scrolling down the screen.
+  The Windows TTY setup tried to enable VT output and silently swallowed
+  the failure. Two changes: (1) surface the mode-set failure on stderr
+  so the cause is visible, (2) wrap stdout with `go-colorable` in
+  standalone stdio mode -- it translates ANSI to Win32 console API
+  calls when VT processing isn't available, passes through unchanged
+  when it is. Same `windows_386` build now renders correctly on both
+  Win10 64-bit and Win10 32-bit. Reported by an external sysop testing
+  on Win10 32-bit.
+
+### Added
+
+- `github.com/mattn/go-colorable` v0.1.14 (with `go-isatty` as transitive
+  dep). BSD-licensed, no CGO, ~50KB binary impact on Windows.
+
+### Changed
+
+- Reporter attributions in v0.1.6 entries anonymized to "an external
+  sysop" to match the project's standing convention. The v0.1.6 commit
+  message in git history is unchanged (rewriting public history is
+  destructive); CHANGELOG.md is the authoritative public record going
+  forward.
+
 ## [0.1.6] - 2026-05-07
 
 ### Fixed
@@ -17,7 +47,8 @@ versioning follows loose [SemVer](https://semver.org/) (see
   consult). Result: setting `-bbs "My BBS"` had no visible effect. Fixed
   by clearing the synthetic `SysopName` and threading `-bbs` through
   `resolveBBSID` as a CLI override that wins over both the dropfile and
-  `cfg.BBSID`. Reported by MeaTLoTioN running standalone under Mystic.
+  `cfg.BBSID`. Reported by an external sysop running standalone under
+  Mystic.
 
 - **`avatar_chat.ini` not picked up under Mystic.** `defaultConfigPath`
   resolved to `<cwd>/avatar_chat.ini` only, but Mystic (and likely other
@@ -41,7 +72,7 @@ versioning follows loose [SemVer](https://semver.org/) (see
   Added a Standalone-fallback subsection covering the `-bbs`/`-user`
   invocation. Added troubleshooting rows for the new stderr config
   warning, `socket fd N not usable`, and the `standalone-local` origin
-  case. Reported by MeaTLoTioN.
+  case. Reported by an external sysop.
 
 ## [0.1.5] - 2026-05-06
 

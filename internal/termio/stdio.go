@@ -2,18 +2,28 @@ package termio
 
 import (
 	"errors"
+	"io"
 	"os"
 	"time"
 )
 
 type stdioConn struct {
 	in  *os.File
-	out *os.File
+	out io.Writer
 }
 
 // NewStdio returns a Conn backed by os.Stdin and os.Stdout.
 func NewStdio() Conn {
 	return &stdioConn{in: os.Stdin, out: os.Stdout}
+}
+
+// NewStdioWith returns a Conn backed by the supplied input file and
+// output writer. Use this when the caller needs to wrap stdout, e.g.
+// to layer ANSI-to-Win32 translation for legacy Windows consoles that
+// don't speak VT output natively. The input handle stays an *os.File
+// so deadline / non-blocking probes still work where the OS allows.
+func NewStdioWith(in *os.File, out io.Writer) Conn {
+	return &stdioConn{in: in, out: out}
 }
 
 func (c *stdioConn) Read(p []byte) (int, error)  { return c.in.Read(p) }

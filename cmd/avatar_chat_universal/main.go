@@ -511,7 +511,14 @@ func openConn(mode string, user *dropfile.User) (termio.Conn, error) {
 	}
 	switch termio.Mode(resolved) {
 	case termio.ModeStdio:
-		return termio.NewStdio(), nil
+		// standaloneStdout() is a per-platform helper. On Windows it
+		// wraps stdout with go-colorable so ANSI escapes still render
+		// on legacy consoles (older Win10, Server 2016, LTSB) that
+		// don't have ENABLE_VIRTUAL_TERMINAL_PROCESSING. On other
+		// platforms it returns os.Stdout unchanged. go-colorable
+		// no-ops on non-console writers (pipes, redirects), so this
+		// is also safe in door-mode-with-stdio configurations.
+		return termio.NewStdioWith(os.Stdin, standaloneStdout()), nil
 	case termio.ModeSocket:
 		if user.SocketHandle <= 0 {
 			return nil, fmt.Errorf("socket mode requested but drop file has no socket handle")

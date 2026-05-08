@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"golang.org/x/sys/windows"
@@ -56,11 +57,22 @@ func setupRawTTY() (restore func(), err error) {
 		_ = windows.SetConsoleMode(stdin, rawIn|enableVirtualTerminalInput)
 	}
 	if outHasMode {
-		// Best-effort VT processing on stdout so our ANSI escapes render
-		// instead of showing up as literal "^[[31m" garbage. If unavailable,
-		// the user sees garbled output but the door still runs and they
-		// can at least quit cleanly.
-		_ = windows.SetConsoleMode(stdout, origOut|enableVirtualTerminalOutput|disableNewlineAutoReturn)
+		// Try to enable VT processing on stdout so our ANSI escapes
+		// render natively. On legacy consoles (older Win10 builds,
+		// Server 2016, LTSB images, some 32-bit Win10 installations)
+		// this call fails -- but we ship a go-colorable-wrapped writer
+		// in standalone stdio mode that translates the escape stream
+		// to Win32 console API calls, so the output still renders.
+		// Surface the mode-set failure on stderr so a sysop debugging
+		// "why is my console behaving weirdly" sees the cause without
+		// having to read source.
+		if err := windows.SetConsoleMode(stdout, origOut|enableVirtualTerminalOutput|disableNewlineAutoReturn); err != nil {
+			fmt.Fprintf(os.Stderr,
+				"avatar_chat_universal: this Windows console does not support VT output processing (%v); "+
+					"ANSI escapes will be translated via go-colorable. "+
+					"For best fidelity, run from Windows Terminal (wt.exe) or any modern terminal client.\n",
+				err)
+		}
 	}
 
 	restore = func() {

@@ -156,7 +156,14 @@ func WSASend(s Handle, bufs *WSABuf, bufCount uint32, sent *uint32, flags uint32
 // adopt time with FIONBIO to flip the inherited socket from the BBS's
 // non-blocking mode into blocking mode (the EleBBS / Win32-BBS-listener
 // problem v0.1.5 fixed). 9 args is exactly what Syscall9 takes.
-func WSAIoctl(s Handle, ioControlCode uint32, inBuffer *byte, cbInBuffer uint32, outBuffer *byte, cbOutBuffer uint32, bytesReturned *uint32, overlapped *Overlapped, croutine *byte) error {
+//
+// Signature note: completionRoutine is uintptr (not *byte) to mirror
+// the modern x/sys/windows WSAIoctl signature exactly. WSARecv and
+// WSASend in modern x/sys take *byte for their croutine arg, but
+// WSAIoctl takes uintptr -- an inconsistency in the upstream API we
+// have to mirror so the same socket_windows.go callsites work against
+// both this shim and the real package.
+func WSAIoctl(s Handle, ioControlCode uint32, inBuffer *byte, cbInBuffer uint32, outBuffer *byte, cbOutBuffer uint32, bytesReturned *uint32, overlapped *Overlapped, completionRoutine uintptr) error {
 	r1, _, e1 := syscall.Syscall9(procWSAIoctl.Addr(), 9,
 		uintptr(s),
 		uintptr(ioControlCode),
@@ -166,7 +173,7 @@ func WSAIoctl(s Handle, ioControlCode uint32, inBuffer *byte, cbInBuffer uint32,
 		uintptr(cbOutBuffer),
 		uintptr(unsafe.Pointer(bytesReturned)),
 		uintptr(unsafe.Pointer(overlapped)),
-		uintptr(unsafe.Pointer(croutine)))
+		completionRoutine)
 	if r1 != 0 {
 		return errnoErr(e1)
 	}

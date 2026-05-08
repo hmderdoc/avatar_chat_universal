@@ -86,7 +86,7 @@ func setSocketBlocking(h windows.Handle) error {
 		h, fionbio,
 		(*byte)(unsafe.Pointer(&mode)), uint32(unsafe.Sizeof(mode)),
 		nil, 0,
-		&bytesReturned, nil, nil,
+		&bytesReturned, nil, 0,
 	)
 }
 

@@ -48,14 +48,11 @@ func run() error {
 	standalone := *dropPath == ""
 	if standalone {
 		// Run as a regular CLI app: synthesize a stub User from env
-		// vars / flags, put the local TTY into raw mode, behave the
-		// same as door mode otherwise.
+		// vars / flags. setupRawTTY is called below once we know the
+		// resolved I/O mode, so it also fires for local-test launches
+		// with -dropfile (where stdin is the user's keyboard, not a
+		// socket inherited from a BBS).
 		user = standaloneUser(*userFlag, *bbsFlag)
-		restore, rerr := setupRawTTY()
-		if rerr != nil {
-			return fmt.Errorf("standalone: %v", rerr)
-		}
-		defer restore()
 	} else {
 		var err error
 		user, err = dropfile.Parse(*dropPath)
@@ -78,11 +75,29 @@ func run() error {
 			*configPath)
 	}
 
-	conn, err := openConn(*ioMode, user)
+	conn, resolvedMode, err := openConn(*ioMode, user)
 	if err != nil {
 		return fmt.Errorf("open termio: %v", err)
 	}
 	defer conn.Close()
+
+	// Put stdin in raw mode whenever we're using stdio I/O. This used
+	// to be gated on standalone-only, which broke local-test launches
+	// of `avatar_chat_universal -dropfile DOOR.SYS` -- the door would
+	// connect, render menus, but arrow keys / Esc / PgUp would be
+	// eaten by the OS's line-edit layer (cmd.exe scrolling cmd-history
+	// instead of dispatching to our input pump). For real BBS spawns
+	// over an inherited socket, resolvedMode is ModeSocket and this
+	// block doesn't fire. setupRawTTY internally no-ops if stdin
+	// isn't actually a console (e.g. ENiGMA/EleBBS piping a stdio-
+	// type connection through pipes), so even stdio + non-TTY is safe.
+	if resolvedMode == termio.ModeStdio {
+		restore, rerr := setupRawTTY()
+		if rerr != nil {
+			return fmt.Errorf("setup raw tty: %v", rerr)
+		}
+		defer restore()
+	}
 
 	// Detect screen size BEFORE the input pump starts, otherwise the pump
 	// would consume the terminal's response packet as if it were keystrokes.
@@ -93,17 +108,24 @@ func run() error {
 	bbsID := resolveBBSID(*bbsFlag, cfg, user)
 	store := &avatar.Store{Root: *dataDir, BBSID: bbsID}
 
-	// Standalone mode (no drop file) defaults to UTF-8 since regular
+	// Stdio + local console = sysop running the door from a shell
+	// (standalone OR local-test with -dropfile). Modern desktop
 	// terminals (Linux console, Terminal.app, iTerm, kitty, Windows
-	// Terminal) interpret stdin/stdout as UTF-8 by default and choke on
-	// raw CP437 high bytes. Door-mode users (BBS clients) keep the
-	// config's CP437 default. Explicit -charset always wins.
+	// Terminal, even XP CMD with chcp 65001) interpret stdin/stdout
+	// as UTF-8 by default and render raw CP437 high bytes as garbage
+	// (often colored question marks for the avatar block-drawing
+	// chars). When that's the situation, force UTF-8 output so cells
+	// get translated through the CP437 -> Unicode table before being
+	// emitted.
+	//
+	// BBS-spawned door-mode runs (real users connecting via SyncTERM
+	// / NetRunner / etc.) keep the config's default (typically CP437,
+	// correct for terminal clients in the BBS scene) -- those land
+	// here as resolvedMode == ModeSocket OR ModeStdio with stdout =
+	// pipe (BBS routing the user's connection through stdio), neither
+	// of which is a "local console." Explicit -charset always wins.
 	charsetCfg := cfg.OutputCharset
-	if standalone && *charsetFlag == "" && charsetCfg == "" {
-		charsetCfg = "utf8"
-	} else if standalone && *charsetFlag == "" {
-		// Config might say cp437 but the user almost certainly didn't
-		// pre-tune it for standalone mode. Override to utf8.
+	if *charsetFlag == "" && resolvedMode == termio.ModeStdio && isLocalConsole() {
 		charsetCfg = "utf8"
 	}
 	charset := resolveCharset(*charsetFlag, charsetCfg)
@@ -498,7 +520,12 @@ func resolveScreen(flagCols, flagRows int, cfg *config.Config, conn termio.Conn)
 	return cols, rows
 }
 
-func openConn(mode string, user *dropfile.User) (termio.Conn, error) {
+// openConn resolves the I/O mode (auto-deriving from user.CommType when
+// the explicit -io flag is empty), opens the corresponding Conn, and
+// returns the resolved mode alongside it. Callers (run() in particular)
+// branch on the returned mode for raw-TTY setup and charset auto-detect
+// decisions, which need to know whether we ended up on stdio or socket.
+func openConn(mode string, user *dropfile.User) (termio.Conn, termio.Mode, error) {
 	resolved := strings.ToLower(mode)
 	if resolved == "" {
 		switch user.CommType {
@@ -508,7 +535,8 @@ func openConn(mode string, user *dropfile.User) (termio.Conn, error) {
 			resolved = string(termio.ModeStdio)
 		}
 	}
-	switch termio.Mode(resolved) {
+	resolvedMode := termio.Mode(resolved)
+	switch resolvedMode {
 	case termio.ModeStdio:
 		// standaloneStdout() is a per-platform helper. On Windows it
 		// wraps stdout with go-colorable so ANSI escapes still render
@@ -517,14 +545,15 @@ func openConn(mode string, user *dropfile.User) (termio.Conn, error) {
 		// platforms it returns os.Stdout unchanged. go-colorable
 		// no-ops on non-console writers (pipes, redirects), so this
 		// is also safe in door-mode-with-stdio configurations.
-		return termio.NewStdioWith(os.Stdin, standaloneStdout()), nil
+		return termio.NewStdioWith(os.Stdin, standaloneStdout()), resolvedMode, nil
 	case termio.ModeSocket:
 		if user.SocketHandle <= 0 {
-			return nil, fmt.Errorf("socket mode requested but drop file has no socket handle")
+			return nil, "", fmt.Errorf("socket mode requested but drop file has no socket handle")
 		}
-		return termio.NewSocketFD(user.SocketHandle)
+		conn, err := termio.NewSocketFD(user.SocketHandle)
+		return conn, resolvedMode, err
 	default:
-		return nil, fmt.Errorf("unknown io mode %q (want stdio|socket)", mode)
+		return nil, "", fmt.Errorf("unknown io mode %q (want stdio|socket)", mode)
 	}
 }
 

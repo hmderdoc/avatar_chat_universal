@@ -5,8 +5,10 @@ package main
 
 import (
 	"io"
+	"os"
 
 	"github.com/mattn/go-colorable"
+	"golang.org/x/sys/windows"
 )
 
 // standaloneStdout returns a stdout writer that handles ANSI on Windows
@@ -25,4 +27,14 @@ import (
 // "^[[31m" garbage scroll down the screen.
 func standaloneStdout() io.Writer {
 	return colorable.NewColorableStdout()
+}
+
+// isLocalConsole reports whether stdout points at a local interactive
+// console (as opposed to a pipe / file / socket). On Windows we probe
+// via GetConsoleMode -- a real console returns success; pipes and
+// files return ERROR_INVALID_HANDLE. Used to decide whether to auto-
+// default to UTF-8 and whether to put stdin in raw mode at startup.
+func isLocalConsole() bool {
+	var mode uint32
+	return windows.GetConsoleMode(windows.Handle(os.Stdout.Fd()), &mode) == nil
 }

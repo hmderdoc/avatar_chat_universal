@@ -109,25 +109,34 @@ Put the binary somewhere stable, e.g. `/mystic/doors/avatar_chat_universal/`.
 
 `Edit door menu` → add a new entry:
 
-| Field      | Value                                                                            |
-| ---------- | -------------------------------------------------------------------------------- |
-| Name       | `Avatar Chat Universal`                                                          |
-| Cmd        | `/mystic/doors/avatar_chat_universal/avatar_chat_universal -dropfile %PDOOR32.SYS` |
-| Type       | `Shell`                                                                          |
-| Drop File  | `DOOR32.SYS`                                                                     |
-| OS         | `Same as Mystic`                                                                 |
+| Field      | Value                                                                                  |
+| ---------- | -------------------------------------------------------------------------------------- |
+| Name       | `Avatar Chat Universal`                                                                |
+| Command    | `(D3) Exec DOOR32 program`                                                             |
+| Data       | `c:\mystic\doors\avatarchat\avatar_chat_universal -dropfile c:\mystic\temp%1\door32.sys` |
+| Drop File  | `DOOR32.SYS`                                                                           |
+| OS         | `Same as Mystic`                                                                       |
 
-`%P` is Mystic's per-user temp directory (e.g. `/mystic/temp2/` for
-node 2). Concatenate the dropfile name onto it as shown — Mystic
-substitutes `%P` and the door receives the full path
-`/mystic/temp2/DOOR32.SYS`. Older docs that used `*F` were wrong for
-Mystic; that placeholder belongs to other BBS softwares.
+`%1` is Mystic's node-number placeholder. The per-node temp directory
+where Mystic writes the dropfile is `c:\mystic\temp%1\` (resolves to
+`c:\mystic\temp2\` for node 2, etc.). The door receives the full path
+e.g. `c:\mystic\temp2\door32.sys`.
+
+The `(D3) Exec DOOR32 program` command type is specifically the right
+one for our door -- it handles the DOOR32-shaped child invocation
+Mystic expects. Older docs that suggested `(DD) Exec external program`
+or the `*F` / `%P` placeholders were either wrong for this command
+type or belonged to other BBS softwares.
+
+For Mystic on Linux, swap the Windows paths for their Unix equivalents
+(`/mystic/doors/avatarchat/avatar_chat_universal -dropfile /mystic/temp%1/door32.sys`).
+The placeholder substitution and command type are the same.
 
 If the door fails with `socket fd N not usable in this process` after
 the user is dropped into it, your Mystic build isn't inheriting the
-user socket fd to the child. Add `-io stdio` to the Cmd line — the
+user socket fd to the child. Add `-io stdio` to the Data line -- the
 door will read/write through stdin/stdout (which Mystic always wires
-up) instead of the fd in DOOR32.SYS. See
+up) instead of the fd in door32.sys. See
 [Troubleshooting](#troubleshooting).
 
 ### 3. Standalone fallback

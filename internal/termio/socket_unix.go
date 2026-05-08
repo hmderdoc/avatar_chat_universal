@@ -1,4 +1,5 @@
 //go:build !windows
+// +build !windows
 
 package termio
 
@@ -33,8 +34,8 @@ func NewSocketFD(fd int) (Conn, error) {
 	f.Close()
 	if err != nil {
 		return nil, fmt.Errorf(
-			"termio: socket fd %d not usable in this process (%w); "+
-				"the BBS may not be inheriting the socket fd to the door — "+
+			"termio: socket fd %d not usable in this process (%v); "+
+				"the BBS may not be inheriting the socket fd to the door -- "+
 				"try -io stdio if your BBS pipes the user connection through stdin/stdout",
 			fd, err)
 	}

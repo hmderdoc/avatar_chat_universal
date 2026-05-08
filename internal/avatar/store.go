@@ -40,7 +40,7 @@ func (s *Store) Read(username string) (*Record, error) {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("avatar: open %s: %w", path, err)
+		return nil, fmt.Errorf("avatar: open %s: %v", path, err)
 	}
 	defer f.Close()
 
@@ -73,7 +73,7 @@ func (s *Store) Read(username string) (*Record, error) {
 			}
 			a, err := FromBase64(val)
 			if err != nil {
-				return nil, fmt.Errorf("avatar: %s: %w", path, err)
+				return nil, fmt.Errorf("avatar: %s: %v", path, err)
 			}
 			rec.Avatar = a
 		case "disabled":
@@ -89,7 +89,7 @@ func (s *Store) Read(username string) (*Record, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("avatar: scan %s: %w", path, err)
+		return nil, fmt.Errorf("avatar: scan %s: %v", path, err)
 	}
 	if rec.Avatar == nil {
 		return nil, nil
@@ -110,14 +110,14 @@ func (s *Store) Write(username string, rec *Record) error {
 	rec.Updated = now
 
 	path := s.path(username)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("avatar: mkdir: %w", err)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("avatar: mkdir: %v", err)
 	}
 
 	tmp := path + ".tmp"
 	f, err := os.Create(tmp)
 	if err != nil {
-		return fmt.Errorf("avatar: create %s: %w", tmp, err)
+		return fmt.Errorf("avatar: create %s: %v", tmp, err)
 	}
 	w := bufio.NewWriter(f)
 	fmt.Fprintln(w, "[avatar]")
@@ -128,15 +128,15 @@ func (s *Store) Write(username string, rec *Record) error {
 	if err := w.Flush(); err != nil {
 		f.Close()
 		os.Remove(tmp)
-		return fmt.Errorf("avatar: flush: %w", err)
+		return fmt.Errorf("avatar: flush: %v", err)
 	}
 	if err := f.Close(); err != nil {
 		os.Remove(tmp)
-		return fmt.Errorf("avatar: close: %w", err)
+		return fmt.Errorf("avatar: close: %v", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		os.Remove(tmp)
-		return fmt.Errorf("avatar: rename: %w", err)
+		return fmt.Errorf("avatar: rename: %v", err)
 	}
 	return nil
 }

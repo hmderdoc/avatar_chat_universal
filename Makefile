@@ -113,3 +113,16 @@ dist-%: splash
 clean:
 	rm -f $(DOOR_BIN) $(SERVER_BIN) $(DOOR_BIN).exe $(SERVER_BIN).exe
 	rm -rf $(DIST)
+
+# --- Legacy Windows (XP) target -------------------------------------
+# Cross-compile a windows/386 binary that runs on Windows XP. Requires
+# Go 1.10.x at ~/.local/go1.10/bin/go (last toolchain that emits XP-
+# loadable PE binaries). The build script runs in a temporary GOPATH
+# so your real Go install isn't touched. See compat/_legacy/README.md
+# for prerequisites and details.
+#
+# Output: dist/windows_386_xp/avatar_chat_universal.exe
+#         dist/avatar_chat_universal_windows_386_xp.tar.gz
+.PHONY: dist-windows-xp
+dist-windows-xp: splash
+	bash compat/_legacy/build-windows-xp.sh

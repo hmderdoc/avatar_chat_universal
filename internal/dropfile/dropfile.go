@@ -3,7 +3,7 @@ package dropfile
 import (
 	"bytes"
 	"fmt"
-	"os"
+	"io/ioutil"
 	"path/filepath"
 	"strings"
 )
@@ -54,9 +54,9 @@ func (u *User) DisplayName() string {
 }
 
 func Parse(path string) (*User, error) {
-	data, err := os.ReadFile(path)
+	data, err := ioutil.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("dropfile: read %s: %w", path, err)
+		return nil, fmt.Errorf("dropfile: read %s: %v", path, err)
 	}
 	base := strings.ToUpper(filepath.Base(path))
 	switch {
@@ -77,8 +77,8 @@ func Parse(path string) (*User, error) {
 
 func splitLines(data []byte) []string {
 	s := string(data)
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	s = strings.ReplaceAll(s, "\r", "\n")
+	s = strings.Replace(s, "\r\n", "\n", -1)
+	s = strings.Replace(s, "\r", "\n", -1)
 	s = strings.TrimRight(s, "\n")
 	if s == "" {
 		return nil

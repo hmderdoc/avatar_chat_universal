@@ -79,10 +79,10 @@ func (c *Client) Unsubscribe(scope, location string) error {
 
 // Write stores `value` at scope.location. Subscribers receive an UPDATE
 // packet with this value. Fire-and-forget — matches the JS client.
-func (c *Client) Write(scope, location string, value any, lock int) error {
+func (c *Client) Write(scope, location string, value interface{}, lock int) error {
 	data, err := json.Marshal(value)
 	if err != nil {
-		return fmt.Errorf("chat: marshal write data: %w", err)
+		return fmt.Errorf("chat: marshal write data: %v", err)
 	}
 	return c.conn.Send(&Packet{
 		Scope:    scope,
@@ -96,10 +96,10 @@ func (c *Client) Write(scope, location string, value any, lock int) error {
 }
 
 // Push appends `value` to the array at scope.location. Fire-and-forget.
-func (c *Client) Push(scope, location string, value any, lock int) error {
+func (c *Client) Push(scope, location string, value interface{}, lock int) error {
 	data, err := json.Marshal(value)
 	if err != nil {
-		return fmt.Errorf("chat: marshal push data: %w", err)
+		return fmt.Errorf("chat: marshal push data: %v", err)
 	}
 	return c.conn.Send(&Packet{
 		Scope:    scope,
@@ -114,7 +114,7 @@ func (c *Client) Push(scope, location string, value any, lock int) error {
 
 // Slice returns array[start:end] at scope.location. Negative indices count
 // from the end (JS Array.slice semantics). end == nil means "to end".
-func (c *Client) Slice(scope, location string, start int, end *int, lock int, target any) error {
+func (c *Client) Slice(scope, location string, start int, end *int, lock int, target interface{}) error {
 	type sliceArgs struct {
 		Start int  `json:"start"`
 		End   *int `json:"end,omitempty"`

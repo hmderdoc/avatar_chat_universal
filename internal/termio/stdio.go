@@ -1,7 +1,6 @@
 package termio
 
 import (
-	"errors"
 	"io"
 	"os"
 	"time"
@@ -40,9 +39,9 @@ func (c *stdioConn) SetReadDeadline(t time.Time) error {
 	}
 	// *os.File has SetReadDeadline since Go 1.10, but it's only honored
 	// for non-blocking-capable file descriptors (pipes, sockets).
-	if d, ok := any(c.in).(deadliner); ok {
+	if d, ok := interface{}(c.in).(deadliner); ok {
 		err := d.SetReadDeadline(t)
-		if err != nil && !errors.Is(err, os.ErrInvalid) {
+		if err != nil && err != os.ErrInvalid {
 			return err
 		}
 		return nil

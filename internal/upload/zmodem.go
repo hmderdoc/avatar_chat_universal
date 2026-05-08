@@ -31,7 +31,7 @@ func openTrace() {
 	if path == "" {
 		return
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return
 	}
@@ -174,15 +174,15 @@ func ReceiveZMODEM(conn ConnIO, maxBytes int) ([]byte, string, error) {
 	for time.Now().Before(deadline) {
 		typ, _, err := r.recvHeader(2 * time.Second)
 		if err != nil {
-			if errors.Is(err, errTimeout) {
+			if err == errTimeout {
 				// Just check the deadline and keep waiting.
 				continue
 			}
-			if errors.Is(err, errCancelled) {
+			if err == errCancelled {
 				r.sendCancel(250 * time.Millisecond)
 				return nil, "", fmt.Errorf("upload cancelled")
 			}
-			return nil, "", fmt.Errorf("zmodem: waiting for ZFILE: %w", err)
+			return nil, "", fmt.Errorf("zmodem: waiting for ZFILE: %v", err)
 		}
 		switch typ {
 		case zrqinit:
@@ -193,7 +193,7 @@ func ReceiveZMODEM(conn ConnIO, maxBytes int) ([]byte, string, error) {
 		case zsinit:
 			// Sender info; subpacket follows. Drain it.
 			if _, _, err := r.recvSubpacket(0, 4*time.Second); err != nil {
-				return nil, "", fmt.Errorf("zmodem: drain ZSINIT: %w", err)
+				return nil, "", fmt.Errorf("zmodem: drain ZSINIT: %v", err)
 			}
 			// ACK with ZACK.
 			if err := r.sendHex(zack, [4]byte{0, 0, 0, 0}); err != nil {
@@ -203,7 +203,7 @@ func ReceiveZMODEM(conn ConnIO, maxBytes int) ([]byte, string, error) {
 			// File info subpacket follows.
 			info, _, err := r.recvSubpacket(0, 4*time.Second)
 			if err != nil {
-				return nil, "", fmt.Errorf("zmodem: file info: %w", err)
+				return nil, "", fmt.Errorf("zmodem: file info: %v", err)
 			}
 			if i := bytes.IndexByte(info, 0); i >= 0 {
 				filename = string(info[:i])
@@ -230,11 +230,11 @@ have_file:
 	for {
 		typ, flags, err := r.recvHeader(8 * time.Second)
 		if err != nil {
-			if errors.Is(err, errCancelled) {
+			if err == errCancelled {
 				r.sendCancel(250 * time.Millisecond)
 				return nil, filename, fmt.Errorf("upload cancelled")
 			}
-			return nil, filename, fmt.Errorf("zmodem: waiting for ZDATA/ZEOF: %w", err)
+			return nil, filename, fmt.Errorf("zmodem: waiting for ZDATA/ZEOF: %v", err)
 		}
 		switch typ {
 		case zdata:
@@ -243,7 +243,7 @@ have_file:
 			_ = flags
 			done, err := r.readSubpackets(&payload, maxBytes, 8*time.Second)
 			if err != nil {
-				return nil, filename, fmt.Errorf("zmodem: read data: %w", err)
+				return nil, filename, fmt.Errorf("zmodem: read data: %v", err)
 			}
 			if done {
 				// Frame ended via ZCRCE/ZCRCW; sender will send another
@@ -364,7 +364,7 @@ func (r *zmodemReader) readByte(timeout time.Duration) (byte, error) {
 		return b, nil
 	}
 	b, err := readByte(r.conn, timeout)
-	if errors.Is(err, errTimeout) {
+	if err == errTimeout {
 		return 0, errTimeout
 	}
 	if err == nil {
@@ -397,7 +397,7 @@ func (r *zmodemReader) recvHeader(timeout time.Duration) (byte, [4]byte, error) 
 			// ms. A lone Esc with no follow-up is the user pressing
 			// the cancel key.
 			next, perr := r.readByte(100 * time.Millisecond)
-			if errors.Is(perr, errTimeout) {
+			if perr == errTimeout {
 				return 0, [4]byte{}, errCancelled
 			}
 			if perr != nil {
@@ -570,8 +570,7 @@ func (r *zmodemReader) recvSubpacket(_ int, timeout time.Duration) ([]byte, byte
 	for {
 		b, err := r.readEscaped(timeout)
 		if err != nil {
-			var spe *errSubpacketEnd
-			if errors.As(err, &spe) {
+			if spe, ok := err.(*errSubpacketEnd); ok {
 				// Read CRC32 (4 bytes), include the code byte itself in
 				// the CRC input as Zmodem requires.
 				crcInput := append(append([]byte(nil), data...), spe.code)

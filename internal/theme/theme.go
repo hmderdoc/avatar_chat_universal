@@ -138,7 +138,7 @@ func Load(path string) (*Theme, error) {
 		applyKey(t, key, val)
 	}
 	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("theme: %s: %w", path, err)
+		return nil, fmt.Errorf("theme: %s: %v", path, err)
 	}
 	return t, nil
 }

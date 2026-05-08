@@ -311,7 +311,7 @@ func (t *Transcript) renderNotice(b *block, y int) {
 	}
 	const animDurationMs = 1800
 	if b.effect != 0 && b.effectStart > 0 {
-		elapsed := time.Now().UnixMilli() - b.effectStart
+		elapsed := time.Now().UnixNano() / 1000000 - b.effectStart
 		if elapsed < animDurationMs {
 			t.renderSweepNotice(b, y, b.effect, elapsed, animDurationMs)
 			return
@@ -478,7 +478,7 @@ func decodeColorCode(c byte, def ansi.Attr) ansi.Attr {
 // label updates as time elapses (matching avatar_chat.js's strategy at
 // avatar_chat.js:120-148).
 func relativeStamp(epochMs int64) string {
-	t := time.UnixMilli(epochMs)
+	t := time.Unix(0, (epochMs) * 1000000)
 	delta := time.Since(t)
 	if delta < 0 {
 		delta = 0

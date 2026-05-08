@@ -58,7 +58,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	lc := net.ListenConfig{}
 	l, err := lc.Listen(ctx, "tcp", s.Addr)
 	if err != nil {
-		return fmt.Errorf("chatserver: listen %s: %w", s.Addr, err)
+		return fmt.Errorf("chatserver: listen %s: %v", s.Addr, err)
 	}
 	s.Logger.Printf("chatserver: listening on %s", l.Addr())
 	go func() {
@@ -74,7 +74,7 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 				return nil
 			default:
 			}
-			return fmt.Errorf("chatserver: accept: %w", err)
+			return fmt.Errorf("chatserver: accept: %v", err)
 		}
 		go s.handleConn(ctx, c)
 	}

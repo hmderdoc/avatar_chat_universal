@@ -65,7 +65,7 @@ func parseDoor32(data []byte) (*User, error) {
 func parseInt(s, ctx string) (int, error) {
 	n, err := strconv.Atoi(s)
 	if err != nil {
-		return 0, fmt.Errorf("dropfile: %s: %w", ctx, err)
+		return 0, fmt.Errorf("dropfile: %s: %v", ctx, err)
 	}
 	return n, nil
 }

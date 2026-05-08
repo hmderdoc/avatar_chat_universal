@@ -54,7 +54,7 @@ func TestReceiveZMODEM_AgainstLrzsz(t *testing.T) {
 
 	tmp := t.TempDir()
 	srcPath := filepath.Join(tmp, "avatar.bin")
-	if err := os.WriteFile(srcPath, want, 0o644); err != nil {
+	if err := os.WriteFile(srcPath, want, 0644); err != nil {
 		t.Fatalf("write source: %v", err)
 	}
 
@@ -124,7 +124,7 @@ func TestReceiveZMODEM_AgainstLrzsz_LargerFile(t *testing.T) {
 
 	tmp := t.TempDir()
 	srcPath := filepath.Join(tmp, "blob.dat")
-	if err := os.WriteFile(srcPath, want, 0o644); err != nil {
+	if err := os.WriteFile(srcPath, want, 0644); err != nil {
 		t.Fatalf("write source: %v", err)
 	}
 

@@ -1,9 +1,8 @@
 package avatar
 
 import (
-	"embed"
 	"fmt"
-	"io/fs"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,44 +20,18 @@ type Collection struct {
 	Author  string // SAUCE author if present
 }
 
-//go:embed assets/avatars/*.bin
-var bundledFS embed.FS
-
-// LoadBundled returns all .bin collections embedded in the binary.
-func LoadBundled() ([]*Collection, error) {
-	entries, err := fs.ReadDir(bundledFS, "assets/avatars")
-	if err != nil {
-		return nil, fmt.Errorf("avatar: read bundled fs: %w", err)
-	}
-	var out []*Collection
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".bin") {
-			continue
-		}
-		data, err := fs.ReadFile(bundledFS, "assets/avatars/"+e.Name())
-		if err != nil {
-			continue
-		}
-		c, err := ParseCollection(strings.TrimSuffix(e.Name(), ".bin"), data)
-		if err != nil {
-			continue
-		}
-		c.Source = "bundled"
-		out = append(out, c)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
-}
-
 // LoadDir scans dir for .bin files and returns the parsed collections. Missing
 // directory is not an error (returns an empty slice).
+//
+// Uses ioutil.ReadDir / ioutil.ReadFile rather than the os.ReadDir family
+// (Go 1.16+) so the same source compiles on Go 1.10 (XP target).
 func LoadDir(dir string) ([]*Collection, error) {
-	entries, err := os.ReadDir(dir)
+	entries, err := ioutil.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("avatar: read dir %s: %w", dir, err)
+		return nil, fmt.Errorf("avatar: read dir %s: %v", dir, err)
 	}
 	var out []*Collection
 	for _, e := range entries {
@@ -66,7 +39,7 @@ func LoadDir(dir string) ([]*Collection, error) {
 			continue
 		}
 		full := filepath.Join(dir, e.Name())
-		data, err := os.ReadFile(full)
+		data, err := ioutil.ReadFile(full)
 		if err != nil {
 			continue
 		}

@@ -22,7 +22,7 @@ import (
 	"compress/zlib"
 	"encoding/hex"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"strconv"
 	"strings"
 )
@@ -76,11 +76,11 @@ func Parse(s string) (*Image, error) {
 
 	compressed, err := hex.DecodeString(hexData)
 	if err != nil {
-		return nil, fmt.Errorf("bitmap: hex decode: %w", err)
+		return nil, fmt.Errorf("bitmap: hex decode: %v", err)
 	}
 	decompressed, err := inflate(compressed)
 	if err != nil {
-		return nil, fmt.Errorf("bitmap: inflate: %w", err)
+		return nil, fmt.Errorf("bitmap: inflate: %v", err)
 	}
 	if len(decompressed) < 4 {
 		return nil, fmt.Errorf("bitmap: payload too short (%d bytes)", len(decompressed))
@@ -130,14 +130,14 @@ func Parse(s string) (*Image, error) {
 func inflate(compressed []byte) ([]byte, error) {
 	if zr, err := zlib.NewReader(bytes.NewReader(compressed)); err == nil {
 		defer zr.Close()
-		out, ierr := io.ReadAll(zr)
+		out, ierr := ioutil.ReadAll(zr)
 		if ierr == nil {
 			return out, nil
 		}
 	}
 	fr := flate.NewReader(bytes.NewReader(compressed))
 	defer fr.Close()
-	out, err := io.ReadAll(fr)
+	out, err := ioutil.ReadAll(fr)
 	if err != nil {
 		return nil, err
 	}

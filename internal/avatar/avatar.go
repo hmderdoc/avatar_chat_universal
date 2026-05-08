@@ -98,7 +98,7 @@ func (a Avatar) Base64() string {
 func FromBase64(s string) (Avatar, error) {
 	data, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
-		return nil, fmt.Errorf("avatar: base64: %w", err)
+		return nil, fmt.Errorf("avatar: base64: %v", err)
 	}
 	if len(data) != Bytes {
 		return nil, fmt.Errorf("avatar: decoded length %d, want %d", len(data), Bytes)

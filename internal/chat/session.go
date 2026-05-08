@@ -70,7 +70,7 @@ func NewSession(client *Client, self *Nick, channel string) *Session {
 // the dirty flag set during animations.
 func (s *Session) HasActiveEffect() bool {
 	const animMs = 1800
-	now := time.Now().UnixMilli()
+	now := time.Now().UnixNano() / 1000000
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Walk the most recent slice; effects are typically the newest msgs.
@@ -295,7 +295,7 @@ func (s *Session) Connect(ctx context.Context, historyCount int) error {
 	}
 	loc := s.locMessages(s.Channel)
 	if err := s.Client.Subscribe("chat", loc); err != nil {
-		return fmt.Errorf("subscribe %s: %w", loc, err)
+		return fmt.Errorf("subscribe %s: %v", loc, err)
 	}
 	if s.Self != nil && s.Self.Name != "" {
 		_ = s.Client.Subscribe("chat", s.locMessages(s.Self.Name))
@@ -344,7 +344,7 @@ func (s *Session) Connect(ctx context.Context, historyCount int) error {
 				}
 			}
 			if lastTime > 0 {
-				s.appendNotice(time.UnixMilli(lastTime).Format("\x01mLast msg:\x01M 15:04 on 01/02/2006"))
+				s.appendNotice(time.Unix(0, (lastTime) * 1000000).Format("\x01mLast msg:\x01M 15:04 on 01/02/2006"))
 			}
 		}
 	}
@@ -429,7 +429,7 @@ func (s *Session) Reconnect(ctx context.Context) error {
 		return err
 	}
 	if err := s.Client.Subscribe("chat", s.locMessages(s.Channel)); err != nil {
-		return fmt.Errorf("resubscribe %s: %w", s.Channel, err)
+		return fmt.Errorf("resubscribe %s: %v", s.Channel, err)
 	}
 	if s.Self != nil && s.Self.Name != "" {
 		_ = s.Client.Subscribe("chat", s.locMessages(s.Self.Name))
@@ -456,7 +456,7 @@ func (s *Session) Send(text string) error {
 	msg := &Message{
 		Nick: s.Self,
 		Str:  text,
-		Time: time.Now().UnixMilli(),
+		Time: time.Now().UnixNano() / 1000000,
 	}
 	if err := s.Client.Write("chat", s.locMessages(s.Channel), msg, LockWrite); err != nil {
 		return err
@@ -487,7 +487,7 @@ func (s *Session) SendPrivate(recipient, text string) error {
 	msg := &Message{
 		Nick: s.Self,
 		Str:  text,
-		Time: time.Now().UnixMilli(),
+		Time: time.Now().UnixNano() / 1000000,
 	}
 	loc := s.locMessages(recipient)
 	if err := s.Client.Write("chat", loc, msg, LockWrite); err != nil {
@@ -519,7 +519,7 @@ func (s *Session) Action(text string) error {
 	msg := &Message{
 		Nick: nil,
 		Str:  s.Self.Name + " " + text,
-		Time: time.Now().UnixMilli(),
+		Time: time.Now().UnixNano() / 1000000,
 	}
 	if err := s.Client.Write("chat", s.locMessages(s.Channel), msg, LockWrite); err != nil {
 		return err
@@ -656,7 +656,7 @@ func (s *Session) handleUpdate(pkt *Packet) {
 //	\x01m  light magenta
 //	\x01g  light green
 func (s *Session) appendNotice(text string) {
-	msg := &Message{Nick: nil, Str: text, Time: time.Now().UnixMilli()}
+	msg := &Message{Nick: nil, Str: text, Time: time.Now().UnixNano() / 1000000}
 	s.append(msg)
 	if s.OnMessage != nil {
 		s.OnMessage(msg)
@@ -746,7 +746,7 @@ func (s *Session) JoinChannel(channel string, historyCount int) error {
 			}
 		}
 		if lastTime > 0 {
-			s.appendNotice(time.UnixMilli(lastTime).Format("\x01mLast msg:\x01M 15:04 on 01/02/2006"))
+			s.appendNotice(time.Unix(0, (lastTime) * 1000000).Format("\x01mLast msg:\x01M 15:04 on 01/02/2006"))
 		}
 	}
 	s.announceRoster(channel)
@@ -776,7 +776,7 @@ func (s *Session) append(m *Message) {
 }
 
 func (s *Session) recentSelf(msg *Message) bool {
-	now := time.Now().UnixMilli()
+	now := time.Now().UnixNano() / 1000000
 	if now-msg.Time > 5000 {
 		return false
 	}

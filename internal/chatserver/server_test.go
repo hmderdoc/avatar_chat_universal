@@ -146,7 +146,7 @@ func TestPingPong(t *testing.T) {
 	defer c.Close()
 
 	// Send a SOCKET-scope PING; expect PONG echoed back.
-	ts := time.Now().UnixMilli()
+	ts := time.Now().UnixNano() / 1000000
 	body := fmt.Sprintf(`{"scope":"SOCKET","func":"PING","data":%d}`+"\r\n", ts)
 	if _, err := c.Write([]byte(body)); err != nil {
 		t.Fatal(err)

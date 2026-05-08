@@ -60,7 +60,7 @@ func (c *Conn) Open(ctx context.Context) error {
 	d := net.Dialer{Timeout: 10 * time.Second}
 	tcp, err := d.DialContext(ctx, "tcp", c.addr)
 	if err != nil {
-		return fmt.Errorf("chat: dial %s: %w", c.addr, err)
+		return fmt.Errorf("chat: dial %s: %v", c.addr, err)
 	}
 	c.mu.Lock()
 	if c.tcp != nil && c.closed {
@@ -106,7 +106,7 @@ func (c *Conn) Close() error {
 func (c *Conn) Send(p *Packet) error {
 	data, err := json.Marshal(p)
 	if err != nil {
-		return fmt.Errorf("chat: marshal: %w", err)
+		return fmt.Errorf("chat: marshal: %v", err)
 	}
 	if len(data)+2 > MaxPacket {
 		return fmt.Errorf("chat: packet too large (%d bytes; max %d)", len(data)+2, MaxPacket)
@@ -207,7 +207,7 @@ func (c *Conn) dispatch(pkt *Packet) {
 }
 
 func (c *Conn) sendPong() error {
-	now := time.Now().UnixMilli()
+	now := time.Now().UnixNano() / 1000000
 	data, _ := json.Marshal(now)
 	return c.Send(&Packet{Scope: "SOCKET", Func: "PONG", Data: data})
 }

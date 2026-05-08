@@ -1,8 +1,8 @@
 package idle
 
 import (
+	"io/ioutil"
 	"math/rand"
-	"os"
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
 )
@@ -92,7 +92,7 @@ func (g *AnsiGallery) loadNext() {
 		return
 	}
 	idx := g.rng.Intn(len(g.files))
-	data, err := os.ReadFile(g.files[idx])
+	data, err := ioutil.ReadFile(g.files[idx])
 	if err != nil {
 		return
 	}

@@ -1269,7 +1269,7 @@ func (a *App) refreshActionBar() {
 	if unread > 0 {
 		imgBtn.Highlight = true
 		// 500ms flash: hide on the off-phase.
-		if (time.Now().UnixMilli()/500)%2 == 1 {
+		if (time.Now().UnixNano() / 1000000/500)%2 == 1 {
 			imgBtn.Hidden = true
 		}
 	}

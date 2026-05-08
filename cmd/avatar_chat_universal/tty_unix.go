@@ -1,4 +1,5 @@
 //go:build !windows
+// +build !windows
 
 package main
 
@@ -16,7 +17,7 @@ func setupRawTTY() (restore func(), err error) {
 	}
 	state, err := term.MakeRaw(fd)
 	if err != nil {
-		return nil, fmt.Errorf("make tty raw: %w", err)
+		return nil, fmt.Errorf("make tty raw: %v", err)
 	}
 	return func() { _ = term.Restore(fd, state) }, nil
 }

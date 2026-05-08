@@ -163,7 +163,7 @@ func Load(path string) (*Config, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("config: %w", err)
+		return nil, fmt.Errorf("config: %v", err)
 	}
 	return cfg, nil
 }

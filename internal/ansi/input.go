@@ -1,7 +1,6 @@
 package ansi
 
 import (
-	"errors"
 	"io"
 	"sync"
 	"time"
@@ -123,7 +122,7 @@ func (in *Input) pump() {
 			// produce (Key{}, false, nil) and the main loop -- which
 			// only exits on err != nil -- would spin forever, holding
 			// the BBS node open even after the user disconnected.
-			if errors.Is(err, io.EOF) {
+			if err == io.EOF {
 				in.closedErr = io.EOF
 			} else {
 				in.closedErr = err

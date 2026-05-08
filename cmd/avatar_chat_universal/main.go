@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -54,7 +53,7 @@ func run() error {
 		user = standaloneUser(*userFlag, *bbsFlag)
 		restore, rerr := setupRawTTY()
 		if rerr != nil {
-			return fmt.Errorf("standalone: %w", rerr)
+			return fmt.Errorf("standalone: %v", rerr)
 		}
 		defer restore()
 	} else {
@@ -66,7 +65,7 @@ func run() error {
 	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
+		return fmt.Errorf("load config: %v", err)
 	}
 	// config.Load silently returns defaults when the file is missing.
 	// Surface that on stderr (which BBSes typically log) so a sysop who
@@ -81,7 +80,7 @@ func run() error {
 
 	conn, err := openConn(*ioMode, user)
 	if err != nil {
-		return fmt.Errorf("open termio: %w", err)
+		return fmt.Errorf("open termio: %v", err)
 	}
 	defer conn.Close()
 
@@ -119,7 +118,7 @@ func run() error {
 	// timeout to 0 to skip. Artwork is compiled into the binary.
 	splashTimeout := time.Duration(cfg.SplashTimeoutSeconds) * time.Second
 	if serr := ui.ShowSplash(conn, input, cols, rows, charset, splashTimeout); serr != nil {
-		if errors.Is(serr, io.EOF) {
+		if serr == io.EOF {
 			return nil
 		}
 	}
@@ -140,7 +139,7 @@ func run() error {
 		sel.Charset = charset
 		action, picked, err := sel.Run()
 		if err != nil {
-			return fmt.Errorf("selector: %w", err)
+			return fmt.Errorf("selector: %v", err)
 		}
 		switch action {
 		case avatar.SelectorPicked:
@@ -180,7 +179,7 @@ func run() error {
 			return nil
 		}
 		if err := store.Write(user.DisplayName(), rec); err != nil {
-			return fmt.Errorf("save avatar: %w", err)
+			return fmt.Errorf("save avatar: %v", err)
 		}
 	}
 
@@ -343,7 +342,7 @@ func run() error {
 		// EOF means the user dropped their connection -- the writes
 		// below will fail silently and the process exits, which is
 		// exactly what we want so Synchronet can free the node.
-		if !errors.Is(err, io.EOF) {
+		if err != io.EOF {
 			ansi.Reset(conn)
 			ansi.ClearScreen(conn)
 			fmt.Fprintf(conn, "\r\nChat ended: %v\r\nGoodbye, %s.\r\n", err, user.DisplayName())
@@ -379,7 +378,7 @@ func runAvatarUpload(conn termio.Conn, input *ansi.Input) (avatar.Avatar, error)
 	}
 	a := avatar.Avatar(data[:avatar.Bytes])
 	if err := a.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid avatar: %w", err)
+		return nil, fmt.Errorf("invalid avatar: %v", err)
 	}
 	return a.Clone(), nil
 }
@@ -399,7 +398,7 @@ func runAvatarEditor(conn termio.Conn, input *ansi.Input, cols, rows int, charse
 		return nil, nil
 	}
 	if err := result.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid avatar: %w", err)
+		return nil, fmt.Errorf("invalid avatar: %v", err)
 	}
 	return result.Clone(), nil
 }
@@ -415,7 +414,7 @@ func greet(conn io.Writer, user *dropfile.User, bbsID, cfgPath, dataDir string, 
 func loadCollections(cfg *config.Config, sysopOverride string) ([]*avatar.Collection, error) {
 	bundled, err := avatar.LoadBundled()
 	if err != nil {
-		return nil, fmt.Errorf("load bundled: %w", err)
+		return nil, fmt.Errorf("load bundled: %v", err)
 	}
 	dir := sysopOverride
 	if dir == "" {
@@ -600,17 +599,17 @@ func scanAnsiGallery(dir string) []string {
 		return nil
 	}
 	var out []string
-	_ = filepath.WalkDir(resolved, func(path string, d os.DirEntry, err error) error {
+	_ = filepath.Walk(resolved, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			if d != nil && d.IsDir() {
+			if info != nil && info.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if d.IsDir() {
+		if info.IsDir() {
 			return nil
 		}
-		ext := strings.ToLower(filepath.Ext(d.Name()))
+		ext := strings.ToLower(filepath.Ext(info.Name()))
 		if ext != ".ans" && ext != ".bin" {
 			return nil
 		}

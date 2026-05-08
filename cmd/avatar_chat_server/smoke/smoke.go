@@ -32,11 +32,11 @@ func run(addr string) error {
 	alice := chat.NewClient(addr)
 	bob := chat.NewClient(addr)
 	if err := alice.Connect(ctx); err != nil {
-		return fmt.Errorf("alice connect: %w", err)
+		return fmt.Errorf("alice connect: %v", err)
 	}
 	defer alice.Close()
 	if err := bob.Connect(ctx); err != nil {
-		return fmt.Errorf("bob connect: %w", err)
+		return fmt.Errorf("bob connect: %v", err)
 	}
 	defer bob.Close()
 	log.Println("both clients connected")
@@ -46,10 +46,10 @@ func run(addr string) error {
 
 	// Both subscribe.
 	if err := alice.Subscribe("chat", loc); err != nil {
-		return fmt.Errorf("alice subscribe: %w", err)
+		return fmt.Errorf("alice subscribe: %v", err)
 	}
 	if err := bob.Subscribe("chat", loc); err != nil {
-		return fmt.Errorf("bob subscribe: %w", err)
+		return fmt.Errorf("bob subscribe: %v", err)
 	}
 	// Subscriptions are fire-and-forget; give the server a beat to ack.
 	time.Sleep(50 * time.Millisecond)
@@ -58,11 +58,11 @@ func run(addr string) error {
 	msg := chat.Message{
 		Nick: &chat.Nick{Name: "alice", Host: "Smoke BBS"},
 		Str:  "hello bob",
-		Time: time.Now().UnixMilli(),
+		Time: time.Now().UnixNano() / 1000000,
 	}
 	bobUpdates := bob.Updates()
 	if err := alice.Write("chat", loc, msg, 2); err != nil {
-		return fmt.Errorf("alice write: %w", err)
+		return fmt.Errorf("alice write: %v", err)
 	}
 	log.Println("alice wrote message; waiting for bob to see it...")
 
@@ -82,12 +82,12 @@ func run(addr string) error {
 	// Push to history; Slice it back.
 	histLoc := "channels." + channel + ".history"
 	if err := alice.Push("chat", histLoc, msg, 2); err != nil {
-		return fmt.Errorf("alice push history: %w", err)
+		return fmt.Errorf("alice push history: %v", err)
 	}
 	time.Sleep(50 * time.Millisecond)
 	var got []chat.Message
 	if err := alice.Slice("chat", histLoc, 0, nil, 2, &got); err != nil {
-		return fmt.Errorf("alice slice history: %w", err)
+		return fmt.Errorf("alice slice history: %v", err)
 	}
 	if len(got) != 1 || got[0].Str != "hello bob" {
 		return fmt.Errorf("history slice: got %+v", got)
@@ -99,10 +99,10 @@ func run(addr string) error {
 	reply := chat.Message{
 		Nick: &chat.Nick{Name: "bob", Host: "Smoke BBS"},
 		Str:  "hi alice",
-		Time: time.Now().UnixMilli(),
+		Time: time.Now().UnixNano() / 1000000,
 	}
 	if err := bob.Write("chat", loc, reply, 2); err != nil {
-		return fmt.Errorf("bob write: %w", err)
+		return fmt.Errorf("bob write: %v", err)
 	}
 	select {
 	case pkt, ok := <-aliceUpdates:
@@ -117,7 +117,7 @@ func run(addr string) error {
 	// WHO lookup -- should show both clients.
 	who, err := alice.Who("chat", loc)
 	if err != nil {
-		return fmt.Errorf("who: %w", err)
+		return fmt.Errorf("who: %v", err)
 	}
 	log.Printf("who returned %d entries: %+v", len(who), who)
 	if len(who) < 2 {

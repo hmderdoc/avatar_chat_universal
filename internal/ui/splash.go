@@ -1,21 +1,16 @@
 package ui
 
 import (
-	_ "embed"
 	"io"
 	"time"
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
 )
 
-// Splash artwork is sourced from the repo root (./splash.ans). The
-// Makefile copies it here before each build so go:embed (which can only
-// read paths at-or-below this file) can pick it up. To customize, drop
-// your replacement at the repo's top-level splash.ans and rebuild --
-// don't edit this copy directly, it gets overwritten.
-//
-//go:embed splash.ans
-var embeddedSplash []byte
+// embeddedSplash holds the splash ANSI bytes. Populated either via
+// //go:embed (modern Go, splash_embed.go) or by reading from disk at
+// init time (Go 1.10 / XP target, splash_disk.go). Both files declare
+// the variable so this file doesn't have to know which path won.
 
 // ShowSplash renders the splash artwork compiled into the binary,
 // centered in (width x height), via the standard Frame pipeline (SGR

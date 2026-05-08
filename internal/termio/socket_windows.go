@@ -1,9 +1,9 @@
 //go:build windows
+// +build windows
 
 package termio
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -86,7 +86,7 @@ func setSocketBlocking(h windows.Handle) error {
 		h, fionbio,
 		(*byte)(unsafe.Pointer(&mode)), uint32(unsafe.Sizeof(mode)),
 		nil, 0,
-		&bytesReturned, nil, 0,
+		&bytesReturned, nil, nil,
 	)
 }
 
@@ -190,8 +190,7 @@ func (timeoutError) Timeout() bool { return true }
 // error. WSA* codes ride inside syscall.Errno and arrive wrapped by os
 // helpers in some paths; both callers want the raw number.
 func mapErrno(err error) (int, bool) {
-	var errno syscall.Errno
-	if errors.As(err, &errno) {
+	if errno, ok := err.(syscall.Errno); ok {
 		return int(errno), true
 	}
 	return 0, false

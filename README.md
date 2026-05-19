@@ -27,6 +27,7 @@ Single static binary per platform. No runtime dependencies.
 - Optional **splash screen** with an RGB strobe effect on entry.
 - **Self-hostable** companion server speaks the same JSON-RPC protocol as the
   public futureland server.
+- Optional **IRC bridge** daemon links one IRC channel to one Avatar Chat channel.
 - Runs as a **standalone CLI app** without a drop file (`./avatar_chat_universal -user alice`)
   for testing or shell-only use.
 
@@ -47,13 +48,14 @@ Grab the tarball matching your platform from the
 | `avatar_chat_universal_darwin_amd64.tar.gz`       | Intel macOS                                   |
 | `avatar_chat_universal_darwin_arm64.tar.gz`       | Apple Silicon macOS                           |
 
-Each tarball contains the door binary, the server binary, the default
-`avatar_chat.ini`, the `themes/futurewave.ini`, and the docs.
+Each tarball contains the door binary, the server binary, the IRC bridge binary,
+the default `avatar_chat.ini` / `irc_bridge.ini`, the `themes/futurewave.ini`,
+and the docs.
 
 ### Build from source
 
 ```sh
-# Build the door + server for your host platform.
+# Build the door + server + IRC bridge for your host platform.
 make build
 
 # Drop into a Synchronet door slot (see INSTALL.md for the full SCFG fields):
@@ -68,7 +70,18 @@ make build
 # Or run the bundled chat server alongside for an isolated deployment:
 ./avatar_chat_server -addr :10088 &
 ./avatar_chat_universal -user alice            # uses host=futureland by default; edit avatar_chat.ini to point at localhost
+
+# Or run the IRC bridge as a foreground process / supervised daemon:
+./avatar_chat_irc_bridge -config irc_bridge.ini
 ```
+
+### IRC bridge
+
+`avatar_chat_irc_bridge` connects one IRC channel to one Avatar Chat channel.
+IRC has no avatar or ANSI/bitmap image payload support, so avatars are omitted
+and `[BITMAP|...]` payloads are controlled by `bitmap_mode` in `irc_bridge.ini`:
+`filter`, `announce`, or `dump`. Messages that originated from IRC are marked
+with an internal `IRC:` host marker so the bridge does not echo them back.
 
 ## Documentation
 

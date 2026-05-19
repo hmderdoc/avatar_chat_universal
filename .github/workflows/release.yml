@@ -1,6 +1,6 @@
-# Builds avatar_chat_universal + avatar_chat_server for every supported
-# platform whenever a version tag (vX.Y.Z) is pushed, and uploads the
-# resulting tarballs to the GitHub Release page for that tag.
+# Builds avatar_chat_universal + avatar_chat_server + avatar_chat_irc_bridge
+# for every supported platform whenever a version tag (vX.Y.Z) is pushed, and
+# uploads the resulting tarballs to the GitHub Release page for that tag.
 #
 # Sysops grab the one matching their platform from the Releases tab.
 # Source-only consumers (anyone with Go installed) can ignore this and

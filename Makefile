@@ -3,6 +3,7 @@ SHELL := /bin/bash
 GO ?= go
 DOOR_BIN := avatar_chat_universal
 SERVER_BIN := avatar_chat_server
+IRC_BRIDGE_BIN := avatar_chat_irc_bridge
 DIST := dist
 
 GO_FLAGS := -trimpath -ldflags='-s -w'
@@ -21,6 +22,7 @@ TARGETS := \
 # Anything top-level that a sysop would want to read or edit goes here.
 DIST_FILES := \
 	avatar_chat.ini \
+	irc_bridge.ini \
 	README.md \
 	INSTALL.md \
 	CONFIG.md \
@@ -46,6 +48,7 @@ splash:
 build: splash
 	CGO_ENABLED=0 $(GO) build $(GO_FLAGS) -o $(DOOR_BIN) ./cmd/$(DOOR_BIN)
 	CGO_ENABLED=0 $(GO) build $(GO_FLAGS) -o $(SERVER_BIN) ./cmd/$(SERVER_BIN)
+	CGO_ENABLED=0 $(GO) build $(GO_FLAGS) -o $(IRC_BRIDGE_BIN) ./cmd/$(IRC_BRIDGE_BIN)
 
 .PHONY: test
 test:
@@ -67,6 +70,8 @@ dist-%: splash
 		$(GO) build $(GO_FLAGS) -o $(OUT)/$(DOOR_BIN)$(EXT) ./cmd/$(DOOR_BIN)
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 \
 		$(GO) build $(GO_FLAGS) -o $(OUT)/$(SERVER_BIN)$(EXT) ./cmd/$(SERVER_BIN)
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 \
+		$(GO) build $(GO_FLAGS) -o $(OUT)/$(IRC_BRIDGE_BIN)$(EXT) ./cmd/$(IRC_BRIDGE_BIN)
 	# Top-level files (config, full doc set, license). Splash artwork is
 	# embedded in the binary; nothing to ship separately.
 	cp $(DIST_FILES) $(OUT)/
@@ -112,6 +117,7 @@ dist-%: splash
 .PHONY: clean
 clean:
 	rm -f $(DOOR_BIN) $(SERVER_BIN) $(DOOR_BIN).exe $(SERVER_BIN).exe
+	rm -f $(IRC_BRIDGE_BIN) $(IRC_BRIDGE_BIN).exe
 	rm -rf $(DIST)
 
 # --- Legacy Windows (XP) target -------------------------------------

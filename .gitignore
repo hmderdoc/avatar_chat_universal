@@ -5,6 +5,10 @@
 /avatar_chat_universal.exe
 /avatar_chat_server
 /avatar_chat_server.exe
+/avatar_chat_irc_bridge
+/avatar_chat_irc_bridge.exe
+/avatar_chat_discord_bridge
+/avatar_chat_discord_bridge.exe
 /dist/
 
 # Runtime data (per-user avatars, etc.)
@@ -13,6 +17,10 @@ data/
 # Local sysop overrides
 avatars/sysop/
 ansi_gallery/
+discord_bridge.ini
+
+# Secrets / local environment
+.env
 
 # Tracing / debugging
 *.trace

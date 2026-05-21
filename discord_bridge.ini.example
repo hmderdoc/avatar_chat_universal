@@ -1,0 +1,59 @@
+; Avatar Chat <-> Discord bridge configuration.
+;
+; Copy this file to discord_bridge.ini and edit that local runtime copy:
+;   cp discord_bridge.ini.example discord_bridge.ini
+;
+; Run with:
+;   DISCORD_BOT_TOKEN=... ./avatar_chat_discord_bridge -config discord_bridge.ini
+;
+; Discord setup:
+;   1. Go to https://discord.com/developers/applications
+;   2. Create or select an application.
+;   3. Open Bot, create a bot if needed, then Reset Token / Copy Token.
+;      Prefer setting it in the environment as DISCORD_BOT_TOKEN.
+;      Do not commit or share bot tokens. If a token was saved in this file,
+;      rotate it in the Discord developer portal.
+;   4. In Bot -> Privileged Gateway Intents, enable Message Content Intent.
+;      Without this, Discord -> Avatar Chat text will usually be empty.
+;   5. Open OAuth2 -> URL Generator.
+;   6. Under Scopes, check: bot
+;   7. Under Bot Permissions, check:
+;      View Channels, Send Messages, Read Message History, Attach Files,
+;      Embed Links
+;   8. Copy the generated URL, open it in a browser, select your Discord
+;      server, and authorize the bot.
+;   9. In Discord, enable User Settings -> Advanced -> Developer Mode.
+;  10. Right-click your server, Copy Server ID, and paste it as guild_id.
+;  11. Right-click the target channel, Copy Channel ID, and paste it as
+;      channel_id.
+;
+; The bot role must also be allowed to see and post in the configured channel.
+
+[discord]
+; Prefer DISCORD_BOT_TOKEN in the environment. This value wins if set.
+; token =
+guild_id =
+channel_id =
+
+[chat]
+host = futureland.today
+port = 10088
+nick = Discord
+system = Discord Bridge
+channel = main
+
+[bridge]
+discord_to_chat = true
+chat_to_discord = true
+include_avatar_image = true
+include_bitmap_image = true
+include_attachment_urls = true
+; Used to turn relative media paths like ./api/files.ssjs?...file=image.png
+; into Discord-embeddable absolute URLs.
+; public_base_url = https://futureland.today
+reconnect_delay_seconds = 5
+
+[filter]
+; Suppress Avatar Chat -> Discord echoes that match these regexes.
+; Repeat the key for multiple patterns.
+; chat_to_discord_ignore_regex = (?i)^BLOCKBRAIN:

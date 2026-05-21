@@ -27,7 +27,8 @@ Single static binary per platform. No runtime dependencies.
 - Optional **splash screen** with an RGB strobe effect on entry.
 - **Self-hostable** companion server speaks the same JSON-RPC protocol as the
   public futureland server.
-- Optional **IRC bridge** daemon links one IRC channel to one Avatar Chat channel.
+- Optional **IRC and Discord bridge** daemons link external rooms to one Avatar
+  Chat channel.
 - Runs as a **standalone CLI app** without a drop file (`./avatar_chat_universal -user alice`)
   for testing or shell-only use.
 
@@ -48,14 +49,14 @@ Grab the tarball matching your platform from the
 | `avatar_chat_universal_darwin_amd64.tar.gz`       | Intel macOS                                   |
 | `avatar_chat_universal_darwin_arm64.tar.gz`       | Apple Silicon macOS                           |
 
-Each tarball contains the door binary, the server binary, the IRC bridge binary,
-the default `avatar_chat.ini` / `irc_bridge.ini`, the `themes/futurewave.ini`,
-and the docs.
+Each tarball contains the door binary, the server binary, bridge binaries, the
+default `avatar_chat.ini` / bridge INI files, the `themes/futurewave.ini`, and
+the docs.
 
 ### Build from source
 
 ```sh
-# Build the door + server + IRC bridge for your host platform.
+# Build the door + server + bridge daemons for your host platform.
 make build
 
 # Drop into a Synchronet door slot (see INSTALL.md for the full SCFG fields):
@@ -73,15 +74,34 @@ make build
 
 # Or run the IRC bridge as a foreground process / supervised daemon:
 ./avatar_chat_irc_bridge -config irc_bridge.ini
+
+# Or run the Discord bridge:
+cp discord_bridge.ini.example discord_bridge.ini
+DISCORD_BOT_TOKEN=... ./avatar_chat_discord_bridge -config discord_bridge.ini
 ```
+
+To run a bridge as a boot-started, auto-restarting daemon under systemd, see
+[Running a bridge as a systemd service](INSTALL.md#running-a-bridge-as-a-systemd-service).
+A ready-to-install unit ships at
+[`avatar-chat-discord-bridge.service`](avatar-chat-discord-bridge.service).
 
 ### IRC bridge
 
 `avatar_chat_irc_bridge` connects one IRC channel to one Avatar Chat channel.
 IRC has no avatar or ANSI/bitmap image payload support, so avatars are omitted
 and `[BITMAP|...]` payloads are controlled by `bitmap_mode` in `irc_bridge.ini`:
-`filter`, `announce`, or `dump`. Messages that originated from IRC are marked
-with an internal `IRC:` host marker so the bridge does not echo them back.
+`filter`, `announce`, or `dump`. Messages that originated from a bridge carry
+an internal origin marker so the same bridge does not echo them back.
+
+### Discord bridge
+
+`avatar_chat_discord_bridge` connects one Discord channel to one Avatar Chat
+channel. Avatar payloads and `[BITMAP|...]` images are rendered to PNG
+attachments when enabled in `discord_bridge.ini`; Discord attachments are
+bridged back to Avatar Chat as URLs. The bot needs access to the configured
+channel and Discord's Message Content intent enabled for Discord-to-Avatar Chat
+messages. Keep the runtime `discord_bridge.ini` local; the tracked
+`discord_bridge.ini.example` contains the setup and bot invite steps.
 
 ## Documentation
 
@@ -91,6 +111,8 @@ with an internal `IRC:` host marker so the bridge does not echo them back.
   defaults.
 - [THEMING.md](THEMING.md) — how to ship a custom color palette + screensaver
   profile via `themes/<name>.ini`.
+- [BRIDGES.md](BRIDGES.md) — bridge architecture, origin rules, and media
+  mapping for Discord/Telegram/Matrix/Slack-style adapters.
 - [AVATARS.md](AVATARS.md) — avatar format, validation rules, sysop-managed
   collection directory, the in-door selector / upload / editor flows.
 - [SCREENSAVER.md](SCREENSAVER.md) — idle animations, ANSI gallery setup,

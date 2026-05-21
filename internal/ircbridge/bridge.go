@@ -10,10 +10,9 @@ import (
 	"time"
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/bitmap"
+	"github.com/hmderdoc/avatar_chat_universal/internal/bridgecore"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
 )
-
-const ircHostMarker = "IRC:"
 
 type Bridge struct {
 	Config *Config
@@ -111,7 +110,7 @@ func (b *Bridge) forwardIRCMessage(c *chat.Client, msg IRCMessage) error {
 		out = &chat.Message{
 			Nick: &chat.Nick{
 				Name: msg.Nick,
-				Host: ircHostMarker + b.Config.IRC.Host + "/" + b.Config.IRC.Channel,
+				Host: bridgecore.FormatHostMarker(b.origin()),
 			},
 			Str:  "* " + action,
 			Time: nowMs(),
@@ -120,7 +119,7 @@ func (b *Bridge) forwardIRCMessage(c *chat.Client, msg IRCMessage) error {
 		out = &chat.Message{
 			Nick: &chat.Nick{
 				Name: msg.Nick,
-				Host: ircHostMarker + b.Config.IRC.Host + "/" + b.Config.IRC.Channel,
+				Host: bridgecore.FormatHostMarker(b.origin()),
 			},
 			Str:  text,
 			Time: nowMs(),
@@ -167,8 +166,11 @@ func (b *Bridge) chatMessageToIRC(msg *chat.Message) (string, bool) {
 	if msg == nil || msg.Str == "" {
 		return "", false
 	}
-	if msg.Nick != nil && strings.HasPrefix(msg.Nick.Host, ircHostMarker) {
-		return "", false
+	if msg.Nick != nil {
+		origin, ok := bridgecore.ParseHostMarker(msg.Nick.Host)
+		if ok && origin.Matches(b.origin()) {
+			return "", false
+		}
 	}
 	if bitmap.IsBitmap(msg.Str) {
 		switch b.Config.Bridge.BitmapMode {
@@ -188,6 +190,9 @@ func (b *Bridge) chatMessageToIRC(msg *chat.Message) (string, bool) {
 	if msg.Nick == nil || msg.Nick.Name == "" {
 		return "* " + text, true
 	}
+	if origin, ok := bridgecore.ParseHostMarker(msg.Nick.Host); ok {
+		return fmt.Sprintf("<%s@%s> %s", msg.Nick.Name, origin.Display(), text), true
+	}
 	return fmt.Sprintf("<%s> %s", msg.Nick.Name, text), true
 }
 
@@ -201,6 +206,13 @@ func nickName(msg *chat.Message) string {
 func locMessages(channel string) string { return "channels." + channel + ".messages" }
 func locHistory(channel string) string  { return "channels." + channel + ".history" }
 func nowMs() int64                      { return time.Now().UnixNano() / 1000000 }
+
+func (b *Bridge) origin() bridgecore.Origin {
+	if b == nil || b.Config == nil {
+		return bridgecore.Origin{}
+	}
+	return bridgecore.NewOrigin("irc", b.Config.IRC.Host, b.Config.IRC.Channel)
+}
 
 func parseCTCPAction(text string) (string, bool) {
 	if strings.HasPrefix(text, "\x01ACTION ") && strings.HasSuffix(text, "\x01") {

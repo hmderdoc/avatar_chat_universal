@@ -1,0 +1,16 @@
+[Unit]
+Description=Avatar Chat Discord Bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sbbs
+Group=sbbs
+WorkingDirectory=/sbbs/xtrn/avatar_chat_universal
+ExecStart=/sbbs/xtrn/avatar_chat_universal/avatar_chat_discord_bridge -config /sbbs/xtrn/avatar_chat_universal/discord_bridge.ini
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

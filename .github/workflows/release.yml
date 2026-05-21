@@ -1,5 +1,5 @@
-# Builds avatar_chat_universal + avatar_chat_server + avatar_chat_irc_bridge
-# for every supported platform whenever a version tag (vX.Y.Z) is pushed, and
+# Builds avatar_chat_universal, avatar_chat_server, and bridge binaries for
+# every supported platform whenever a version tag (vX.Y.Z) is pushed, and
 # uploads the resulting tarballs to the GitHub Release page for that tag.
 #
 # Sysops grab the one matching their platform from the Releases tab.

@@ -4,6 +4,7 @@ GO ?= go
 DOOR_BIN := avatar_chat_universal
 SERVER_BIN := avatar_chat_server
 IRC_BRIDGE_BIN := avatar_chat_irc_bridge
+DISCORD_BRIDGE_BIN := avatar_chat_discord_bridge
 DIST := dist
 
 GO_FLAGS := -trimpath -ldflags='-s -w'
@@ -23,10 +24,12 @@ TARGETS := \
 DIST_FILES := \
 	avatar_chat.ini \
 	irc_bridge.ini \
+	discord_bridge.ini.example \
 	README.md \
 	INSTALL.md \
 	CONFIG.md \
 	THEMING.md \
+	BRIDGES.md \
 	AVATARS.md \
 	SCREENSAVER.md \
 	CONTRIBUTING.md \
@@ -49,6 +52,7 @@ build: splash
 	CGO_ENABLED=0 $(GO) build $(GO_FLAGS) -o $(DOOR_BIN) ./cmd/$(DOOR_BIN)
 	CGO_ENABLED=0 $(GO) build $(GO_FLAGS) -o $(SERVER_BIN) ./cmd/$(SERVER_BIN)
 	CGO_ENABLED=0 $(GO) build $(GO_FLAGS) -o $(IRC_BRIDGE_BIN) ./cmd/$(IRC_BRIDGE_BIN)
+	CGO_ENABLED=0 $(GO) build $(GO_FLAGS) -o $(DISCORD_BRIDGE_BIN) ./cmd/$(DISCORD_BRIDGE_BIN)
 
 .PHONY: test
 test:
@@ -72,9 +76,12 @@ dist-%: splash
 		$(GO) build $(GO_FLAGS) -o $(OUT)/$(SERVER_BIN)$(EXT) ./cmd/$(SERVER_BIN)
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 \
 		$(GO) build $(GO_FLAGS) -o $(OUT)/$(IRC_BRIDGE_BIN)$(EXT) ./cmd/$(IRC_BRIDGE_BIN)
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 \
+		$(GO) build $(GO_FLAGS) -o $(OUT)/$(DISCORD_BRIDGE_BIN)$(EXT) ./cmd/$(DISCORD_BRIDGE_BIN)
 	# Top-level files (config, full doc set, license). Splash artwork is
 	# embedded in the binary; nothing to ship separately.
 	cp $(DIST_FILES) $(OUT)/
+	cp discord_bridge.ini.example $(OUT)/discord_bridge.ini
 	# Bundled themes -- futurewave is the default; sysops copy + edit.
 	cp themes/*.ini $(OUT)/themes/
 	# Stub READMEs for the directories sysops fill with their own content.
@@ -118,6 +125,7 @@ dist-%: splash
 clean:
 	rm -f $(DOOR_BIN) $(SERVER_BIN) $(DOOR_BIN).exe $(SERVER_BIN).exe
 	rm -f $(IRC_BRIDGE_BIN) $(IRC_BRIDGE_BIN).exe
+	rm -f $(DISCORD_BRIDGE_BIN) $(DISCORD_BRIDGE_BIN).exe
 	rm -rf $(DIST)
 
 # --- Legacy Windows (XP) target -------------------------------------

@@ -267,6 +267,68 @@ Persist-to-disk is on the roadmap.
 
 ---
 
+## Running a bridge as a systemd service
+
+The IRC and Discord bridges are long-running foreground processes that handle
+`SIGTERM` cleanly and reconnect on their own when the Discord/chat link drops.
+That makes them a clean fit for systemd with `Type=simple` — no forking or
+PID-file handling needed.
+
+A ready-to-install unit for the Discord bridge ships at
+[`avatar-chat-discord-bridge.service`](avatar-chat-discord-bridge.service):
+
+```ini
+[Unit]
+Description=Avatar Chat Discord Bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sbbs
+Group=sbbs
+WorkingDirectory=/sbbs/xtrn/avatar_chat_universal
+ExecStart=/sbbs/xtrn/avatar_chat_universal/avatar_chat_discord_bridge -config /sbbs/xtrn/avatar_chat_universal/discord_bridge.ini
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Install, enable at boot, and start:
+
+```sh
+sudo cp avatar-chat-discord-bridge.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now avatar-chat-discord-bridge.service
+```
+
+Check status and tail the log:
+
+```sh
+systemctl status avatar-chat-discord-bridge.service
+journalctl -u avatar-chat-discord-bridge.service -f
+```
+
+Notes:
+
+- **The bot token stays out of the unit file.** `WorkingDirectory` points at
+  the install dir, so the binary loads `DISCORD_BOT_TOKEN` from the `.env`
+  there automatically (see [Discord bridge](#discord-bridge) and `main.go`).
+  Keep the token in `.env`, not in the `.service` file — the unit carries no
+  secrets and is safe to commit.
+- **The IRC bridge is identical** — copy the unit, swap the three names
+  (`Description`, the binary in `ExecStart`, and `discord_bridge.ini` →
+  `irc_bridge.ini`). The IRC bridge has no token, so it doesn't need `.env`.
+- **`Restart=always`** covers a hard crash; the bridge's own reconnect loop
+  (5s default, `reconnect_delay_seconds`) covers a dropped link without a
+  process restart.
+- Adjust `User`/`Group`/paths if your install isn't the standard `sbbs` layout
+  under `/sbbs/xtrn/`.
+
+---
+
 ## Verifying the install
 
 A short checklist after first launch:

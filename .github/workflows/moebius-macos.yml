@@ -34,7 +34,7 @@ jobs:
         env:
           # No signing identity in CI; skip code signing so the build succeeds.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npm run build-mac
+        run: npm run build-mac -- --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: Moebius-macos-dmg

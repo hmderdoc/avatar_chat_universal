@@ -15,27 +15,21 @@ fileAssociations:
   - ext: .ans
     name: ANSI Art
     role: Editor
-    icon: document_icon.icns
   - ext: .bin
     name: Binary Text
     role: Editor
-    icon: document_icon.icns
   - ext: .xb
     name: XBin
     role: Editor
-    icon: document_icon.icns
   - ext: .diz
     name: Description in Zip File
     role: Editor
-    icon: document_icon.icns
   - ext: .nfo
     name: Release Information
     role: Editor
-    icon: document_icon.icns
   - ext: .asc
     name: ASCII Art
     role: Editor
-    icon: document_icon.icns
 mac:
   artifactName: Moebius.dmg
   category: public.app-category.graphics-design

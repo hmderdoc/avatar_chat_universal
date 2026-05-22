@@ -210,67 +210,154 @@ class ChatUI extends events.EventEmitter {
         }
     }
 
-    // Small portrait canvas for a base64 avatar, or null if absent/invalid.
-    avatar_element(base64) {
+    // Portrait canvas for a base64 avatar at the given pixel height, or null.
+    avatar_canvas(base64, height_px) {
         const canvas = this.render_blocks_canvas(avatar_codec.avatar_to_blocks(base64));
         if (!canvas) return null;
         canvas.classList.add("avatar");
-        canvas.style.height = "30px";
+        canvas.style.height = `${height_px}px`;
         canvas.style.width = "auto";
-        canvas.style.imageRendering = "pixelated";
-        canvas.style.verticalAlign = "middle";
-        canvas.style.marginRight = "6px";
         return canvas;
     }
 
-    // Inline artwork element for a [BITMAP|...] message. Falls back to a text
-    // placeholder when the font isn't ready (history replay).
+    // Coloured square with the nick's initial, used when there's no avatar.
+    initial_square(nick, size_px) {
+        const el = this.create_div({classname: "avatar-initial"});
+        el.style.width = el.style.height = el.style.lineHeight = `${size_px}px`;
+        el.style.fontSize = `${Math.floor(size_px * 0.5)}px`;
+        el.style.background = nick ? this.nick_color(nick) : "#555555";
+        const trimmed = (nick || "").trim();
+        el.innerText = trimmed ? trimmed[0].toUpperCase() : "?";
+        return el;
+    }
+
+    // Left gutter: the sender's avatar, or an initial square fallback.
+    gutter_element(nick, avatar, size_px) {
+        const gutter = this.create_div({classname: "msg-gutter"});
+        const canvas = avatar ? this.avatar_canvas(avatar, size_px) : null;
+        gutter.appendChild(canvas || this.initial_square(nick, size_px));
+        return gutter;
+    }
+
+    // Inline artwork canvas for a [BITMAP|...] message; text placeholder if the
+    // font isn't ready yet (history replay).
     art_element(text) {
         const blocks = avatar_codec.decode_bitmap(text);
-        if (!blocks) return this.create_div({classname: "text", text});
+        if (!blocks) return this.create_div({classname: "msg-text", text});
         const canvas = this.render_blocks_canvas(blocks);
-        if (!canvas) return this.create_div({classname: "text", text: `[art ${blocks.columns}x${blocks.rows}${blocks.from ? " by " + blocks.from : ""}]`});
+        if (!canvas) return this.create_div({classname: "msg-text", text: `[art ${blocks.columns}x${blocks.rows}${blocks.from ? " by " + blocks.from : ""}]`});
         canvas.classList.add("art");
-        canvas.style.maxWidth = "100%";
-        canvas.style.height = "auto";
-        canvas.style.imageRendering = "pixelated";
-        canvas.style.display = "block";
-        canvas.style.marginTop = "3px";
         canvas.title = blocks.from ? `art by ${blocks.from} (${blocks.columns}x${blocks.rows})` : `art (${blocks.columns}x${blocks.rows})`;
         return canvas;
+    }
+
+    // Classify a URL so we can embed images/audio inline like other clients.
+    media_kind(url) {
+        const u = url.split(/[?#]/)[0].toLowerCase();
+        if (/\.(png|jpe?g|gif|webp|bmp|avif|svg)$/.test(u)) return "image";
+        if (/\.(mp3|ogg|oga|wav|m4a|aac|flac|opus)$/.test(u)) return "audio";
+        return "link";
+    }
+
+    // Message body: BITMAP art, or linkified text plus any image/audio embeds.
+    body_element(text) {
+        const body = this.create_div({classname: "msg-body"});
+        if (avatar_codec.is_bitmap(text)) {
+            body.appendChild(this.art_element(text));
+            return body;
+        }
+        body.appendChild(this.create_div({classname: "msg-text", text, linkify: true}));
+        const urls = text.match(/(https?:\/\/[^\s<>"']+)/gi) || [];
+        const seen = {};
+        let embeds = 0;
+        for (const url of urls) {
+            if (seen[url] || embeds >= 4) continue;
+            seen[url] = true;
+            const kind = this.media_kind(url);
+            if (kind === "image") {
+                const img = document.createElement("img");
+                img.className = "embed-img";
+                img.loading = "lazy";
+                img.src = url;
+                img.addEventListener("load", () => scroll_to_bottom());
+                img.addEventListener("error", () => img.remove());
+                img.addEventListener("click", () => electron.shell.openExternal(url));
+                body.appendChild(img);
+                embeds++;
+            } else if (kind === "audio") {
+                const audio = document.createElement("audio");
+                audio.className = "embed-audio";
+                audio.controls = true;
+                audio.preload = "none";
+                audio.src = url;
+                audio.addEventListener("error", () => audio.remove());
+                body.appendChild(audio);
+                embeds++;
+            }
+        }
+        return body;
     }
 
     // Stable colour per nick so the eye can track speakers.
     nick_color(nick) {
         let h = 0;
-        for (let i = 0; i < nick.length; i++) h = (h * 31 + nick.charCodeAt(i)) & 0xffff;
+        for (let i = 0; i < (nick || "").length; i++) h = (h * 31 + nick.charCodeAt(i)) & 0xffff;
         return `hsl(${h % 360}, 70%, 66%)`;
     }
 
     chat(id, nick, group, text, time, avatar) {
-        if (this.users[id] && (this.users[id] != nick || this.users[id].group != group)) {
+        if (this.users[id] && (this.users[id].nick != nick || this.users[id].group != group)) {
             this.users[id].nick = nick;
             this.users[id].group = group;
             this.users[id].element.innerText = group ? `${nick} <${group}>` : nick;
         }
-        const nick_div = this.create_div({classname: "nick", text: group ? `${nick} <${group}>` : nick});
+        if (nick && avatar) this.remote_avatars[nick] = avatar; // enrich the WHO roster
+        if (time) this.update_date(time);
+
+        const container = this.create_div({classname: "message"});
+        container.appendChild(this.gutter_element(nick, avatar, 40));
+
+        const main = this.create_div({classname: "msg-main"});
+        const header = this.create_div({classname: "msg-header"});
+        const nick_div = this.create_div({classname: "nick", text: nick || "?"});
         if (nick) nick_div.style.color = this.nick_color(nick);
-        const container = this.create_div();
+        header.appendChild(nick_div);
+        if (group) header.appendChild(this.create_div({classname: "system", text: group}));
         if (time) {
-            this.update_date(time);
             const date = new Date(time);
             const time_text = `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
-            container.appendChild(this.create_div({classname: "time", text: time_text}));
+            header.appendChild(this.create_div({classname: "time", text: time_text}));
         }
-        const avatar_el = avatar ? this.avatar_element(avatar) : null;
-        if (avatar_el) container.appendChild(avatar_el);
-        container.appendChild(nick_div);
-        if (avatar_codec.is_bitmap(text)) {
-            container.appendChild(this.art_element(text));
-        } else {
-            container.appendChild(this.create_div({classname: "text", text, linkify: true}));
-        }
+        main.appendChild(header);
+        main.appendChild(this.body_element(text));
+        container.appendChild(main);
         this.append(container, false);
+    }
+
+    // Render the Avatar Chat channel roster (from WHO) into the user list, with
+    // avatars where we've seen them. Kept in its own block below the Moebius
+    // collaborators so the two rosters stay visually distinct.
+    set_avatar_roster(users) {
+        if (!Array.isArray(users)) users = [];
+        if (!this.roster_el) {
+            this.roster_el = this.create_div({classname: "avatar-roster"});
+            $("user_list").appendChild(this.roster_el);
+        }
+        const container = this.roster_el;
+        while (container.firstChild) container.removeChild(container.lastChild);
+        if (!users.length) return;
+        container.appendChild(this.create_div({classname: "roster-header", text: `Avatar Chat (${users.length})`}));
+        for (const u of users) {
+            const row = this.create_div({classname: "roster-user"});
+            const portrait = u.avatar || this.remote_avatars[u.nick];
+            const canvas = portrait ? this.avatar_canvas(portrait, 18) : null;
+            row.appendChild(canvas || this.initial_square(u.nick, 18));
+            const name = this.create_div({classname: "rname", text: u.nick});
+            if (u.nick) name.style.color = this.nick_color(u.nick);
+            row.appendChild(name);
+            if (u.system) row.appendChild(this.create_div({classname: "rsys", text: u.system}));
+            container.appendChild(row);
+        }
     }
 
     mouse_down(event) {
@@ -298,6 +385,8 @@ class ChatUI extends events.EventEmitter {
         super();
         this.mouse_button = false;
         this.users = {};
+        this.remote_avatars = {}; // nick -> base64 avatar, seen in messages
+        this.roster_el = null;    // Avatar Chat WHO block inside #user_list
         document.addEventListener("DOMContentLoaded", (event) => {
             $("chat_input").addEventListener("focus", chat_input_focus, true);
             $("chat_input").addEventListener("blur", chat_input_blur, true);

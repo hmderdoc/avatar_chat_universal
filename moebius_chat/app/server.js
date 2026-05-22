@@ -1,6 +1,6 @@
 const ws = require("ws");
 const libtextmode = require("./libtextmode/libtextmode");
-const action =  {CONNECTED: 0, REFUSED: 1, JOIN: 2, LEAVE: 3, CURSOR: 4, SELECTION: 5, RESIZE_SELECTION: 6, OPERATION: 7, HIDE_CURSOR: 8, DRAW: 9, CHAT: 10, STATUS: 11, SAUCE: 12, ICE_COLORS: 13, USE_9PX_FONT: 14, CHANGE_FONT: 15, SET_CANVAS_SIZE: 16, SET_BG: 21};
+const action =  {CONNECTED: 0, REFUSED: 1, JOIN: 2, LEAVE: 3, CURSOR: 4, SELECTION: 5, RESIZE_SELECTION: 6, OPERATION: 7, HIDE_CURSOR: 8, DRAW: 9, CHAT: 10, STATUS: 11, SAUCE: 12, ICE_COLORS: 13, USE_9PX_FONT: 14, CHANGE_FONT: 15, SET_CANVAS_SIZE: 16, SET_BG: 21, AVATAR_ROSTER: 22};
 const status_types = {ACTIVE: 0, IDLE: 1, AWAY: 2, WEB: 3};
 const os = require("os");
 const url = require("url");
@@ -107,7 +107,7 @@ class Joint {
                     send(ws, action.CONNECTED, {id, doc: libtextmode.compress(this.doc)});
                     this.log("web joined", ip);
                 } else {
-                    send(ws, action.CONNECTED, {id, doc: libtextmode.compress(this.doc), users, chat_history: this.chat_history, status: status_types.ACTIVE});
+                    send(ws, action.CONNECTED, {id, doc: libtextmode.compress(this.doc), users, chat_history: this.chat_history, avatar_roster: this.avatar_roster, status: status_types.ACTIVE});
                     this.log(`${msg.data.nick} has joined`, ip);
                     if (this.webhook) this.discord_join(msg.data.nick);
                 }
@@ -189,10 +189,18 @@ class Joint {
             label: os.hostname(),
         });
         avatar_chat.on("message", ({nick, text, system, avatar}) => this.inject_chat(nick, text, system, avatar));
+        avatar_chat.on("roster", (users) => this.set_avatar_roster(users));
         avatar_chat.on("open", () => this.log(`avatar-chat: connected to ${host}`, "avatar-chat"));
         avatar_chat.on("error", (err) => this.log(`avatar-chat: ${err.message}`, "avatar-chat"));
         avatar_chat.connect();
         return avatar_chat;
+    }
+
+    // Store the Avatar Chat channel roster and push it to every Moebius client
+    // so it can be shown (with avatars) in the WHO list.
+    set_avatar_roster(users) {
+        this.avatar_roster = Array.isArray(users) ? users : [];
+        this.send_all_including_self(action.AVATAR_ROSTER, {users: this.avatar_roster});
     }
 
     constructor({path, file, pass, quiet = false, discord, avatar_chat = ""}) {
@@ -203,6 +211,7 @@ class Joint {
         this.webhook = (discord == "") ? undefined : new WebhookClient({ url: discord });
         this.data_store = [];
         this.chat_history = [];
+        this.avatar_roster = []; // users present on the Avatar Chat channel
         this.avatar_chat = this.start_avatar_chat(avatar_chat);
         hourly_saver = new HourlySaver();
         hourly_saver.start();

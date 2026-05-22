@@ -4,7 +4,7 @@ const events = require("events");
 const chat = require("./ui/chat");
 const path = require("path");;
 let doc, render;
-const actions =  {CONNECTED: 0, REFUSED: 1, JOIN: 2, LEAVE: 3, CURSOR: 4, SELECTION: 5, RESIZE_SELECTION: 6, OPERATION: 7, HIDE_CURSOR: 8, DRAW: 9, CHAT: 10, STATUS: 11, SAUCE: 12, ICE_COLORS: 13, USE_9PX_FONT: 14, CHANGE_FONT: 15, SET_CANVAS_SIZE: 16, PASTE_AS_SELECTION: 17, ROTATE: 18, FLIP_X: 19, FLIP_Y: 20, SET_BG: 21};
+const actions =  {CONNECTED: 0, REFUSED: 1, JOIN: 2, LEAVE: 3, CURSOR: 4, SELECTION: 5, RESIZE_SELECTION: 6, OPERATION: 7, HIDE_CURSOR: 8, DRAW: 9, CHAT: 10, STATUS: 11, SAUCE: 12, ICE_COLORS: 13, USE_9PX_FONT: 14, CHANGE_FONT: 15, SET_CANVAS_SIZE: 16, PASTE_AS_SELECTION: 17, ROTATE: 18, FLIP_X: 19, FLIP_Y: 20, SET_BG: 21, AVATAR_ROSTER: 22};
 const statuses = {ACTIVE: 0, IDLE: 1, AWAY: 2, WEB: 3};
 const modes = {EDITING: 0, SELECTION: 1, OPERATION: 2};
 let nick, group;
@@ -219,6 +219,7 @@ class Connection extends events.EventEmitter {
                 this.status = data.status;
                 this.users = {};
                 chat.welcome(data.doc.comments, data.chat_history);
+                chat.set_avatar_roster(data.avatar_roster || []);
                 for (const user of data.users) this.join(user.id, user.nick, user.group, user.status, false);
                 this.join(data.id, nick, group, data.status);
                 this.ready = true;
@@ -271,6 +272,9 @@ class Connection extends events.EventEmitter {
                     // in from Avatar Chat arrive with id -1 (no roster slot), and
                     // chat.chat() already guards its own users[] lookup.
                     chat.chat(data.id, data.nick, data.group, data.text, data.time, data.avatar);
+                    break;
+                case actions.AVATAR_ROSTER:
+                    chat.set_avatar_roster(data.users);
                     break;
                 case actions.STATUS:
                     if (user) chat.status(data.id, data.status);

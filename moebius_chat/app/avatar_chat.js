@@ -29,6 +29,7 @@ const events = require("events");
 
 const MAX_PACKET = 131072; // json-sock.js Socket.prototype.max_recv
 const RECONNECT_MS = 5000;
+const WHO_INTERVAL_MS = 15000; // how often we poll the channel roster
 
 // Strip the control bytes json-chat.js Message() removes, plus ESC (0x1b):
 // these lines are rendered on CP437 BBS terminals downstream where a stray
@@ -60,25 +61,36 @@ class AvatarChat extends events.EventEmitter {
         this.host = host;
         this.port = port;
         this.channel = channel;
+        this.label = label;
         this.default_nick = nick;
         // Our origin marker. Lowercased to match bridgecore.cleanPart so the
         // comparison against our own echo is exact.
         this.origin = `BRIDGE:moebius:${String(label).toLowerCase()}/${String(channel).toLowerCase()}`;
+        // Presence identity for the channel roster (WHO). Lets the bridge show
+        // up as "Moebius" rather than a raw IP, and lets us filter ourselves
+        // out of the roster we report.
+        this.presence_nick = nick;
+        // nick -> base64 avatar, learned from messages; used to give the WHO
+        // roster portraits (WHO itself only returns names).
+        this.avatarByNick = Object.create(null);
         this.buffer = "";
         this.socket = undefined;
         this.closed = false;
+        this.whoTimer = undefined;
     }
 
     connect() {
         this.closed = false;
         const socket = net.createConnection({host: this.host, port: this.port}, () => {
             this._subscribe();
+            this._start_who_poll();
             this.emit("open");
         });
         socket.setEncoding("utf8");
         socket.on("data", (chunk) => this._on_data(chunk));
         socket.on("error", (err) => this.emit("error", err));
         socket.on("close", () => {
+            this._stop_who_poll();
             this.socket = undefined;
             this.emit("close");
             if (!this.closed) setTimeout(() => this.connect(), RECONNECT_MS);
@@ -88,6 +100,7 @@ class AvatarChat extends events.EventEmitter {
 
     close() {
         this.closed = true;
+        this._stop_who_poll();
         if (this.socket) {
             this._send({scope: "chat", func: "QUERY", oper: "UNSUBSCRIBE", location: this._loc("messages"), timeout: -1});
             this.socket.end();
@@ -106,7 +119,48 @@ class AvatarChat extends events.EventEmitter {
     }
 
     _subscribe() {
-        this._send({scope: "chat", func: "QUERY", oper: "SUBSCRIBE", location: this._loc("messages"), timeout: -1});
+        // Carry our presence identity so the channel roster shows "Moebius"
+        // (the server records the subscriber's nick from this packet).
+        this._send({scope: "chat", func: "QUERY", oper: "SUBSCRIBE", location: this._loc("messages"), nick: this.presence_nick, system: this.label, timeout: -1});
+    }
+
+    _start_who_poll() {
+        this._stop_who_poll();
+        this._who(); // ask right away so the roster fills promptly
+        this.whoTimer = setInterval(() => this._who(), WHO_INTERVAL_MS);
+    }
+
+    _stop_who_poll() {
+        if (this.whoTimer) {
+            clearInterval(this.whoTimer);
+            this.whoTimer = undefined;
+        }
+    }
+
+    _who() {
+        this._send({scope: "chat", func: "QUERY", oper: "WHO", location: this._loc("messages"), timeout: -1});
+    }
+
+    // Build a roster from a WHO response. The server returns either a bare
+    // [name] array (our Go server) or [{nick, system}] (Synchronet json-db).
+    // We drop our own presence entry and attach any avatar we've seen.
+    _handle_who(data) {
+        if (!Array.isArray(data)) return;
+        const users = [];
+        for (const entry of data) {
+            let nick = "";
+            let system = "";
+            if (typeof entry === "string") {
+                nick = entry;
+            } else if (entry && typeof entry === "object") {
+                nick = entry.nick || entry.name || "";
+                system = entry.system || "";
+            }
+            if (!nick) continue;
+            if (nick === this.presence_nick) continue; // that's us (the bridge)
+            users.push({nick, system, avatar: this.avatarByNick[nick] || ""});
+        }
+        this.emit("roster", users);
     }
 
     // Forward a chat line from a Moebius user out to Avatar Chat. `avatar` is
@@ -148,14 +202,20 @@ class AvatarChat extends events.EventEmitter {
             this._send({scope: "SOCKET", func: "PONG", data: Date.now()});
             return;
         }
-        if (func !== "UPDATE") return; // PONG, RESPONSE, ERROR: nothing to do here
-        if ((packet.oper || "").toUpperCase() !== "WRITE") return; // SUBSCRIBE/UNSUBSCRIBE join/leave noise
+        const oper = (packet.oper || "").toUpperCase();
+        if (func === "RESPONSE") {
+            if (oper === "WHO") this._handle_who(packet.data);
+            return; // other RESPONSE acks (WRITE/PUSH): nothing to do
+        }
+        if (func !== "UPDATE") return; // PONG, ERROR: nothing to do here
+        if (oper !== "WRITE") return; // SUBSCRIBE/UNSUBSCRIBE join/leave noise
         const msg = packet.data;
         if (!msg || typeof msg.str !== "string") return;
         const host = (msg.nick && msg.nick.host) ? msg.nick.host : "";
         if (host === this.origin) return; // our own echo
         const name = (msg.nick && msg.nick.name) ? msg.nick.name : "";
         const avatar = (msg.nick && typeof msg.nick.avatar === "string") ? msg.nick.avatar : "";
+        if (name && avatar) this.avatarByNick[name] = avatar; // for the WHO roster
         this.emit("message", {nick: name, text: msg.str, system: origin_label(host), avatar});
     }
 }

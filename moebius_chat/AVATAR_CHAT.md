@@ -14,11 +14,20 @@ into the Avatar Chat ecosystem. Three phases from `objective.MD` are implemented
    the existing ecosystem convention (the JS door and Go bridges already decode
    it), so terminal users and bridges render it too. The encoder is byte-for-byte
    compatible with `internal/bitmap/bitmap.go` (cross-checked).
-3. **Rich chat** — the chat panel renders sender **avatars** (10×6 CP437 blocks)
-   and inline **art** (`[BITMAP]` messages) using Moebius's own font, and colours
-   each nick. Set your avatar with File ▸ Set Avatar from Canvas (uses the
-   top-left 10×6 of the current canvas; persisted in the renderer's localStorage
-   and attached to your outgoing messages on `message.nick.avatar`).
+3. **Rich chat** — a Discord-style layout: a 40px avatar gutter (portrait, or a
+   coloured initial), a content column with a `nick · system · time` header, and
+   a full-width body below (so the nick no longer shoves art to the right).
+   Renders sender **avatars** and inline **art** (`[BITMAP]`) via Moebius's own
+   font, plus inline **image and audio embeds** for media URLs in a message, and
+   colours each nick. Set your avatar with File ▸ Set Avatar from Canvas (top-left
+   10×6 of the canvas; persisted in localStorage; rides on `message.nick.avatar`).
+4. **WHO list with avatars** — the connector polls the channel roster with the
+   protocol's `WHO` and shows present Avatar-Chat users (with portraits, where
+   we've seen them) in a block below the Moebius collaborators in the user list.
+   The bridge itself presents as "Moebius" on the channel and is filtered out of
+   the list. (Roster avatars come from messages we've seen; `WHO` only returns
+   names. Showing each Moebius user individually on the avatar-chat side is the
+   bigger published-presence follow-up, not done yet.)
 
 ## Architecture (server-side mirror)
 

@@ -1,0 +1,62 @@
+directories:
+  output: dist
+  buildResources: build
+appId: org.andyherbert.moebius
+productName: Moebius
+copyright: Copyright © 2022 Andy Herbert
+extraResources:
+  - from: build/ans
+    to: ans
+    filter: "*.ans"
+  - from: build/png
+    to: png
+    filter: "*.png"
+fileAssociations:
+  - ext: .ans
+    name: ANSI Art
+    role: Editor
+    icon: document_icon.icns
+  - ext: .bin
+    name: Binary Text
+    role: Editor
+    icon: document_icon.icns
+  - ext: .xb
+    name: XBin
+    role: Editor
+    icon: document_icon.icns
+  - ext: .diz
+    name: Description in Zip File
+    role: Editor
+    icon: document_icon.icns
+  - ext: .nfo
+    name: Release Information
+    role: Editor
+    icon: document_icon.icns
+  - ext: .asc
+    name: ASCII Art
+    role: Editor
+    icon: document_icon.icns
+mac:
+  artifactName: Moebius.dmg
+  category: public.app-category.graphics-design
+  target:
+  - target: dmg
+    arch: [universal]
+  darkModeSupport: true
+win:
+  artifactName: Moebius.Setup.exe
+  target:
+  - target: nsis
+    arch: [x64, ia32]
+  - target: portable
+    arch: [x64, ia32]
+portable:
+  artifactName: Moebius.exe
+linux:
+  artifactName: Moebius.${ext}
+  target:
+  - target: appImage
+  - target: snap
+  description: Moebius is a new ANSI and ASCII Editor for Linux, MacOS, and Windows. The major feature that differentiates it from PabloDraw is the 'half-block' brush which allows editing in a style closer to Photoshop than a text editor, although you can still use the function and cursor keys to draw with, and you should find that most of the text editing features from PabloDraw are carried over to this editor.
+  category: Graphics
+electronVersion: 18.2.0

@@ -1,0 +1,42 @@
+# Builds the vendored Moebius editor (moebius_chat/, with the Avatar Chat
+# integration) into a macOS .dmg on a mac runner and uploads it as a workflow
+# artifact. Runs on demand (workflow_dispatch) and whenever moebius_chat/
+# changes on main. The .dmg is unsigned (no certs in CI): first launch needs
+#   xattr -dr com.apple.quarantine /Applications/Moebius.app
+# To ship signed/notarized builds later, add CSC_LINK / CSC_KEY_PASSWORD (and
+# APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID) repo secrets and drop
+# the CSC_IDENTITY_AUTO_DISCOVERY override below.
+
+name: moebius-macos
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'moebius_chat/**'
+      - '.github/workflows/moebius-macos.yml'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: moebius_chat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install
+      - name: Build macOS .dmg
+        env:
+          # No signing identity in CI; skip code signing so the build succeeds.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run build-mac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Moebius-macos-dmg
+          path: moebius_chat/dist/*.dmg
+          if-no-files-found: error

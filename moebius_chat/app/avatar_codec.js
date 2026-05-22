@@ -70,6 +70,17 @@ function blocks_to_avatar(blocks) {
 
 const BITMAP_PREFIX = "[BITMAP|";
 
+// Moebius stores colours in VGA/CGA index order (1=blue, 4=red, 3=cyan,
+// 6=brown). The BITMAP wire format indexes the xterm/ANSI palette (1=red,
+// 4=blue, 3=yellow, 6=cyan) — that's what the Go bridge renders with
+// (internal/media/render.go palette256[0..15]) and what the chat web client
+// uses. So we permute the low 16 indices when crossing the boundary. The
+// table swaps 1<->4 and 3<->6 (and the bright pair +8), which makes it its
+// own inverse, so the same map applies both encoding and decoding. Extended
+// 16..255 indices pass through unchanged.
+const PAL_SWAP = [0, 4, 2, 6, 1, 5, 3, 7, 8, 12, 10, 14, 9, 13, 11, 15];
+function swap_palette(i) { return i < 16 ? PAL_SWAP[i] : i; }
+
 function is_bitmap(str) {
     return typeof str === "string" && str.indexOf(BITMAP_PREFIX) === 0 && str.charAt(str.length - 1) === "]" && str.length > BITMAP_PREFIX.length + 1;
 }
@@ -93,8 +104,8 @@ function encode_bitmap(doc, from) {
     payload[0] = rows;
     for (let i = 0; i < N; i++) {
         const cell = doc.data[i] || {code: 32, fg: 7, bg: 0};
-        payload[1 + i] = (cell.fg || 0) & 0xff;
-        payload[1 + N + i] = (cell.bg || 0) & 0xff;
+        payload[1 + i] = swap_palette((cell.fg || 0) & 0xff);
+        payload[1 + N + i] = swap_palette((cell.bg || 0) & 0xff);
         let code = (cell.code == null ? 32 : cell.code) & 0xff;
         payload[1 + 2 * N + i] = code;
     }
@@ -147,8 +158,8 @@ function decode_bitmap(str) {
         if (code === 0) code = 32;
         data[y * width + x] = {
             code,
-            fg: decompressed[1 + i] || 0,
-            bg: decompressed[1 + slice + i] || 0,
+            fg: swap_palette(decompressed[1 + i] || 0),
+            bg: swap_palette(decompressed[1 + slice + i] || 0),
         };
     }
     return {columns: width, rows: height, from, data};

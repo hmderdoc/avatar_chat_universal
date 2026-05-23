@@ -21,13 +21,18 @@ into the Avatar Chat ecosystem. Three phases from `objective.MD` are implemented
    font, plus inline **image and audio embeds** for media URLs in a message, and
    colours each nick. Set your avatar with File ▸ Set Avatar from Canvas (top-left
    10×6 of the canvas; persisted in localStorage; rides on `message.nick.avatar`).
-4. **WHO list with avatars** — the connector polls the channel roster with the
-   protocol's `WHO` and shows present Avatar-Chat users (with portraits, where
-   we've seen them) in a block below the Moebius collaborators in the user list.
-   The bridge itself presents as "Moebius" on the channel and is filtered out of
-   the list. (Roster avatars come from messages we've seen; `WHO` only returns
-   names. Showing each Moebius user individually on the avatar-chat side is the
-   bigger published-presence follow-up, not done yet.)
+4. **Per-user presence (both directions)** — the connector opens one TCP
+   connection *per Moebius user*, subscribed under that user's nick, so each
+   Moebius user shows up as a real participant joining/leaving the Avatar Chat
+   channel (in the door, web client, other bridges). One connection is the
+   "receiver" that reads inbound messages and polls `WHO`. The user list shows
+   present Avatar-Chat users with portraits (merged from `WHO` plus recent
+   speakers, so it populates even when `WHO` is sparse), excluding our own
+   Moebius users (already listed as collaborators).
+5. **Robust avatar/art rendering** — the chat panel loads its own CP437 font at
+   startup, independent of the editor's render pipeline, so the connect-time
+   backlog renders portraits/art too (not just live messages); anything drawn
+   before the font finishes loading is swapped in when it does.
 
 ## Architecture (server-side mirror)
 

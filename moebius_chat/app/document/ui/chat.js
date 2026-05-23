@@ -4,6 +4,8 @@ const statuses = {ACTIVE: 0, IDLE: 1, AWAY: 2, WEB: 3};
 const electron = require("electron");
 const {send} = require("../../senders");
 const avatar_codec = require("../../avatar_codec");
+const libtextmode = require("../../libtextmode/libtextmode");
+const {Font} = require("../../libtextmode/font");
 const linkify_string = require("linkify-string");
 require("linkify-plugin-ticket");
 let last_height = 240;
@@ -197,30 +199,64 @@ class ChatUI extends events.EventEmitter {
     // font is available yet (e.g. during the initial history replay, before
     // the canvas has rendered). Palette indices are clamped to the 16-colour
     // font so 256-colour BITMAPs degrade instead of throwing.
-    render_blocks_canvas(blocks) {
+    // Load chat's own CP437 font once, then re-render anything that was waiting.
+    // Decoupled from the editor's render pipeline so backlog (replayed on
+    // connect, before the canvas renders) and live messages both draw avatars
+    // and art instead of falling back to placeholders.
+    load_chat_font() {
+        this.font = new Font();
+        this.font.load({name: "IBM VGA", use_9px_font: false}).then(() => {
+            this.font_loaded = true;
+            this.flush_pending();
+        }).catch(() => { this.font = null; });
+    }
+
+    // Render a libtextmode "blocks" object to a canvas with chat's font, or null
+    // if the font hasn't loaded yet. Palette indices are clamped to the 16-colour
+    // font so 256-colour BITMAPs degrade instead of throwing.
+    cp437_canvas(blocks) {
+        if (!this.font_loaded || !this.font || !blocks || !blocks.data) return null;
         try {
-            const doc = require("../doc");
-            const libtextmode = require("../../libtextmode/libtextmode");
-            const font = doc.font;
-            if (!font || !blocks || !blocks.data) return null;
             const data = blocks.data.map((c) => ({code: (c.code || 0) & 0xff, fg: (c.fg || 0) & 0x0f, bg: (c.bg || 0) & 0x0f}));
-            return libtextmode.render_blocks({columns: blocks.columns, rows: blocks.rows, data}, font, doc.c64_background);
+            return libtextmode.render_blocks({columns: blocks.columns, rows: blocks.rows, data}, this.font, undefined);
         } catch (e) {
             return null;
         }
     }
 
-    // Portrait canvas for a base64 avatar at the given pixel height, or null.
-    avatar_canvas(base64, height_px) {
-        const canvas = this.render_blocks_canvas(avatar_codec.avatar_to_blocks(base64));
-        if (!canvas) return null;
-        canvas.classList.add("avatar");
-        canvas.style.height = `${height_px}px`;
-        canvas.style.width = "auto";
+    style_canvas(canvas, kind, height_px) {
+        if (kind === "avatar") {
+            canvas.classList.add("avatar");
+            canvas.style.height = `${height_px}px`;
+            canvas.style.width = "auto";
+        } else {
+            canvas.classList.add("art");
+        }
         return canvas;
     }
 
-    // Coloured square with the nick's initial, used when there's no avatar.
+    // Render now if the font is ready; otherwise return `placeholder` and queue
+    // it to be swapped for the real canvas once the font loads.
+    deferred_canvas(blocks, kind, height_px, placeholder) {
+        const canvas = this.cp437_canvas(blocks);
+        if (canvas) return this.style_canvas(canvas, kind, height_px);
+        this.pending.push({holder: placeholder, blocks, kind, height_px});
+        return placeholder;
+    }
+
+    flush_pending() {
+        const items = this.pending.splice(0);
+        for (const it of items) {
+            const canvas = this.cp437_canvas(it.blocks);
+            if (!canvas || !it.holder.parentNode) continue;
+            this.style_canvas(canvas, it.kind, it.height_px);
+            it.holder.parentNode.replaceChild(canvas, it.holder);
+        }
+        scroll_to_bottom();
+    }
+
+    // Coloured square with the nick's initial; the no-avatar fallback, and the
+    // placeholder a real avatar swaps into once the font loads.
     initial_square(nick, size_px) {
         const el = this.create_div({classname: "avatar-initial"});
         el.style.width = el.style.height = el.style.lineHeight = `${size_px}px`;
@@ -231,31 +267,32 @@ class ChatUI extends events.EventEmitter {
         return el;
     }
 
-    // Left gutter: the sender's avatar, or an initial square fallback.
+    // Left gutter: the sender's avatar (or an initial square it swaps into).
     gutter_element(nick, avatar, size_px) {
         const gutter = this.create_div({classname: "msg-gutter"});
-        const canvas = avatar ? this.avatar_canvas(avatar, size_px) : null;
-        gutter.appendChild(canvas || this.initial_square(nick, size_px));
+        const square = this.initial_square(nick, size_px);
+        const blocks = avatar ? avatar_codec.avatar_to_blocks(avatar) : null;
+        gutter.appendChild(blocks ? this.deferred_canvas(blocks, "avatar", size_px, square) : square);
         return gutter;
     }
 
-    // Inline artwork canvas for a [BITMAP|...] message; text placeholder if the
-    // font isn't ready yet (history replay).
+    // Inline artwork for a [BITMAP|...] message.
     art_element(text) {
         const blocks = avatar_codec.decode_bitmap(text);
         if (!blocks) return this.create_div({classname: "msg-text", text});
-        const canvas = this.render_blocks_canvas(blocks);
-        if (!canvas) return this.create_div({classname: "msg-text", text: `[art ${blocks.columns}x${blocks.rows}${blocks.from ? " by " + blocks.from : ""}]`});
-        canvas.classList.add("art");
-        canvas.title = blocks.from ? `art by ${blocks.from} (${blocks.columns}x${blocks.rows})` : `art (${blocks.columns}x${blocks.rows})`;
-        return canvas;
+        const label = `[art ${blocks.columns}x${blocks.rows}${blocks.from ? " by " + blocks.from : ""}]`;
+        const el = this.deferred_canvas(blocks, "art", 0, this.create_div({classname: "msg-text", text: label}));
+        if (el.tagName === "CANVAS") el.title = blocks.from ? `art by ${blocks.from} (${blocks.columns}x${blocks.rows})` : `art (${blocks.columns}x${blocks.rows})`;
+        return el;
     }
 
-    // Classify a URL so we can embed images/audio inline like other clients.
+    // Classify a URL so we can embed images/audio inline. Matches the Go
+    // bridges (internal/bridgemedia/media.go): the extension can appear anywhere,
+    // including a Synchronet-style ?file=name.mp3 query param, not just the path.
     media_kind(url) {
-        const u = url.split(/[?#]/)[0].toLowerCase();
-        if (/\.(png|jpe?g|gif|webp|bmp|avif|svg)$/.test(u)) return "image";
-        if (/\.(mp3|ogg|oga|wav|m4a|aac|flac|opus)$/.test(u)) return "audio";
+        const u = url.toLowerCase();
+        for (const ext of [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".avif"]) if (u.indexOf(ext) >= 0) return "image";
+        for (const ext of [".mp3", ".ogg", ".oga", ".wav", ".m4a", ".aac", ".flac", ".opus"]) if (u.indexOf(ext) >= 0) return "audio";
         return "link";
     }
 
@@ -350,8 +387,9 @@ class ChatUI extends events.EventEmitter {
         for (const u of users) {
             const row = this.create_div({classname: "roster-user"});
             const portrait = u.avatar || this.remote_avatars[u.nick];
-            const canvas = portrait ? this.avatar_canvas(portrait, 18) : null;
-            row.appendChild(canvas || this.initial_square(u.nick, 18));
+            const square = this.initial_square(u.nick, 18);
+            const blocks = portrait ? avatar_codec.avatar_to_blocks(portrait) : null;
+            row.appendChild(blocks ? this.deferred_canvas(blocks, "avatar", 18, square) : square);
             const name = this.create_div({classname: "rname", text: u.nick});
             if (u.nick) name.style.color = this.nick_color(u.nick);
             row.appendChild(name);
@@ -387,6 +425,10 @@ class ChatUI extends events.EventEmitter {
         this.users = {};
         this.remote_avatars = {}; // nick -> base64 avatar, seen in messages
         this.roster_el = null;    // Avatar Chat WHO block inside #user_list
+        this.font = null;         // chat's own CP437 font for avatars/art
+        this.font_loaded = false;
+        this.pending = [];        // canvases waiting for the font to load
+        this.load_chat_font();
         document.addEventListener("DOMContentLoaded", (event) => {
             $("chat_input").addEventListener("focus", chat_input_focus, true);
             $("chat_input").addEventListener("blur", chat_input_blur, true);

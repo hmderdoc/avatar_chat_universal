@@ -110,6 +110,7 @@ class Joint {
                     send(ws, action.CONNECTED, {id, doc: libtextmode.compress(this.doc), users, chat_history: this.chat_history, avatar_roster: this.avatar_roster, status: status_types.ACTIVE});
                     this.log(`${msg.data.nick} has joined`, ip);
                     if (this.webhook) this.discord_join(msg.data.nick);
+                    if (this.avatar_chat) this.avatar_chat.add_user(id, msg.data.nick, this.hostname);
                 }
                 this.send_all(ws, action.JOIN, {id, nick: msg.data.nick, group: msg.data.group, status: (msg.data.nick == undefined) ? status_types.WEB : status_types.ACTIVE});
             } else {
@@ -124,14 +125,17 @@ class Joint {
             }
         break;
         case action.CHAT:
-            if (this.data_store[msg.data.id].user.nick != msg.data.nick) this.data_store[msg.data.id].user.nick = msg.data.nick;
+            if (this.data_store[msg.data.id].user.nick != msg.data.nick) {
+                this.data_store[msg.data.id].user.nick = msg.data.nick;
+                if (this.avatar_chat) this.avatar_chat.rename_user(msg.data.id, msg.data.nick);
+            }
             if (this.data_store[msg.data.id].user.group != msg.data.group) this.data_store[msg.data.id].user.group = msg.data.group;
             this.chat_history.push({id: msg.data.id, nick: msg.data.nick, group: msg.data.group, text: msg.data.text, time: Date.now()});
             if (this.chat_history.length > 32) this.chat_history.shift();
             this.send_all(ws, msg.type, msg.data);
             this.log(`${msg.data.nick}: ${msg.data.text}`, ip);
             if (this.webhook) this.discord_chat(msg.data.nick, msg.data.text);
-            if (this.avatar_chat) this.avatar_chat.say(msg.data.nick, msg.data.text, msg.data.avatar);
+            if (this.avatar_chat) this.avatar_chat.say(msg.data.id, msg.data.nick, msg.data.text, msg.data.avatar);
         break;
         case action.STATUS:
             this.data_store[msg.data.id].user.status = msg.data.status;
@@ -192,7 +196,7 @@ class Joint {
         avatar_chat.on("roster", (users) => this.set_avatar_roster(users));
         avatar_chat.on("open", () => this.log(`avatar-chat: connected to ${host}`, "avatar-chat"));
         avatar_chat.on("error", (err) => this.log(`avatar-chat: ${err.message}`, "avatar-chat"));
-        avatar_chat.connect();
+        // No global connect: connections open per Moebius user via add_user().
         return avatar_chat;
     }
 
@@ -233,6 +237,7 @@ class Joint {
                         this.log("web left", ip);
                     } else {
                         this.log(`${user.nick} has left`, ip);
+                        if (this.avatar_chat) this.avatar_chat.remove_user(id);
                     }
                     this.send_all(ws, action.LEAVE, {id: user.id});
                 }

@@ -358,6 +358,18 @@ canvas.avatar {
     font-size: 9px;
     white-space: nowrap;
 }
+/* Self-identifying status line pinned at the top of the user list */
+#user_list > div.ac-status {
+    white-space: normal;
+    padding: 4px 6px;
+    margin: 0 0 2px 0;
+    background: var(--dark-border-color);
+    color: #d0d0d0;
+    font-size: 10px;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
 body.dark #viewport {
     border-color: var(--dark-border-color);
     background-color: var(--dark-view-color);

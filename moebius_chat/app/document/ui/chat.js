@@ -10,6 +10,8 @@ const linkify_string = require("linkify-string");
 require("linkify-plugin-ticket");
 let last_height = 240;
 let last_date;
+// Bump on each change so the running build is identifiable in the chat panel.
+const BUILD = "r4";
 
 function $(name) {
     return document.getElementById(name);
@@ -208,7 +210,27 @@ class ChatUI extends events.EventEmitter {
         this.font.load({name: "IBM VGA", use_9px_font: false}).then(() => {
             this.font_loaded = true;
             this.flush_pending();
-        }).catch(() => { this.font = null; });
+            this.update_status();
+        }).catch(() => { this.font = null; this.update_status(); });
+    }
+
+    // A small self-identifying status line at the top of the user list, so the
+    // running build and the avatar-chat state are visible at a glance.
+    init_status() {
+        const ul = $("user_list");
+        if (!ul) return;
+        this.status_el = this.create_div({classname: "ac-status"});
+        ul.insertBefore(this.status_el, ul.firstChild);
+        this.update_status();
+    }
+
+    update_status() {
+        if (!this.status_el) return;
+        let font = "font:loading";
+        if (this.font_loaded) font = "font:ok";
+        else if (!this.font) font = "font:FAILED";
+        const online = (this.roster_count == null) ? "" : ` · ${this.roster_count} on chat`;
+        this.status_el.innerText = `AvatarChat ${BUILD} · ${font}${online}`;
     }
 
     // Render a libtextmode "blocks" object to a canvas with chat's font, or null
@@ -376,6 +398,8 @@ class ChatUI extends events.EventEmitter {
     // collaborators so the two rosters stay visually distinct.
     set_avatar_roster(users) {
         if (!Array.isArray(users)) users = [];
+        this.roster_count = users.length;
+        this.update_status();
         if (!this.roster_el) {
             this.roster_el = this.create_div({classname: "avatar-roster"});
             $("user_list").appendChild(this.roster_el);
@@ -428,8 +452,11 @@ class ChatUI extends events.EventEmitter {
         this.font = null;         // chat's own CP437 font for avatars/art
         this.font_loaded = false;
         this.pending = [];        // canvases waiting for the font to load
+        this.roster_count = null; // # on the avatar-chat channel (null until known)
+        this.status_el = null;
         this.load_chat_font();
         document.addEventListener("DOMContentLoaded", (event) => {
+            this.init_status();
             $("chat_input").addEventListener("focus", chat_input_focus, true);
             $("chat_input").addEventListener("blur", chat_input_blur, true);
             $("chat_resizer").addEventListener("mousedown", (event) => this.mouse_down(event), true);

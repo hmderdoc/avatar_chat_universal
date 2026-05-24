@@ -1,0 +1,39 @@
+# Moebius collaborative "joint" server with the Avatar Chat bridge.
+#
+# This is the long-running piece of the moebius_chat integration: it hosts the
+# shared canvas on --server_port and mirrors chat to/from Avatar Chat (opening
+# one connection per Moebius user). Moebius clients connect with
+# File > Connect to Server -> <this-host>:8000.
+#
+# Install (as root):
+#   cp /sbbs/xtrn/avatar_chat_universal/moebius_chat/moebius-chat-server.service /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now moebius-chat-server
+#   journalctl -u moebius-chat-server -f      # watch joins / chat / backups
+#
+# Config lives in ExecStart below — edit and `systemctl daemon-reload` to change:
+#   --file <canvas>        the hosted, saved-back canvas (server.ans is gitignored,
+#                          as are its "server - <timestamp>.ans" hourly backups)
+#   --server_port <port>   port Moebius clients connect to (default 8000)
+#   --avatar_chat host[:port[:channel]]   Avatar Chat server to bridge to
+#                          (port default 10088, channel default main)
+#
+# NOTE: ExecStart needs an absolute node path because systemd has no nvm in its
+# PATH. If `which node` changes (nvm upgrade), update the path below.
+
+[Unit]
+Description=Moebius collaborative server + Avatar Chat bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sbbs
+Group=sbbs
+WorkingDirectory=/sbbs/xtrn/avatar_chat_universal/moebius_chat
+ExecStart=/home/sbbs/.nvm/versions/node/v22.20.0/bin/node server.js --file server.ans --server_port 8000 --avatar_chat 127.0.0.1:10088:main
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

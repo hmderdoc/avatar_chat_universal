@@ -67,6 +67,19 @@ npm start
 In Moebius: **File ▸ Connect to Server**, enter `localhost:8000`. The chat panel
 opens on connect.
 
+### Run the server as a daemon (systemd)
+
+`moebius-chat-server.service` runs the joint server under systemd (uses
+`server.ans` as the hosted canvas; it and its `server - <timestamp>.ans` hourly
+backups are gitignored). Edit the `ExecStart` args to taste, then:
+
+```sh
+sudo cp moebius-chat-server.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now moebius-chat-server
+journalctl -u moebius-chat-server -f      # watch joins / chat / backups
+```
+
 ### Try
 - **Chat:** type in the chat box → it appears for BBS users on the channel, and
   their messages appear in Moebius.

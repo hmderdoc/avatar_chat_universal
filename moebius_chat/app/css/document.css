@@ -168,7 +168,7 @@ body.dark #current_colors > canvas {
     border-top: 1px solid var(--dark-border-color);
     border-left: 1px solid var(--dark-border-color);
     height: calc(100% - 1px);
-    width: calc(150px - 1px);
+    width: calc(210px - 1px);
     overflow-y: hidden;
     overflow-y: scroll;
 }
@@ -194,7 +194,7 @@ body.dark #current_colors > canvas {
     float: left;
     border-top: 1px solid var(--dark-border-color);
     background-color: var(--dark-mid-color);
-    width: calc(100% - 1px - 150px);
+    width: calc(100% - 1px - 210px);
     overflow-y: scroll;
     height: calc(100% - 28px);
     border-left: 1px solid var(--dark-border-color);
@@ -219,7 +219,7 @@ body.dark #current_colors > canvas {
     font-size: 12px;
     border: none;
     padding: 0px 8px;
-    width: calc(100% - 16px - 1px - 150px);
+    width: calc(100% - 16px - 1px - 210px);
     height: 27px;
     outline: none;
     border-top: 1px solid var(--dark-border-color);

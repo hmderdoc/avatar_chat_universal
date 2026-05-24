@@ -87,10 +87,11 @@ class Joint {
     // client's chat() guards `this.users[id]`, so an unknown id renders the
     // nick/group/text verbatim without touching the user list. The sender's
     // BBS/system name rides along as the group, e.g. alice <futureland>.
-    inject_chat(nick, text, system = "", avatar = "") {
-        const data = {id: -1, nick: nick || "?", group: system || "", text};
+    inject_chat(nick, text, system = "", avatar = "", time) {
+        const t = time || Date.now();
+        const data = {id: -1, nick: nick || "?", group: system || "", text, time: t};
         if (avatar) data.avatar = avatar;
-        this.chat_history.push({id: -1, nick: data.nick, group: data.group, text, time: Date.now(), avatar});
+        this.chat_history.push({id: -1, nick: data.nick, group: data.group, text, time: t, avatar});
         if (this.chat_history.length > 32) this.chat_history.shift();
         this.send_all_including_self(action.CHAT, data);
         this.log(`${data.nick}: ${text}`, "avatar-chat");
@@ -192,7 +193,7 @@ class Joint {
             channel: channel || "main",
             label: os.hostname(),
         });
-        avatar_chat.on("message", ({nick, text, system, avatar}) => this.inject_chat(nick, text, system, avatar));
+        avatar_chat.on("message", ({nick, text, system, avatar, time}) => this.inject_chat(nick, text, system, avatar, time));
         avatar_chat.on("roster", (users) => this.set_avatar_roster(users));
         avatar_chat.on("open", () => this.log(`avatar-chat: connected to ${host}`, "avatar-chat"));
         avatar_chat.on("error", (err) => this.log(`avatar-chat: ${err.message}`, "avatar-chat"));

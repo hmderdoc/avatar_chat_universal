@@ -11,7 +11,7 @@ require("linkify-plugin-ticket");
 let last_height = 240;
 let last_date;
 // Bump on each change so the running build is identifiable in the chat panel.
-const BUILD = "r4";
+const BUILD = "r5";
 
 function $(name) {
     return document.getElementById(name);

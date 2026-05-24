@@ -27,6 +27,7 @@ const MAX_PACKET = 131072; // json-sock.js Socket.prototype.max_recv
 const RECONNECT_MS = 5000;
 const WHO_INTERVAL_MS = 15000; // how often we poll the channel roster
 const SEEN_TTL_MS = 10 * 60 * 1000; // keep recent speakers in the roster this long
+const HISTORY_LIMIT = 30; // backlog lines pulled from the channel on connect
 
 // Strip control bytes json-chat.js drops, plus ESC: these render on CP437 BBS
 // terminals where a stray ESC would corrupt layout.
@@ -107,6 +108,10 @@ class Conn extends events.EventEmitter {
         this.send({scope: "chat", func: "QUERY", oper: "WHO", location: this.loc("messages"), timeout: -1});
     }
 
+    slice_history(limit) {
+        this.send({scope: "chat", func: "QUERY", oper: "SLICE", location: this.loc("history"), data: {start: -limit}, lock: 1, timeout: -1});
+    }
+
     write_message(message) {
         this.send({scope: "chat", func: "QUERY", oper: "WRITE", location: this.loc("messages"), data: message, lock: 2, timeout: -1});
         this.send({scope: "chat", func: "QUERY", oper: "PUSH", location: this.loc("history"), data: message, lock: 2, timeout: -1});
@@ -149,6 +154,7 @@ class AvatarChat extends events.EventEmitter {
         this.receiver = undefined;                // Conn we read messages + WHO on
         this.lastWho = [];                        // last WHO response, [{nick, system}]
         this.whoTimer = undefined;
+        this.historyLoaded = false;               // backlog pulled once per session
         this.closed = false;
     }
 
@@ -219,6 +225,31 @@ class AvatarChat extends events.EventEmitter {
         this.receiver = conn;
         conn.onpacket = (packet) => this._on_packet(packet);
         this._start_who_poll();
+        this._load_history();
+    }
+
+    // Pull the channel backlog once, so a freshly-connected Moebius user sees
+    // recent chat (with avatars) instead of an empty room. Mirrors how the JS
+    // door seeds its history/avatars (avatar_chat.js: slice channels.x.history).
+    _load_history() {
+        if (this.historyLoaded || !this.receiver) return;
+        this.historyLoaded = true;
+        this.receiver.slice_history(HISTORY_LIMIT);
+    }
+
+    _handle_history(data) {
+        if (!Array.isArray(data)) return;
+        for (const msg of data) {
+            if (!msg || typeof msg.str !== "string") continue;
+            const host = (msg.nick && msg.nick.host) ? msg.nick.host : "";
+            if (host === this.origin) continue; // our own past lines
+            const name = (msg.nick && msg.nick.name) ? msg.nick.name : "";
+            const avatar = (msg.nick && typeof msg.nick.avatar === "string") ? msg.nick.avatar : "";
+            if (name && avatar) this.avatarByNick[name] = avatar;
+            if (name) this.seen.set(name, {system: origin_label(host), ts: Date.now()});
+            this.emit("message", {nick: name, text: msg.str, system: origin_label(host), avatar, time: msg.time, history: true});
+        }
+        this._emit_roster(); // avatars now seeded from the backlog
     }
 
     _start_who_poll() {
@@ -239,6 +270,7 @@ class AvatarChat extends events.EventEmitter {
         const oper = (packet.oper || "").toUpperCase();
         if (func === "RESPONSE") {
             if (oper === "WHO") this._handle_who(packet.data);
+            else if (oper === "SLICE") this._handle_history(packet.data);
             return;
         }
         if (func !== "UPDATE") return;
@@ -259,7 +291,7 @@ class AvatarChat extends events.EventEmitter {
             this.seen.set(name, {system: origin_label(host), ts: Date.now()});
             if (was_new) this._emit_roster();
         }
-        this.emit("message", {nick: name, text: msg.str, system: origin_label(host), avatar});
+        this.emit("message", {nick: name, text: msg.str, system: origin_label(host), avatar, time: msg.time});
     }
 
     // WHO returns either ["name", ...] (our Go server) or [{nick, system}, ...]

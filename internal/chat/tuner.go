@@ -143,12 +143,31 @@ func (s *Session) ClearTuner() error {
 }
 
 // broadcastMarker writes a control marker to the channel without appending it
-// to our own transcript (it isn't a chat line).
+// to our own transcript (it isn't a chat line). It goes three places:
+//   - .messages: live, so everyone in the room reacts immediately
+//   - .tvtuner:  durable state — a dedicated location only tune/off events use,
+//     so the current TV state survives any amount of chat scrolling past
 func (s *Session) broadcastMarker(marker string) error {
 	msg := &Message{Nick: s.Self, Str: marker, Time: time.Now().UnixNano() / 1000000}
 	if err := s.Client.Write("chat", s.locMessages(s.Channel), msg, LockWrite); err != nil {
 		return err
 	}
-	_ = s.Client.Push("chat", s.locHistory(s.Channel), msg, LockWrite)
+	_ = s.Client.Push("chat", s.locTuner(s.Channel), msg, LockWrite)
 	return nil
+}
+
+// loadTunerState reads the channel's durable TV state from the dedicated
+// .tvtuner location (the last tune/off event) and applies it. Used on connect
+// and channel switch so joining a tuned room enters the lounge regardless of
+// how busy the chat has been since it was tuned. Quiet (no notice replay).
+func (s *Session) loadTunerState(channel string) {
+	var last []*Message
+	if err := s.Client.Slice("chat", s.locTuner(channel), -1, nil, LockRead, &last); err != nil {
+		return
+	}
+	for _, m := range last {
+		if m != nil {
+			s.maybeTuner(m, false)
+		}
+	}
 }

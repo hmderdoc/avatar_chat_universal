@@ -355,6 +355,8 @@ func (s *Session) Connect(ctx context.Context, historyCount int) error {
 			}
 		}
 	}
+	// Durable TV state wins over anything inferred from message history.
+	s.loadTunerState(s.Channel)
 	// Initial roster surfaced as a notice so users see who's online without
 	// having to /who.
 	s.announceRoster(s.Channel)
@@ -766,6 +768,8 @@ func (s *Session) JoinChannel(channel string, historyCount int) error {
 			s.appendNotice(time.Unix(0, (lastTime) * 1000000).Format("\x01mLast msg:\x01M 15:04 on 01/02/2006"))
 		}
 	}
+	// Durable TV state wins over anything inferred from message history.
+	s.loadTunerState(channel)
 	s.announceRoster(channel)
 	if s.OnNotice != nil {
 		s.OnNotice(fmt.Sprintf("joined %s", channel))
@@ -810,6 +814,10 @@ func (s *Session) recentSelf(msg *Message) bool {
 
 func (s *Session) locMessages(channel string) string { return "channels." + channel + ".messages" }
 func (s *Session) locHistory(channel string) string  { return "channels." + channel + ".history" }
+
+// locTuner is a dedicated location holding only TV tune/off events, so the
+// current TV state survives no matter how much chat scrolls past in .history.
+func (s *Session) locTuner(channel string) string { return "channels." + channel + ".tvtuner" }
 
 // sanitizeText strips form-feed, CR, LF, and bell — same set as
 // json-chat.js:302's Message constructor.

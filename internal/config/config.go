@@ -47,6 +47,11 @@ type Config struct {
 
 	Theme string // theme name (resolved to themes/<name>.ini) or full .ini path
 
+	// TV lounge mode (telnetvision). See internal/ui/tvlounge.go.
+	TVColor      string // "truecolor" (default) or "16"
+	TVPopupSecs  int    // how long a comment lingers over the video (5-15, default 10)
+	TVAvatars    bool   // show avatars in popups (default off; they compete with video)
+
 	Raw map[string]string
 }
 
@@ -72,6 +77,8 @@ func Default() *Config {
 		OutputCharset:        "cp437",
 		SplashTimeoutSeconds: 5,
 		Theme:                "futurewave",
+		TVColor:              "truecolor",
+		TVPopupSecs:          10,
 		Raw:                  map[string]string{},
 	}
 }
@@ -160,6 +167,12 @@ func Load(path string) (*Config, error) {
 			cfg.IdleInterleaveAnsi = parseBool(val, cfg.IdleInterleaveAnsi)
 		case "theme":
 			cfg.Theme = val
+		case "tv_color":
+			cfg.TVColor = val
+		case "tv_popup_seconds":
+			cfg.TVPopupSecs = atoiOr(val, cfg.TVPopupSecs)
+		case "tv_avatars":
+			cfg.TVAvatars = parseBool(val, cfg.TVAvatars)
 		}
 	}
 	if err := scanner.Err(); err != nil {

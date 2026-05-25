@@ -266,6 +266,13 @@ func run() error {
 	app.FigletMove = cfg.FigletMove
 	app.AnsiGalleryFiles = scanAnsiGallery(cfg.AnsiGalleryDir)
 	app.IdleInterleaveAnsi = cfg.IdleInterleaveAnsi
+	if cfg.TVColor != "" {
+		app.TVColor = cfg.TVColor
+	}
+	if cfg.TVPopupSecs > 0 {
+		app.TVPopupSecs = cfg.TVPopupSecs
+	}
+	app.TVAvatars = cfg.TVAvatars
 
 	// Theme overlay. Main config sets the baseline; theme can override
 	// any color or screensaver field. Missing theme files are not fatal --

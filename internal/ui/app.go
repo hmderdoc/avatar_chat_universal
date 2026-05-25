@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
 	"github.com/hmderdoc/avatar_chat_universal/internal/idle"
+	"github.com/hmderdoc/avatar_chat_universal/internal/telnetvision"
 	"github.com/hmderdoc/avatar_chat_universal/internal/theme"
 )
 
@@ -114,6 +116,19 @@ type App struct {
 	idlePool        []string // resolved playback list after disable filter
 	idlePoolIdx     int
 
+	// TV lounge config (see internal/ui/tvlounge.go).
+	TVColor     string // "truecolor" (default) or "16"
+	TVPopupSecs int    // how long a message popup lingers (5-15, default 10)
+	TVAvatars   bool   // show avatars in popups (default off; video competes)
+
+	// TV lounge runtime state.
+	tvTuner          *chat.Tuner
+	tvConsumer       *telnetvision.Consumer
+	tvOptedOut       bool
+	tvShowTranscript bool
+	tvPopups         []tvPopup
+	tvLastTick       time.Time
+
 	dirty bool
 }
 
@@ -134,6 +149,8 @@ func NewApp(conn io.Writer, in *ansi.Input, sess *chat.Session, width, height in
 		IdleRandom:     true,
 		idleLastActive: time.Now(),
 		idleRegistry:   idle.NewRegistry(),
+		TVColor:        "truecolor",
+		TVPopupSecs:    10,
 	}
 	a.layout()
 	return a
@@ -212,7 +229,7 @@ func (a *App) layout() {
 	a.bottomActionBar.ButtonAttr = th.BottomActionPill
 	a.bottomActionBar.HighlightAttr = th.BottomActionHighlight
 
-	a.Session.OnMessage = func(*chat.Message) {
+	a.Session.OnMessage = func(m *chat.Message) {
 		a.dirty = true
 		// Incoming messages do NOT kill the screensaver -- the user
 		// still gets a small ticker overlay showing the most recent
@@ -220,6 +237,10 @@ func (a *App) layout() {
 		// gallery animation keeps running. Only a real keypress
 		// dismisses idle (handled in handleKey via markActive).
 		a.idleLastMsgAt = time.Now()
+		// In TV lounge mode, comments become timeboxed popups over the video.
+		if a.loungeActive() {
+			a.addPopup(m)
+		}
 	}
 	// Notices route into the transcript itself now that there's no status
 	// bar; nothing extra to do here, but keep a callback so per-event
@@ -572,8 +593,15 @@ func (a *App) Run(ctx context.Context) error {
 			a.tryReconnect(ctx, &reconnect)
 		}
 
-		// Tick idle animation if we've been quiet long enough.
-		a.idleTick()
+		// Reconcile TV-lounge tuner state (open/close the video stream when
+		// the room is tuned/untuned). In lounge mode the video drives the
+		// redraw; otherwise the idle screensaver may kick in.
+		a.tvSync()
+		if a.loungeActive() {
+			a.tvTick()
+		} else {
+			a.idleTick()
+		}
 
 		// Keep the render loop dirty while a join/leave notice is still
 		// playing its color sweep, so the wave actually animates.
@@ -660,6 +688,11 @@ func (a *App) handleKey(k ansi.Key) (exit bool, err error) {
 	// Global hotkeys first.
 	switch k.Type {
 	case ansi.KeyPgUp:
+		// In lounge mode, scrolling up pulls the transcript over the video.
+		if a.loungeActive() {
+			a.tvShowTranscript = true
+			a.forceFullRedraw()
+		}
 		a.transcript.Scroll += 5
 		a.dirty = true
 		return false, nil
@@ -667,6 +700,12 @@ func (a *App) handleKey(k ansi.Key) (exit bool, err error) {
 		a.transcript.Scroll -= 5
 		if a.transcript.Scroll < 0 {
 			a.transcript.Scroll = 0
+		}
+		// Scrolled back to the bottom in lounge mode: drop the transcript and
+		// return to the full video.
+		if a.loungeActive() && a.transcript.Scroll == 0 && a.tvShowTranscript {
+			a.tvShowTranscript = false
+			a.forceFullRedraw()
 		}
 		a.dirty = true
 		return false, nil
@@ -803,8 +842,50 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 	case "/avatar":
 		a.handleAvatarCmd(parts)
 		return false, true
+	case "/tvtuner":
+		a.handleTunerCmd(parts)
+		return false, true
+	case "/tvoff":
+		if a.Session.Tuner() == nil {
+			a.Session.Notice("/tvoff: the room isn't tuned to a TV")
+			return false, true
+		}
+		a.tvOptedOut = true
+		a.forceFullRedraw()
+		a.Session.Notice("left the TV lounge (/tvon to rejoin)")
+		return false, true
+	case "/tvon":
+		if a.Session.Tuner() == nil {
+			a.Session.Notice("/tvon: the room isn't tuned to a TV")
+			return false, true
+		}
+		a.tvOptedOut = false
+		a.forceFullRedraw()
+		a.Session.Notice("rejoined the TV lounge")
+		return false, true
+	case "/transcript", "/scrollback":
+		if !a.loungeActive() {
+			a.Session.Notice("/transcript: only in TV lounge mode (PgUp also works)")
+			return false, true
+		}
+		a.tvShowTranscript = !a.tvShowTranscript
+		if !a.tvShowTranscript {
+			a.transcript.Scroll = 0
+		}
+		a.forceFullRedraw()
+		return false, true
+	case "/tvcolor":
+		if strings.EqualFold(a.TVColor, "16") {
+			a.TVColor = "truecolor"
+		} else {
+			a.TVColor = "16"
+		}
+		a.forceFullRedraw()
+		a.Session.Notice("TV color: " + a.TVColor)
+		return false, true
 	case "/help", "/?":
-		a.Session.Notice("/me /msg /r /join /part /who /img /channels /clear /avatar set|off|upload /quit")
+		a.Session.Notice("/me /msg /r /join /part /who /img /channels /clear /avatar /quit")
+		a.Session.Notice("TV: /tvtuner <host> <port> <channel> | /tvtuner off | /tvon | /tvoff | /transcript | /tvcolor")
 		return false, true
 	}
 	a.Session.Notice(fmt.Sprintf("unknown command: %s", cmd))
@@ -883,6 +964,42 @@ func (a *App) handleAvatarCmd(parts []string) {
 		a.Session.Notice("avatar uploaded -- attached to your next message")
 	default:
 		a.Session.Notice("unknown /avatar subcommand: " + sub)
+	}
+}
+
+// handleTunerCmd implements /tvtuner: tune the room to a telnetvision feed,
+// turn it off, or (bare) rejoin the lounge if you'd opted out. The tune is
+// shared — it broadcasts a marker so everyone in the channel enters lounge
+// mode (and is applied locally immediately, since our own echo is suppressed).
+func (a *App) handleTunerCmd(parts []string) {
+	if len(parts) == 1 {
+		if a.Session.Tuner() == nil {
+			a.Session.Notice("usage: /tvtuner <host> <port> <channel>   (or /tvtuner off)")
+			return
+		}
+		a.tvOptedOut = false
+		a.forceFullRedraw()
+		a.Session.Notice("rejoined the TV lounge")
+		return
+	}
+	if strings.EqualFold(parts[1], "off") {
+		if err := a.Session.ClearTuner(); err != nil {
+			a.Session.Notice(fmt.Sprintf("/tvtuner off: %v", err))
+		}
+		return
+	}
+	if len(parts) < 4 {
+		a.Session.Notice("usage: /tvtuner <host> <port> <channel>   (e.g. /tvtuner futureland.today 7601 cam)")
+		return
+	}
+	port, err := strconv.Atoi(parts[2])
+	if err != nil || port <= 0 || port > 65535 {
+		a.Session.Notice("/tvtuner: port must be 1-65535")
+		return
+	}
+	a.tvOptedOut = false
+	if err := a.Session.SetTuner(parts[1], port, parts[3]); err != nil {
+		a.Session.Notice(fmt.Sprintf("/tvtuner: %v", err))
 	}
 }
 
@@ -1219,10 +1336,16 @@ func (a *App) draw() {
 	a.refreshActionBar()
 	a.header.Render()
 	a.actionBar.Render()
-	// Always render the transcript: the bg-anim layer shows through any
-	// transparent cells in the transcript (gutters between bubbles), so
-	// chat stays visible while idle animations play behind it.
-	a.transcript.Render(a.Session.Messages())
+	if a.loungeActive() {
+		// TV lounge mode paints the video + caption + popups into the three
+		// transcript layers instead of the normal transcript.
+		a.drawLounge()
+	} else {
+		// Always render the transcript: the bg-anim layer shows through any
+		// transparent cells in the transcript (gutters between bubbles), so
+		// chat stays visible while idle animations play behind it.
+		a.transcript.Render(a.Session.Messages())
+	}
 	a.bottomActionBar.Render()
 	a.inputLine.Render()
 }

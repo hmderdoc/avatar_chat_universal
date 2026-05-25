@@ -49,6 +49,7 @@ type Session struct {
 	motdTimestamp int64
 	userCount     int       // last-known size of current channel
 	lastReply     string    // sender of the most recent received PM (for /r)
+	tuner         *Tuner    // active TV-lounge tuner for the channel (nil = off)
 }
 
 func NewSession(client *Client, self *Nick, channel string) *Session {
@@ -315,6 +316,12 @@ func (s *Session) Connect(ctx context.Context, historyCount int) error {
 					continue
 				}
 				s.rememberNick(m.Nick)
+				// A tuner marker in history sets the room's current TV state
+				// quietly (last one wins), so joining a tuned room enters the
+				// lounge without replaying old tune/off notices.
+				if s.maybeTuner(m, false) {
+					continue
+				}
 				// History BITMAP envelopes get queued and shown as a notice,
 				// just like ones that arrive live. Mark them Viewed so they
 				// don't inflate the unread count when the user opens the door.
@@ -584,6 +591,12 @@ func (s *Session) handleUpdate(pkt *Packet) {
 		}
 		s.rememberNick(msg.Nick)
 
+		// TVTUNER control markers: apply (enter/exit lounge) + notice, and
+		// suppress the raw marker from the transcript.
+		if s.maybeTuner(&msg, true) {
+			return
+		}
+
 		// Track most recent PM sender so /r works.
 		if msg.Private && msg.Nick != nil && !s.isSelfName(msg.Nick.Name) {
 			s.mu.Lock()
@@ -726,6 +739,7 @@ func (s *Session) JoinChannel(channel string, historyCount int) error {
 	s.mu.Lock()
 	s.Channel = channel
 	s.messages = nil
+	s.tuner = nil // each channel has its own TV state; history below re-sets it
 	s.mu.Unlock()
 	if err := s.Client.Subscribe("chat", s.locMessages(channel)); err != nil {
 		return err
@@ -739,6 +753,9 @@ func (s *Session) JoinChannel(channel string, historyCount int) error {
 					continue
 				}
 				s.rememberNick(m.Nick)
+				if s.maybeTuner(m, false) {
+					continue
+				}
 				s.append(m)
 				if m.Time > lastTime {
 					lastTime = m.Time

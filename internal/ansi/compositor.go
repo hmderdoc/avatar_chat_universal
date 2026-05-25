@@ -100,13 +100,13 @@ func (c *Compositor) Render(w io.Writer) error {
 
 		// Emit cursor move + cells.
 		fmt.Fprintf(&buf, "\x1b[%d;%dH", base.Y+r+1, base.X+firstChange+1)
-		var prevAttr Attr
+		var prevSGR string
 		var primed bool
 		for col := firstChange; col <= lastChange; col++ {
 			cell := composed[col]
-			if !primed || cell.Attr != prevAttr {
-				buf.WriteString(cell.Attr.SGR())
-				prevAttr = cell.Attr
+			if sgr := cell.SGR(); !primed || sgr != prevSGR {
+				buf.WriteString(sgr)
+				prevSGR = sgr
 				primed = true
 			}
 			buf.Write(encodeCellBytes(cell.Char, c.Charset, scratch))

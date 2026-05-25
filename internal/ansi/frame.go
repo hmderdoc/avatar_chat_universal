@@ -15,6 +15,24 @@ type Cell struct {
 	Char        byte
 	Attr        Attr
 	Transparent bool
+
+	// True enables 24-bit color: when set, Fg/Bg override the CGA Attr at
+	// render time (emitting SGR 38;2/48;2). This lets truecolor cells (e.g. a
+	// telnetvision video frame rendered as half-blocks) coexist with ordinary
+	// CGA chat cells in the same frame/compositor. Cell stays comparable, so
+	// the dirty-diff in Render/Compositor still works unchanged.
+	True   bool
+	Fg, Bg RGB
+}
+
+// SGR returns the escape sequence that selects this cell's colors: a 24-bit
+// truecolor sequence when True, otherwise the CGA attribute's SGR.
+func (c Cell) SGR() string {
+	if c.True {
+		return fmt.Sprintf("\x1b[0;38;2;%d;%d;%d;48;2;%d;%d;%dm",
+			c.Fg.R, c.Fg.G, c.Fg.B, c.Bg.R, c.Bg.G, c.Bg.B)
+	}
+	return c.Attr.SGR()
 }
 
 // Frame is a fixed-position 2D grid of cells with dirty tracking. Frames are
@@ -104,6 +122,16 @@ func (f *Frame) SetCell(x, y int, ch byte, attr Attr) {
 		return
 	}
 	f.cur[y][x] = Cell{Char: ch, Attr: attr}
+}
+
+// SetCellTrue writes one 24-bit truecolor cell at (x,y): glyph ch with
+// foreground fg and background bg. Used for video half-blocks (ch = 0xDF,
+// fg = top pixel, bg = bottom pixel).
+func (f *Frame) SetCellTrue(x, y int, ch byte, fg, bg RGB) {
+	if x < 0 || x >= f.W || y < 0 || y >= f.H {
+		return
+	}
+	f.cur[y][x] = Cell{Char: ch, True: true, Fg: fg, Bg: bg}
 }
 
 // Print writes b at the current cursor with the fill attribute, advancing
@@ -244,13 +272,13 @@ func (f *Frame) Render(w io.Writer) error {
 			continue
 		}
 		fmt.Fprintf(&buf, "\x1b[%d;%dH", f.Y+r+1, f.X+firstC+1)
-		var prevAttr Attr
+		var prevSGR string
 		var primed bool
 		for c := firstC; c <= lastC; c++ {
 			cell := f.cur[r][c]
-			if !primed || cell.Attr != prevAttr {
-				buf.WriteString(cell.Attr.SGR())
-				prevAttr = cell.Attr
+			if sgr := cell.SGR(); !primed || sgr != prevSGR {
+				buf.WriteString(sgr)
+				prevSGR = sgr
 				primed = true
 			}
 			buf.Write(encodeCellBytes(cell.Char, f.Charset, scratch))

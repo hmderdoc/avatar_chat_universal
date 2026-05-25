@@ -6,6 +6,9 @@ import (
 	"strings"
 )
 
+// RGB is a 24-bit color, used by truecolor cells (Cell.True).
+type RGB struct{ R, G, B uint8 }
+
 // Attr is a CGA-style attribute byte:
 //
 //	bits 0-2: foreground base color (0-7)

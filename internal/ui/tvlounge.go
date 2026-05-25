@@ -60,19 +60,39 @@ func (a *App) tvSync() {
 	if changed {
 		a.tvTuner = cur
 		a.tvPopups = nil
-		a.tvShowTranscript = false
 		a.tvOptedOut = false // a fresh tune opts everyone back in
-		a.forceFullRedraw()
+		// Drop the old feed unconditionally; the want-check below reopens it
+		// for the new tuner. Without this, retuning (joining a different tuned
+		// channel) would keep streaming the previous one.
+		if a.tvConsumer != nil {
+			a.tvConsumer.Close()
+			a.tvConsumer = nil
+		}
+		a.clearLoungeResidue()
 	}
 	// Stream only while tuned AND not opted out — so /tvoff stops the bytes.
 	want := a.tvTuner != nil && !a.tvOptedOut
-	if want && a.tvConsumer == nil {
+	switch {
+	case want && a.tvConsumer == nil:
 		a.tvConsumer = telnetvision.NewConsumer(a.tvTuner.Host, a.tvTuner.Port, a.tvTuner.Channel)
 		a.tvConsumer.Start()
-	} else if !want && a.tvConsumer != nil {
+	case !want && a.tvConsumer != nil:
 		a.tvConsumer.Close()
 		a.tvConsumer = nil
+		a.clearLoungeResidue()
 	}
+}
+
+// clearLoungeResidue blanks the video/popup/transcript layers and forces a
+// full repaint, so leaving (or switching) a TV channel doesn't leave residual
+// half-block characters bleeding through the normal chat view.
+func (a *App) clearLoungeResidue() {
+	a.tvShowTranscript = false
+	a.transcript.Scroll = 0
+	a.bgAnimFrame.Clear()
+	a.fgAnimFrame.Clear()
+	a.transcriptFrame.Clear()
+	a.forceFullRedraw()
 }
 
 // tvTick paces the video redraw while the lounge is active.

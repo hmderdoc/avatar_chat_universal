@@ -7,6 +7,53 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-26
+
+### Fixed
+
+- **TV chat popups now wrap instead of clipping at the screen edge.** Long
+  messages flow across up to three rows (then trim with `...`); the nick
+  keeps its color on the first row. The normal transcript already wrapped.
+
+- **Two stray Unicode characters that rendered as CP437 garbage on the
+  wire** -- the `->` in the `/avatar upload` hint (was a `→`, shown as
+  `ΓåÆ`) and the idle-ticker truncation marker (now always ASCII `...`;
+  the UTF-8 path had emitted a multi-byte ellipsis byte-by-byte).
+
+### Changed
+
+- **TV lounge layout reworked** -- the live caption bar now occupies the
+  bottom action row (where the command pills used to be), and the
+  command-hint strip moved up to a thin bar across the top of the video.
+  Incoming chat popups stack up just above the caption bar.
+
+- **PgUp history in the lounge is now a one-press "show", not a scroll.**
+  The first PgUp pulls up the most recent page of chat over the video
+  (it no longer also jumps back five lines); subsequent PgUp presses page
+  further back. The overlay dismisses on PgDn / Down-arrow at the bottom,
+  on sending a message, or after 30s of no interaction.
+
+### Added
+
+- **Telegram, Matrix, and Slack chat bridges** join the existing IRC and
+  Discord bridges -- thin per-platform adapters over the shared bridgecore /
+  bridgemedia layer, with systemd units and `*_bridge.ini.example` templates.
+  See `BRIDGES.md`. (Tokens load from the environment or gitignored configs.)
+
+- **Per-nick color badges in TV chat popups** -- each speaker's name renders
+  as a stable colored badge (a foreground from the 12 saturated CGA colors,
+  omitting the neutrals, plus a contrast-checked background), seeded by the
+  nick so it's consistent per person. A quick-glance "who said that" cue as
+  chat scrolls over the video. TV-mode only; the transcript is unchanged.
+
+- **Themeable caption bar color** via the `tv_caption` theme key
+  (default `white|bgblue`). See `themes/futurewave.ini`.
+
+- **Ctrl-T toggles the TV video between 24-bit truecolor and the 16-color
+  CGA fallback** (same effect as `/tvcolor`), for a quick flip without
+  typing a command. Truecolor can't be auto-detected over a BBS link, so
+  the switch stays manual; the startup default comes from `tv_color`.
+
 ## [0.1.8] - 2026-05-07
 
 ### Fixed

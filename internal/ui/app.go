@@ -126,8 +126,11 @@ type App struct {
 	tvConsumer       *telnetvision.Consumer
 	tvOptedOut       bool
 	tvShowTranscript bool
-	tvPopups         []tvPopup
-	tvLastTick       time.Time
+	// tvTranscriptShownAt is when the history overlay was last shown or
+	// interacted with; the overlay auto-dismisses after tvTranscriptIdle.
+	tvTranscriptShownAt time.Time
+	tvPopups            []tvPopup
+	tvLastTick          time.Time
 
 	dirty bool
 }
@@ -362,12 +365,11 @@ func (a *App) renderIdleTicker() {
 	}
 	text := " " + nick + ": " + last.Str + " "
 	maxW := a.fgAnimFrame.W
-	if len(text) > maxW {
-		text = text[:maxW-1] + "…"
-		// fall back to "..." in CP437 mode
-		if a.Charset == ansi.CharsetCP437 {
-			text = string([]byte(text)[:maxW-3]) + "..."
-		}
+	if len(text) > maxW && maxW >= 3 {
+		// ASCII "..." in both charsets: cells are CP437 bytes written
+		// byte-by-byte below, so a multi-byte Unicode ellipsis would render
+		// as garbage on the wire.
+		text = text[:maxW-3] + "..."
 	}
 	bg := ansi.LightGray | ansi.BgBlue
 	if a.Theme != nil {
@@ -688,24 +690,34 @@ func (a *App) handleKey(k ansi.Key) (exit bool, err error) {
 	// Global hotkeys first.
 	switch k.Type {
 	case ansi.KeyPgUp:
-		// In lounge mode, scrolling up pulls the transcript over the video.
 		if a.loungeActive() {
-			a.tvShowTranscript = true
-			a.forceFullRedraw()
+			// First press: just SHOW the most recent page (no scroll-back) —
+			// chat vanishes here, so the user wants to see what they missed.
+			// Once it's up, PgUp pages further back into history.
+			if !a.tvShowTranscript {
+				a.showLoungeHistory()
+			} else {
+				a.pageLoungeHistory(5)
+			}
+			return false, nil
 		}
 		a.transcript.Scroll += 5
 		a.dirty = true
 		return false, nil
 	case ansi.KeyPgDn:
+		if a.loungeActive() && a.tvShowTranscript {
+			// At the bottom already: PgDn dismisses the overlay. Otherwise it
+			// pages forward (toward the newest messages).
+			if a.transcript.Scroll == 0 {
+				a.hideLoungeHistory()
+			} else {
+				a.pageLoungeHistory(-5)
+			}
+			return false, nil
+		}
 		a.transcript.Scroll -= 5
 		if a.transcript.Scroll < 0 {
 			a.transcript.Scroll = 0
-		}
-		// Scrolled back to the bottom in lounge mode: drop the transcript and
-		// return to the full video.
-		if a.loungeActive() && a.transcript.Scroll == 0 && a.tvShowTranscript {
-			a.tvShowTranscript = false
-			a.forceFullRedraw()
 		}
 		a.dirty = true
 		return false, nil
@@ -713,8 +725,26 @@ func (a *App) handleKey(k ansi.Key) (exit bool, err error) {
 		return true, nil
 	}
 
+	// Down arrow on an empty input mirrors PgDn while the history overlay is
+	// up: page toward the newest messages, and dismiss when already at the
+	// bottom. With a non-empty buffer, Down keeps doing input-history recall.
+	if k.Type == ansi.KeyDown && a.loungeActive() && a.tvShowTranscript && a.inputLine.Value() == "" {
+		if a.transcript.Scroll == 0 {
+			a.hideLoungeHistory()
+		} else {
+			a.pageLoungeHistory(-5)
+		}
+		return false, nil
+	}
+
 	if k.Type == ansi.KeyChar && k.Ctrl && k.Rune == 0x18 { // Ctrl-X
 		return true, nil
+	}
+	if k.Type == ansi.KeyChar && k.Ctrl && k.Rune == 0x14 { // Ctrl-T: TV truecolor/16 toggle
+		if a.loungeActive() {
+			a.toggleTVColor()
+		}
+		return false, nil
 	}
 
 	submit, cancel := a.inputLine.HandleKey(k)
@@ -733,6 +763,11 @@ func (a *App) handleKey(k ansi.Key) (exit bool, err error) {
 			a.Session.Notice(fmt.Sprintf("send failed: %v", err))
 		}
 		a.transcript.Scroll = 0
+		// Sending a line drops the history overlay so the user sees their
+		// message land back over the video.
+		if a.loungeActive() {
+			a.hideLoungeHistory()
+		}
 	}
 	a.dirty = true
 	return false, nil
@@ -868,24 +903,19 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 			a.Session.Notice("/transcript: only in TV lounge mode (PgUp also works)")
 			return false, true
 		}
-		a.tvShowTranscript = !a.tvShowTranscript
-		if !a.tvShowTranscript {
-			a.transcript.Scroll = 0
+		if a.tvShowTranscript {
+			a.hideLoungeHistory()
+		} else {
+			a.showLoungeHistory()
 		}
-		a.forceFullRedraw()
 		return false, true
 	case "/tvcolor":
-		if strings.EqualFold(a.TVColor, "16") {
-			a.TVColor = "truecolor"
-		} else {
-			a.TVColor = "16"
-		}
-		a.forceFullRedraw()
-		a.Session.Notice("TV color: " + a.TVColor)
+		a.toggleTVColor()
 		return false, true
 	case "/help", "/?":
 		a.Session.Notice("/me /msg /r /join /part /who /img /channels /clear /avatar /quit")
-		a.Session.Notice("TV: /tvtuner <host> <port> <channel> | /tvtuner off | /tvon | /tvoff | /transcript | /tvcolor")
+		a.Session.Notice("TV: /tvtuner <host> <port> <channel> | /tvtuner off | /tvon | /tvoff")
+		a.Session.Notice("TV: PgUp=history (PgDn/Down or 30s closes) | /tvcolor or Ctrl-T = truecolor/16")
 		return false, true
 	}
 	a.Session.Notice(fmt.Sprintf("unknown command: %s", cmd))
@@ -946,7 +976,7 @@ func (a *App) handleAvatarCmd(parts []string) {
 		// ZRINIT, so we tell the user how to trigger the upload.
 		a.Session.Notice("\x01WZmodem ready.\x01n Trigger the upload in your terminal:")
 		a.Session.Notice("  SyncTERM: \x01WAlt-S\x01n then pick the .bin")
-		a.Session.Notice("  NetRunner / fTelnet: Send menu → Zmodem")
+		a.Session.Notice("  NetRunner / fTelnet: Send menu -> Zmodem")
 		a.Session.Notice("  Press \x01WEsc\x01n to cancel.")
 		a.draw()
 		_ = a.render()
@@ -1337,16 +1367,17 @@ func (a *App) draw() {
 	a.header.Render()
 	a.actionBar.Render()
 	if a.loungeActive() {
-		// TV lounge mode paints the video + caption + popups into the three
-		// transcript layers instead of the normal transcript.
+		// TV lounge mode paints the video, the top hint strip, and popups into
+		// the three transcript layers, and owns the bottom action frame (it
+		// renders the caption bar there instead of the command pills).
 		a.drawLounge()
 	} else {
 		// Always render the transcript: the bg-anim layer shows through any
 		// transparent cells in the transcript (gutters between bubbles), so
 		// chat stays visible while idle animations play behind it.
 		a.transcript.Render(a.Session.Messages())
+		a.bottomActionBar.Render()
 	}
-	a.bottomActionBar.Render()
 	a.inputLine.Render()
 }
 

@@ -62,6 +62,10 @@ type Theme struct {
 	ModalBg    ansi.Attr
 	ModalTitle ansi.Attr
 
+	// TV lounge caption bar -- the live-subtitle strip painted across the
+	// bottom action row while a channel is tuned to a telnetvision feed.
+	TVCaption ansi.Attr
+
 	// Screensaver / idle profile. nil/empty means "inherit from main config".
 	IdleRandom   *bool
 	IdleSequence []string
@@ -102,6 +106,8 @@ func Default() *Theme {
 
 		ModalBg:    ansi.LightGray | ansi.BgBlack,
 		ModalTitle: ansi.Yellow | ansi.BgBlue,
+
+		TVCaption: ansi.White | ansi.BgBlue,
 	}
 }
 
@@ -212,6 +218,8 @@ func colorSlot(t *Theme, key string) *ansi.Attr {
 		return &t.ModalBg
 	case "modal_title":
 		return &t.ModalTitle
+	case "tv_caption":
+		return &t.TVCaption
 	}
 	return nil
 }

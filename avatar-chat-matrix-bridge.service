@@ -1,0 +1,16 @@
+[Unit]
+Description=Avatar Chat Matrix Bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sbbs
+Group=sbbs
+WorkingDirectory=/sbbs/xtrn/avatar_chat_universal
+ExecStart=/sbbs/xtrn/avatar_chat_universal/avatar_chat_matrix_bridge -config /sbbs/xtrn/avatar_chat_universal/matrix_bridge.ini
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

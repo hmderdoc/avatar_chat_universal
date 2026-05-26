@@ -269,13 +269,21 @@ Persist-to-disk is on the roadmap.
 
 ## Running a bridge as a systemd service
 
-The IRC and Discord bridges are long-running foreground processes that handle
-`SIGTERM` cleanly and reconnect on their own when the Discord/chat link drops.
-That makes them a clean fit for systemd with `Type=simple` — no forking or
-PID-file handling needed.
+Every bridge (IRC, Discord, Telegram, Matrix, Slack) is a long-running
+foreground process that handles `SIGTERM` cleanly and reconnects on its own when
+the upstream/chat link drops. That makes them a clean fit for systemd with
+`Type=simple` — no forking or PID-file handling needed. A ready-to-install unit
+ships for each:
 
-A ready-to-install unit for the Discord bridge ships at
-[`avatar-chat-discord-bridge.service`](avatar-chat-discord-bridge.service):
+| Bridge   | Unit file                                                                          | Binary                        | Config                |
+| -------- | ---------------------------------------------------------------------------------- | ----------------------------- | --------------------- |
+| Discord  | [`avatar-chat-discord-bridge.service`](avatar-chat-discord-bridge.service)         | `avatar_chat_discord_bridge`  | `discord_bridge.ini`  |
+| Telegram | [`avatar-chat-telegram-bridge.service`](avatar-chat-telegram-bridge.service)       | `avatar_chat_telegram_bridge` | `telegram_bridge.ini` |
+| Matrix   | [`avatar-chat-matrix-bridge.service`](avatar-chat-matrix-bridge.service)           | `avatar_chat_matrix_bridge`   | `matrix_bridge.ini`   |
+| Slack    | [`avatar-chat-slack-bridge.service`](avatar-chat-slack-bridge.service)             | `avatar_chat_slack_bridge`    | `slack_bridge.ini`    |
+
+The units are identical except for those three fields. Using Discord as the
+example:
 
 ```ini
 [Unit]
@@ -318,9 +326,10 @@ Notes:
   there automatically (see [Discord bridge](#discord-bridge) and `main.go`).
   Keep the token in `.env`, not in the `.service` file — the unit carries no
   secrets and is safe to commit.
-- **The IRC bridge is identical** — copy the unit, swap the three names
-  (`Description`, the binary in `ExecStart`, and `discord_bridge.ini` →
-  `irc_bridge.ini`). The IRC bridge has no token, so it doesn't need `.env`.
+- **Each bridge loads its own secret from `.env`** in the working directory:
+  `DISCORD_BOT_TOKEN`, `TELEGRAM_BOT_TOKEN`, `MATRIX_ACCESS_TOKEN`, and Slack's
+  `SLACK_APP_TOKEN` + `SLACK_BOT_TOKEN`. Keep them in `.env`, not the unit. The
+  IRC bridge has no token, so it doesn't need `.env`.
 - **`Restart=always`** covers a hard crash; the bridge's own reconnect loop
   (5s default, `reconnect_delay_seconds`) covers a dropped link without a
   process restart.

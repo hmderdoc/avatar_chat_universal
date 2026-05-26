@@ -5,6 +5,9 @@ DOOR_BIN := avatar_chat_universal
 SERVER_BIN := avatar_chat_server
 IRC_BRIDGE_BIN := avatar_chat_irc_bridge
 DISCORD_BRIDGE_BIN := avatar_chat_discord_bridge
+TELEGRAM_BRIDGE_BIN := avatar_chat_telegram_bridge
+MATRIX_BRIDGE_BIN := avatar_chat_matrix_bridge
+SLACK_BRIDGE_BIN := avatar_chat_slack_bridge
 DIST := dist
 
 GO_FLAGS := -trimpath -ldflags='-s -w'
@@ -25,6 +28,9 @@ DIST_FILES := \
 	avatar_chat.ini \
 	irc_bridge.ini \
 	discord_bridge.ini.example \
+	telegram_bridge.ini.example \
+	matrix_bridge.ini.example \
+	slack_bridge.ini.example \
 	README.md \
 	INSTALL.md \
 	CONFIG.md \
@@ -53,6 +59,9 @@ build: splash
 	CGO_ENABLED=0 $(GO) build $(GO_FLAGS) -o $(SERVER_BIN) ./cmd/$(SERVER_BIN)
 	CGO_ENABLED=0 $(GO) build $(GO_FLAGS) -o $(IRC_BRIDGE_BIN) ./cmd/$(IRC_BRIDGE_BIN)
 	CGO_ENABLED=0 $(GO) build $(GO_FLAGS) -o $(DISCORD_BRIDGE_BIN) ./cmd/$(DISCORD_BRIDGE_BIN)
+	CGO_ENABLED=0 $(GO) build $(GO_FLAGS) -o $(TELEGRAM_BRIDGE_BIN) ./cmd/$(TELEGRAM_BRIDGE_BIN)
+	CGO_ENABLED=0 $(GO) build $(GO_FLAGS) -o $(MATRIX_BRIDGE_BIN) ./cmd/$(MATRIX_BRIDGE_BIN)
+	CGO_ENABLED=0 $(GO) build $(GO_FLAGS) -o $(SLACK_BRIDGE_BIN) ./cmd/$(SLACK_BRIDGE_BIN)
 
 .PHONY: test
 test:
@@ -78,10 +87,19 @@ dist-%: splash
 		$(GO) build $(GO_FLAGS) -o $(OUT)/$(IRC_BRIDGE_BIN)$(EXT) ./cmd/$(IRC_BRIDGE_BIN)
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 \
 		$(GO) build $(GO_FLAGS) -o $(OUT)/$(DISCORD_BRIDGE_BIN)$(EXT) ./cmd/$(DISCORD_BRIDGE_BIN)
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 \
+		$(GO) build $(GO_FLAGS) -o $(OUT)/$(TELEGRAM_BRIDGE_BIN)$(EXT) ./cmd/$(TELEGRAM_BRIDGE_BIN)
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 \
+		$(GO) build $(GO_FLAGS) -o $(OUT)/$(MATRIX_BRIDGE_BIN)$(EXT) ./cmd/$(MATRIX_BRIDGE_BIN)
+	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 \
+		$(GO) build $(GO_FLAGS) -o $(OUT)/$(SLACK_BRIDGE_BIN)$(EXT) ./cmd/$(SLACK_BRIDGE_BIN)
 	# Top-level files (config, full doc set, license). Splash artwork is
 	# embedded in the binary; nothing to ship separately.
 	cp $(DIST_FILES) $(OUT)/
 	cp discord_bridge.ini.example $(OUT)/discord_bridge.ini
+	cp telegram_bridge.ini.example $(OUT)/telegram_bridge.ini
+	cp matrix_bridge.ini.example $(OUT)/matrix_bridge.ini
+	cp slack_bridge.ini.example $(OUT)/slack_bridge.ini
 	# Bundled themes -- futurewave is the default; sysops copy + edit.
 	cp themes/*.ini $(OUT)/themes/
 	# Stub READMEs for the directories sysops fill with their own content.
@@ -126,6 +144,9 @@ clean:
 	rm -f $(DOOR_BIN) $(SERVER_BIN) $(DOOR_BIN).exe $(SERVER_BIN).exe
 	rm -f $(IRC_BRIDGE_BIN) $(IRC_BRIDGE_BIN).exe
 	rm -f $(DISCORD_BRIDGE_BIN) $(DISCORD_BRIDGE_BIN).exe
+	rm -f $(TELEGRAM_BRIDGE_BIN) $(TELEGRAM_BRIDGE_BIN).exe
+	rm -f $(MATRIX_BRIDGE_BIN) $(MATRIX_BRIDGE_BIN).exe
+	rm -f $(SLACK_BRIDGE_BIN) $(SLACK_BRIDGE_BIN).exe
 	rm -rf $(DIST)
 
 # --- Legacy Windows (XP) target -------------------------------------

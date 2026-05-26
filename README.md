@@ -78,12 +78,21 @@ make build
 # Or run the Discord bridge:
 cp discord_bridge.ini.example discord_bridge.ini
 DISCORD_BOT_TOKEN=... ./avatar_chat_discord_bridge -config discord_bridge.ini
+
+# Or the Telegram / Matrix / Slack bridges (same shape):
+TELEGRAM_BOT_TOKEN=...  ./avatar_chat_telegram_bridge -config telegram_bridge.ini
+MATRIX_ACCESS_TOKEN=... ./avatar_chat_matrix_bridge   -config matrix_bridge.ini
+SLACK_APP_TOKEN=... SLACK_BOT_TOKEN=... ./avatar_chat_slack_bridge -config slack_bridge.ini
 ```
 
-To run a bridge as a boot-started, auto-restarting daemon under systemd, see
-[Running a bridge as a systemd service](INSTALL.md#running-a-bridge-as-a-systemd-service).
-A ready-to-install unit ships at
-[`avatar-chat-discord-bridge.service`](avatar-chat-discord-bridge.service).
+Each bridge ships an `<platform>_bridge.ini.example` to copy and edit. To run one
+as a boot-started, auto-restarting daemon under systemd, see
+[Running a bridge as a systemd service](INSTALL.md#running-a-bridge-as-a-systemd-service);
+a ready-to-install unit ships for each
+([`avatar-chat-discord-bridge.service`](avatar-chat-discord-bridge.service),
+[`-telegram-`](avatar-chat-telegram-bridge.service),
+[`-matrix-`](avatar-chat-matrix-bridge.service),
+[`-slack-`](avatar-chat-slack-bridge.service)).
 
 ### IRC bridge
 
@@ -102,6 +111,33 @@ bridged back to Avatar Chat as URLs. The bot needs access to the configured
 channel and Discord's Message Content intent enabled for Discord-to-Avatar Chat
 messages. Keep the runtime `discord_bridge.ini` local; the tracked
 `discord_bridge.ini.example` contains the setup and bot invite steps.
+
+### Telegram bridge
+
+`avatar_chat_telegram_bridge` connects one Telegram group/channel to one Avatar
+Chat channel. Avatars (off by default) and `[BITMAP|...]` images render to native
+photo uploads; linked images/audio in chat are re-uploaded as native Telegram
+media. Telegram file URLs embed the bot token, so inbound attachments are
+annotated by type (`[photo]`, `[file: ...]`) rather than forwarded as links. Set
+the token via `TELEGRAM_BOT_TOKEN`; see `telegram_bridge.ini.example` for the
+@BotFather and chat-id steps.
+
+### Matrix bridge
+
+`avatar_chat_matrix_bridge` connects one Matrix room to one Avatar Chat channel
+using a bot account's access token (no SDK; plain Client-Server API). BITMAP and
+linked media upload to the homeserver media repo as native events; inbound `mxc://`
+media is annotated by type rather than forwarded (download often needs auth). Set
+the token via `MATRIX_ACCESS_TOKEN`; see `matrix_bridge.ini.example`.
+
+### Slack bridge
+
+`avatar_chat_slack_bridge` connects one Slack channel to one Avatar Chat channel
+over Socket Mode (no public endpoint needed). It needs an app-level token
+(`SLACK_APP_TOKEN`, `xapp-`) and a bot token (`SLACK_BOT_TOKEN`, `xoxb-`). BITMAP
+and linked media upload natively; inbound files carry an auth-only `url_private`,
+so they're annotated rather than forwarded. See `slack_bridge.ini.example` for the
+app scopes and Socket Mode setup.
 
 ## Documentation
 

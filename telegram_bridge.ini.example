@@ -1,0 +1,67 @@
+; Avatar Chat <-> Telegram bridge configuration.
+;
+; Copy this file to telegram_bridge.ini and edit that local runtime copy:
+;   cp telegram_bridge.ini.example telegram_bridge.ini
+;
+; Run with:
+;   TELEGRAM_BOT_TOKEN=... ./avatar_chat_telegram_bridge -config telegram_bridge.ini
+;
+; Telegram setup:
+;   1. In Telegram, message @BotFather and run /newbot. Follow the prompts to
+;      name the bot; BotFather replies with an HTTP API token.
+;      Prefer setting it in the environment as TELEGRAM_BOT_TOKEN.
+;      Do not commit or share bot tokens. If a token leaks, /revoke it in
+;      @BotFather and issue a new one.
+;   2. Add the bot to your target group or channel.
+;        - Group: add the bot as a member. For it to RECEIVE messages, either
+;          make it an admin, or message @BotFather -> /setprivacy -> Disable
+;          (so it sees all group messages, not just commands).
+;        - Channel: add the bot as an admin with "Post Messages".
+;   3. Find the chat_id:
+;        - Easiest: add @RawDataBot or @getidsbot to the chat briefly; it
+;          prints the numeric chat id (groups/supergroups look like
+;          -1001234567890). Or use a public channel's @username.
+;   4. Paste the id (or @username) below as chat_id.
+
+[telegram]
+; Prefer TELEGRAM_BOT_TOKEN in the environment. This value wins if set.
+; token =
+; Numeric id (e.g. -1001234567890) or @channelusername of the bound chat.
+chat_id =
+; getUpdates long-poll window, seconds.
+poll_timeout_seconds = 30
+
+[chat]
+host = futureland.today
+port = 10088
+nick = Telegram
+system = Telegram Bridge
+channel = main
+
+[bridge]
+telegram_to_chat = true
+chat_to_telegram = true
+; When true, each chat message is posted as the sender's avatar image with the
+; text as its caption, and the avatar is also used as the audio-player thumbnail
+; for shared tracks that have no cover art. Note: Telegram renders photos at
+; bubble width, so the avatar shows full-size (there's no inline-thumbnail-beside
+; -text option for bots like Discord embeds have). Set false for styled text
+; only (no avatar image).
+include_avatar_image = true
+; Render [BITMAP|...] payloads to a PNG and send as a photo.
+include_bitmap_image = true
+; Fetch image/audio links found in chat text and re-upload them as native
+; Telegram photo/audio attachments (falls back to forwarding the link).
+include_media = true
+; Annotate inbound Telegram attachments ([photo], [file: name], ...). Telegram
+; media URLs embed the bot token, so the URL itself is never forwarded.
+include_attachment_urls = true
+; Turn relative media paths like ./api/files.ssjs?...file=image.png into
+; absolute URLs the bridge can fetch.
+; public_base_url = https://futureland.today
+reconnect_delay_seconds = 5
+
+[filter]
+; Suppress Avatar Chat -> Telegram echoes that match these regexes.
+; Repeat the key for multiple patterns.
+; chat_to_telegram_ignore_regex = (?i)^BLOCKBRAIN:

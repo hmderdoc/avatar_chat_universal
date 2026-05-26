@@ -62,12 +62,29 @@ frames into PNG. If a CP437 sprite sheet is supplied, it uses glyph rendering;
 otherwise it falls back to colored cell/block rendering so bridge adapters can
 still produce valid image attachments in minimal deployments.
 
-## Adapter Order
+## Adapters
 
-Recommended next adapters:
+All four planned adapters are implemented, each a thin command over the shared
+core:
 
-1. Discord: highest value for embeds, thumbnails, PNG and audio attachments.
-   Initial adapter: `cmd/avatar_chat_discord_bridge`.
-2. Telegram: similar media value, smaller API surface.
-3. Matrix: good BBS-community fit, native media repository.
-4. Slack: useful but less BBS-native, likely lowest priority.
+1. Discord — `cmd/avatar_chat_discord_bridge` / `internal/discordbridge`. Rich
+   embeds, thumbnails, PNG and audio attachments. Uses the `discordgo` SDK.
+2. Telegram — `cmd/avatar_chat_telegram_bridge` / `internal/telegrambridge`.
+   Native photo/audio uploads. Hand-rolled Bot API client (long-poll), no SDK.
+3. Matrix — `cmd/avatar_chat_matrix_bridge` / `internal/matrixbridge`. Native
+   media-repo uploads. Hand-rolled Client-Server API client, no SDK.
+4. Slack — `cmd/avatar_chat_slack_bridge` / `internal/slackbridge`. Socket Mode
+   over `gorilla/websocket` + Web API; native file uploads.
+
+Telegram, Matrix, and Slack share `internal/bridgeenv` for `.env` loading. The
+hand-rolled clients mirror `internal/ircbridge/irc.go`: each platform's bridge
+needs only a small slice of its API (receive in one channel, send text + media),
+so a full SDK would be more dependency than payoff.
+
+### Inbound media safety
+
+Discord attachment URLs are public CDN links, so they're forwarded into Avatar
+Chat as-is. Telegram file URLs embed the bot token, Matrix `mxc://` downloads
+often require auth, and Slack `url_private` always does — so those three
+**annotate inbound attachments by type** (`[photo]`, `[file: name]`, ...) instead
+of forwarding a credential-bearing URL.

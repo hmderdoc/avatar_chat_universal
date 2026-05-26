@@ -1,0 +1,67 @@
+; Avatar Chat <-> Slack bridge configuration.
+;
+; Copy this file to slack_bridge.ini and edit that local runtime copy:
+;   cp slack_bridge.ini.example slack_bridge.ini
+;
+; Run with:
+;   SLACK_APP_TOKEN=xapp-... SLACK_BOT_TOKEN=xoxb-... ./avatar_chat_slack_bridge -config slack_bridge.ini
+;
+; Slack setup:
+;   1. Create an app at https://api.slack.com/apps ("Create New App" ->
+;      "From scratch"), name it and pick your workspace.
+;   2. Enable Socket Mode (Settings -> Socket Mode -> toggle on). This
+;      generates an app-level token (xapp-...) with the connections:write
+;      scope. That is the app_token below. Prefer SLACK_APP_TOKEN in env.
+;   3. Under OAuth & Permissions -> Scopes -> Bot Token Scopes, add:
+;        chat:write, channels:history, channels:read, users:read, files:write
+;      Then "Install to Workspace" to get the bot token (xoxb-...). That is
+;      the bot_token below. Prefer SLACK_BOT_TOKEN in env.
+;   4. Under Event Subscriptions, toggle "Enable Events" on, and under
+;      "Subscribe to bot events" add: message.channels
+;   5. Invite the bot to the target channel in Slack: /invite @yourbot
+;   6. Copy the channel id (open the channel, click its name -> bottom of the
+;      About tab shows "Channel ID" like C0123ABCD) into channel_id below.
+;
+; Do not commit or share tokens. If a token leaks, rotate it in the app's
+; settings (regenerate the app-level token / reinstall for a new bot token).
+
+[slack]
+; Prefer SLACK_APP_TOKEN in the environment. This value wins if set.
+; app_token = xapp-...
+; Prefer SLACK_BOT_TOKEN in the environment. This value wins if set.
+; bot_token = xoxb-...
+; The bound Slack channel id (e.g. C0123ABCD).
+channel_id =
+
+[chat]
+host = futureland.today
+port = 10088
+nick = Slack
+system = Slack Bridge
+channel = main
+
+[bridge]
+slack_to_chat = true
+chat_to_slack = true
+; Avatars aren't shown per-message on Slack by default (it would flood the
+; channel). When true, a message with no other media is uploaded as the
+; sender's avatar image with the text as its caption.
+include_avatar_image = true
+; Render [BITMAP|...] payloads to a PNG and upload as a file.
+include_bitmap_image = true
+; Fetch image/audio links found in chat text and re-upload them as native
+; Slack file attachments (falls back to posting the link, which Slack unfurls).
+include_media = true
+; Annotate inbound Slack attachments ([file: name], [image], ...). Slack file
+; URLs (url_private) require the bot token to download, so the URL itself is
+; never forwarded into the BBS chat.
+include_attachment_urls = true
+; Turn relative media paths like ./api/files.ssjs?...file=image.png into
+; absolute URLs the bridge can fetch.
+; public_base_url = https://futureland.today
+reconnect_delay_seconds = 5
+
+[filter]
+; Suppress Avatar Chat -> Slack echoes that match these regexes.
+; Repeat the key for multiple patterns.
+; chat_to_slack_ignore_regex = (?i)^BLOCKBRAIN:

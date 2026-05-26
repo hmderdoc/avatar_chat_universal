@@ -1,0 +1,70 @@
+; Avatar Chat <-> Matrix bridge configuration.
+;
+; Copy this file to matrix_bridge.ini and edit that local runtime copy:
+;   cp matrix_bridge.ini.example matrix_bridge.ini
+;
+; Run with:
+;   MATRIX_ACCESS_TOKEN=... ./avatar_chat_matrix_bridge -config matrix_bridge.ini
+;
+; Matrix setup:
+;   1. Create a bot account on your homeserver (the same way you register any
+;      user). Use a dedicated account for the bridge, not your personal one.
+;   2. Log in once to obtain an access token. Two easy ways:
+;        - curl: POST to the login endpoint with the bot's credentials, e.g.
+;            curl -XPOST 'https://matrix.org/_matrix/client/v3/login' \
+;              -d '{"type":"m.login.password","identifier":{"type":"m.id.user","user":"bridgebot"},"password":"..."}'
+;          The JSON response contains "access_token" and "user_id".
+;        - Element: log in as the bot, then Settings -> Help & About ->
+;          Access Token (click to reveal). The user id (@bridgebot:server) is
+;          shown in your profile.
+;      Prefer setting the token in the environment as MATRIX_ACCESS_TOKEN.
+;      Do not commit or share access tokens. If a token leaks, log the bot out
+;      of that session to revoke it and obtain a new one.
+;   3. Invite the bot to your target room and have it join (accept the invite
+;      while logged in as the bot, or auto-join).
+;   4. Find the internal room id: in the room's Settings -> Advanced, copy the
+;      "Internal room ID". It looks like !abcdef012345:matrix.org. Use that, not
+;      a #alias:server room alias.
+
+[matrix]
+; Homeserver base URL, e.g. https://matrix.org
+homeserver = https://matrix.org
+; Prefer MATRIX_ACCESS_TOKEN in the environment. This value wins if set.
+; access_token =
+; The bot's own user id (@bridgebot:server). Used to skip the bot's own
+; messages so its sends are not echoed back into chat.
+user_id =
+; Internal room id of the bound room, e.g. !abcdef012345:matrix.org
+room_id =
+
+[chat]
+host = futureland.today
+port = 10088
+nick = Matrix
+system = Matrix Bridge
+channel = main
+
+[bridge]
+matrix_to_chat = true
+chat_to_matrix = true
+; Avatars aren't shown per-message on Matrix by default (it would flood the
+; room). When true, a message's sender avatar is uploaded as its own image.
+include_avatar_image = false
+; Render [BITMAP|...] payloads to a PNG and upload as an m.image.
+include_bitmap_image = true
+; Fetch image/audio links found in chat text and re-upload them as native
+; Matrix m.image/m.audio events (falls back to forwarding the link as text).
+include_media = true
+; Annotate inbound Matrix attachments ([image: name], [file: name], ...). The
+; mxc:// content URL needs the homeserver plus auth to resolve, so it is never
+; forwarded -- only the type and filename.
+include_attachment_urls = true
+; Turn relative media paths like ./api/files.ssjs?...file=image.png into
+; absolute URLs the bridge can fetch.
+; public_base_url = https://futureland.today
+reconnect_delay_seconds = 5
+
+[filter]
+; Suppress Avatar Chat -> Matrix echoes that match these regexes.
+; Repeat the key for multiple patterns.
+; chat_to_matrix_ignore_regex = (?i)^BLOCKBRAIN:

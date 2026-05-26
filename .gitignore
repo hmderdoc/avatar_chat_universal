@@ -9,6 +9,12 @@
 /avatar_chat_irc_bridge.exe
 /avatar_chat_discord_bridge
 /avatar_chat_discord_bridge.exe
+/avatar_chat_telegram_bridge
+/avatar_chat_telegram_bridge.exe
+/avatar_chat_matrix_bridge
+/avatar_chat_matrix_bridge.exe
+/avatar_chat_slack_bridge
+/avatar_chat_slack_bridge.exe
 /dist/
 
 # Runtime data (per-user avatars, etc.)
@@ -18,6 +24,9 @@ data/
 avatars/sysop/
 ansi_gallery/
 discord_bridge.ini
+telegram_bridge.ini
+matrix_bridge.ini
+slack_bridge.ini
 
 # Secrets / local environment
 .env

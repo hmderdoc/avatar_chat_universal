@@ -35,6 +35,11 @@ slack_bridge.ini
 *.trace
 *.log
 
+# Moebius editor autosaves / exports dropped at the top of moebius_chat/
+# (timestamped "<name> - <date>.ans", server.ans, etc.). Anchored to the
+# top level so the curated art under moebius_chat/build/ans/ stays tracked.
+moebius_chat/*.ans
+
 # Editor / OS noise
 .DS_Store
 .idea/

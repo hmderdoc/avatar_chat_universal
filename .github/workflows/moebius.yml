@@ -6,9 +6,10 @@
 #   Linux   -> Moebius.AppImage       (x64)
 #
 # Each platform uploads its OWN workflow artifact (Moebius-macOS / -Windows /
-# -Linux), so you can download just the one you want instead of the whole set.
-# On a published Release (tags via release.yml) the raw installers are also
-# attached as release assets for direct, no-zip downloads.
+# -Linux) so you can grab just the one you want. This workflow only produces
+# per-commit CI artifacts; release ASSETS (attached to a tag's release) are
+# built and attached by release.yml so a tag yields the complete release in one
+# GITHUB_TOKEN run.
 #
 # Builds are unsigned (no certs in CI). First launch:
 #   macOS:   xattr -dr com.apple.quarantine /Applications/Moebius.app
@@ -24,8 +25,6 @@ on:
     paths:
       - 'moebius_chat/**'
       - '.github/workflows/moebius.yml'
-  release:
-    types: [published]
 
 jobs:
   build:
@@ -65,21 +64,3 @@ jobs:
           name: Moebius-${{ matrix.platform }}
           path: moebius_chat/${{ matrix.glob }}
           if-no-files-found: error
-
-  # On a published release, attach the raw installers as release assets so they
-  # can be downloaded individually (no artifact zip).
-  release:
-    needs: build
-    if: github.event_name == 'release'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.release.tag_name }}
-          files: dist/*

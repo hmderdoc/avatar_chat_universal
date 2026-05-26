@@ -42,8 +42,49 @@ jobs:
           name: ${{ matrix.goos }}_${{ matrix.goarch }}
           path: dist/avatar_chat_universal_*.tar.gz
 
+  # Desktop installers for the vendored Moebius editor, built on native runners
+  # and attached to the same release (so a tag yields the complete release in
+  # one GITHUB_TOKEN workflow — no fragile cross-workflow `release` event).
+  moebius:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macOS
+            build: npx electron-builder --mac --publish never
+            glob: dist/*.dmg
+          - os: windows-latest
+            platform: Windows
+            build: npx electron-builder --win nsis portable --x64 --publish never
+            glob: dist/*.exe
+          - os: ubuntu-latest
+            platform: Linux
+            build: npx electron-builder --linux AppImage --x64 --publish never
+            glob: dist/*.AppImage
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: moebius_chat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm install
+      - name: Build ${{ matrix.platform }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: ${{ matrix.build }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Moebius-${{ matrix.platform }}
+          path: moebius_chat/${{ matrix.glob }}
+          if-no-files-found: error
+
   release:
-    needs: build
+    needs: [build, moebius]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -54,7 +95,9 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/avatar_chat_universal_*.tar.gz
+          files: |
+            dist/avatar_chat_universal_*.tar.gz
+            dist/Moebius*
           draft: false
           prerelease: false
           generate_release_notes: true

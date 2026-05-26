@@ -152,7 +152,16 @@ func (s *Session) broadcastMarker(marker string) error {
 	if err := s.Client.Write("chat", s.locMessages(s.Channel), msg, LockWrite); err != nil {
 		return err
 	}
-	_ = s.Client.Push("chat", s.locTuner(s.Channel), msg, LockWrite)
+	// Durable state, written so SLICE can read it back on join. Two server
+	// behaviors to satisfy: the Go chatserver only slices PUSH-built arrays
+	// (WRITE goes to a scalar map), while Synchronet json-db rejects a PUSH to
+	// a missing record ("Record not found"). The portable idiom (same as the
+	// JS door's ensureHistoryArray) is: WRITE [] to create/reset the record,
+	// then PUSH the latest event. Net result on both: the record holds exactly
+	// the most recent tune/off.
+	loc := s.locTuner(s.Channel)
+	_ = s.Client.Write("chat", loc, []*Message{}, LockWrite)
+	_ = s.Client.Push("chat", loc, msg, LockWrite)
 	return nil
 }
 

@@ -12,6 +12,28 @@ type RenderOpts struct {
 	Truecolor  bool    // true: 24-bit cells; false: CGA-16 (quantized + dithered)
 	Saturation float64 // CGA only: saturation boost before quantizing (e.g. 1.8)
 	Dither     bool    // CGA only: ordered (Bayer) dithering
+
+	// Mode mirrors the broadcaster's per-frame render hint (telnetvision wire
+	// byte f[5]): 0 = color half-block, 1 = ASCII/shade ramp (one FG-colored
+	// glyph chosen by brightness, no background). Ramp mode emits roughly a
+	// third the bytes of truecolor half-blocks — the broadcaster sends it when
+	// the material reads fine as a gradient, which is also the byte-rate lever
+	// that keeps a slow SSH link from backing up.
+	Mode byte
+	// Ramp selects the glyph set when Mode==1 (wire byte f[6]): 0 = ASCII
+	// " .:-=+*#%@", 1 = CP437 shade blocks " ░▒▓█".
+	Ramp byte
+}
+
+// rampGlyphs returns the brightness ramp for telnetvision "ramp" mode (Mode==1),
+// darkest-first. Ramp 1 selects CP437 shade blocks; anything else uses the ASCII
+// ramp. Mirrors rampGlyphs() in the canonical telnetvision door; we emit CP437
+// bytes since the door's cells are CP437 (Frame.Charset handles UTF-8 output).
+func rampGlyphs(ramp byte) []byte {
+	if ramp == 1 {
+		return []byte{0x20, 0xB0, 0xB1, 0xB2, 0xDB} // ' ' ░ ▒ ▓ █
+	}
+	return []byte(" .:-=+*#%@")
 }
 
 // RenderTo paints the frame into dst's region [ox,ox+w) x [oy,oy+h), scaling
@@ -27,6 +49,13 @@ func (fr *Frame) RenderTo(dst *ansi.Frame, ox, oy, w, h int, opts RenderOpts) {
 	if sat == 0 {
 		sat = 1.0
 	}
+	// Ramp mode: one FG-colored glyph per cell, chosen by brightness. The
+	// broadcaster requests this for material that reads fine as a gradient;
+	// it is the cheapest path on the wire (no per-cell background).
+	var ramp []byte
+	if opts.Mode == 1 {
+		ramp = rampGlyphs(opts.Ramp)
+	}
 	for ty := 0; ty < h; ty++ {
 		sy := ty * fr.Rows / h
 		for tx := 0; tx < w; tx++ {
@@ -38,6 +67,28 @@ func (fr *Frame) RenderTo(dst *ansi.Frame, ox, oy, w, h int, opts RenderOpts) {
 			}
 			tr, tg, tb := int(fr.Pixels[tp]), int(fr.Pixels[tp+1]), int(fr.Pixels[tp+2])
 			br, bg, bb := int(fr.Pixels[bp]), int(fr.Pixels[bp+1]), int(fr.Pixels[bp+2])
+			if ramp != nil {
+				// Average the two source rows (a ramp glyph carries one cell,
+				// not a top/bottom split) and map luma -> glyph, like the
+				// canonical door's renderRamp.
+				r, g, b := (tr+br)/2, (tg+bg)/2, (tb+bb)/2
+				luma := (r*299 + g*587 + b*114) / 1000
+				gi := luma * (len(ramp) - 1) / 255
+				if gi < 0 {
+					gi = 0
+				} else if gi >= len(ramp) {
+					gi = len(ramp) - 1
+				}
+				if opts.Truecolor {
+					dst.SetCellFg(ox+tx, oy+ty, ramp[gi],
+						ansi.RGB{R: uint8(r), G: uint8(g), B: uint8(b)})
+				} else {
+					idx := quantCGA(r, g, b, tx, ty, sat, opts.Dither)
+					// FG only; background stays black (no iCE bg).
+					dst.SetCell(ox+tx, oy+ty, ramp[gi], ansi.Attr(idx&0x0f))
+				}
+				continue
+			}
 			if opts.Truecolor {
 				dst.SetCellTrue(ox+tx, oy+ty, halfBlock,
 					ansi.RGB{R: uint8(tr), G: uint8(tg), B: uint8(tb)},

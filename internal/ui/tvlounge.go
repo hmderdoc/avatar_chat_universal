@@ -198,6 +198,10 @@ func (a *App) drawLounge() {
 			Truecolor:  a.tvColorTrue(),
 			Saturation: 1.8,
 			Dither:     true,
+			// Honor the broadcaster's per-frame render hint: mode=1 frames
+			// paint as a cheap FG-only glyph ramp instead of half-blocks.
+			Mode: fr.Mode,
+			Ramp: fr.Ramp,
 		})
 	} else {
 		label := "the channel"

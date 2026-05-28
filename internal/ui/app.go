@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -133,6 +134,14 @@ type App struct {
 	tvLastTick          time.Time
 
 	dirty bool
+
+	// Render pacer: renderBuf is scratch for composing a frame; pending holds
+	// the composed frame currently being drained to the conn (one frame in
+	// flight at a time), with pendingOff the write cursor into it. See
+	// paceFrame / flushPending.
+	renderBuf  bytes.Buffer
+	pending    []byte
+	pendingOff int
 }
 
 func NewApp(conn io.Writer, in *ansi.Input, sess *chat.Session, width, height int, charset ansi.Charset) *App {
@@ -573,7 +582,7 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	a.draw()
-	if err := a.render(); err != nil {
+	if err := a.renderBlocking(); err != nil {
 		return err
 	}
 
@@ -636,12 +645,12 @@ func (a *App) Run(ctx context.Context) error {
 			}
 		}
 
-		if a.dirty {
-			a.draw()
-			if err := a.render(); err != nil {
-				return err
-			}
-			a.dirty = false
+		// Pace output: drain any frame still in flight, and compose a new one
+		// only when the previous has fully flushed. This is the backpressure
+		// point — on a slow/stalled link the door stops producing instead of
+		// firehosing past the SSH channel window.
+		if err := a.paceFrame(); err != nil {
+			return err
 		}
 	}
 }
@@ -979,7 +988,7 @@ func (a *App) handleAvatarCmd(parts []string) {
 		a.Session.Notice("  NetRunner / fTelnet: Send menu -> Zmodem")
 		a.Session.Notice("  Press \x01WEsc\x01n to cancel.")
 		a.draw()
-		_ = a.render()
+		_ = a.renderBlocking()
 		b64, err := a.OnAvatarUpload()
 		// Force a full repaint after upload because the protocol writes
 		// to the conn and may have scrolled the screen.
@@ -1452,26 +1461,30 @@ func (a *App) refreshActionBar() {
 	}
 }
 
-func (a *App) render() error {
+// composeInto writes the current UI frame to w. The render loop composes
+// into an in-memory buffer (so a frame can be held in flight and paced out
+// without blocking); the one-shot paint paths write straight to the conn via
+// renderBlocking.
+func (a *App) composeInto(w io.Writer) error {
 	if a.imageViewer != nil {
-		return a.imageViewer.Render(a.Conn)
+		return a.imageViewer.Render(w)
 	}
 	if a.modal != nil {
-		return a.modalFrame.Render(a.Conn)
+		return a.modalFrame.Render(w)
 	}
-	if err := a.headerFrame.Render(a.Conn); err != nil {
+	if err := a.headerFrame.Render(w); err != nil {
 		return err
 	}
-	if err := a.actionFrame.Render(a.Conn); err != nil {
+	if err := a.actionFrame.Render(w); err != nil {
 		return err
 	}
-	if err := a.transcriptComp.Render(a.Conn); err != nil {
+	if err := a.transcriptComp.Render(w); err != nil {
 		return err
 	}
-	if err := a.bottomActionFrame.Render(a.Conn); err != nil {
+	if err := a.bottomActionFrame.Render(w); err != nil {
 		return err
 	}
-	if err := a.inputFrame.Render(a.Conn); err != nil {
+	if err := a.inputFrame.Render(w); err != nil {
 		return err
 	}
 	// Park the terminal cursor at the end of the input buffer. If the user's
@@ -1480,5 +1493,88 @@ func (a *App) render() error {
 	// lands on top of our input line instead of below the drawn area.
 	col := a.inputFrame.X + a.inputLine.CursorCol() + 1 // 1-based
 	row := a.inputFrame.Y + 1
-	return ansi.MoveCursor(a.Conn, col, row)
+	return ansi.MoveCursor(w, col, row)
+}
+
+// renderBlocking composes the current frame and writes all of it to the conn
+// with the ordinary blocking Write. Used for one-shot paints (startup, and
+// before handing the wire to a file transfer) where there is no next frame to
+// race and we just want the screen fully on the wire before continuing.
+func (a *App) renderBlocking() error {
+	a.renderBuf.Reset()
+	if err := a.composeInto(&a.renderBuf); err != nil {
+		return err
+	}
+	_, err := a.Conn.Write(a.renderBuf.Bytes())
+	return err
+}
+
+// paceFrame is the render-loop output path. It keeps at most one composed
+// frame in flight: it first tries to drain the frame already pending, and
+// only composes a new one once that has fully flushed. On a slow link the
+// non-blocking write short-returns, we hold off composing, and the TV
+// consumer's drop-to-latest means the next frame we compose is the freshest
+// one — graceful frame-drop instead of stuffing the SSH channel past its
+// window. Frames are written whole and in order, so a partial flush never
+// corrupts an escape sequence; we just resume at pendingOff next tick.
+func (a *App) paceFrame() error {
+	if err := a.flushPending(); err != nil {
+		return err
+	}
+	if a.frameInFlight() || !a.dirty {
+		return nil
+	}
+	a.draw()
+	a.renderBuf.Reset()
+	if err := a.composeInto(&a.renderBuf); err != nil {
+		return err
+	}
+	a.dirty = false
+	if a.renderBuf.Len() == 0 {
+		return nil
+	}
+	// Copy the composed frame into the pending buffer (reusing its backing
+	// array; renderBuf is reset on the next compose) and start draining it.
+	a.pending = append(a.pending[:0], a.renderBuf.Bytes()...)
+	a.pendingOff = 0
+	return a.flushPending()
+}
+
+// frameInFlight reports whether a composed frame is still partially unwritten.
+func (a *App) frameInFlight() bool {
+	return a.pendingOff < len(a.pending)
+}
+
+// flushPending writes as much of the in-flight frame as the conn will accept
+// without blocking. When the conn exposes a non-blocking write (real socket
+// mode), a full send buffer short-returns and we retry the remainder next
+// tick — this is where Synchronet's backpressure finally reaches the door.
+// stdio / local consoles fall back to a single blocking Write.
+func (a *App) flushPending() error {
+	if !a.frameInFlight() {
+		return nil
+	}
+	n, err := a.writeConn(a.pending[a.pendingOff:])
+	if err != nil {
+		return err
+	}
+	a.pendingOff += n
+	return nil
+}
+
+// writeConn writes p to the conn, preferring a non-blocking write when the
+// conn supports it (see termio.NonBlockingWriter). The interface is declared
+// locally so app.go stays decoupled from the termio package; Go interfaces
+// are structural, so the concrete socket conn satisfies it.
+func (a *App) writeConn(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	type nonBlockingWriter interface {
+		WriteNB(p []byte) (int, error)
+	}
+	if nb, ok := a.Conn.(nonBlockingWriter); ok {
+		return nb.WriteNB(p)
+	}
+	return a.Conn.Write(p)
 }

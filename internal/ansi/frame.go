@@ -23,12 +23,22 @@ type Cell struct {
 	// the dirty-diff in Render/Compositor still works unchanged.
 	True   bool
 	Fg, Bg RGB
+
+	// FgOnly (with True) emits only the 24-bit foreground and leaves the
+	// background at the terminal default (black, via the leading SGR reset).
+	// Used by telnetvision "ramp" mode, where each cell is a single
+	// FG-colored glyph rather than a two-color half-block — roughly half the
+	// bytes per cell, and adjacent same-color glyphs coalesce their SGR.
+	FgOnly bool
 }
 
 // SGR returns the escape sequence that selects this cell's colors: a 24-bit
 // truecolor sequence when True, otherwise the CGA attribute's SGR.
 func (c Cell) SGR() string {
 	if c.True {
+		if c.FgOnly {
+			return fmt.Sprintf("\x1b[0;38;2;%d;%d;%dm", c.Fg.R, c.Fg.G, c.Fg.B)
+		}
 		return fmt.Sprintf("\x1b[0;38;2;%d;%d;%d;48;2;%d;%d;%dm",
 			c.Fg.R, c.Fg.G, c.Fg.B, c.Bg.R, c.Bg.G, c.Bg.B)
 	}
@@ -132,6 +142,17 @@ func (f *Frame) SetCellTrue(x, y int, ch byte, fg, bg RGB) {
 		return
 	}
 	f.cur[y][x] = Cell{Char: ch, True: true, Fg: fg, Bg: bg}
+}
+
+// SetCellFg writes one 24-bit foreground-only cell at (x,y): glyph ch in
+// color fg over the terminal-default (black) background. Used for
+// telnetvision "ramp" mode glyphs, which are FG-colored characters rather
+// than half-blocks.
+func (f *Frame) SetCellFg(x, y int, ch byte, fg RGB) {
+	if x < 0 || x >= f.W || y < 0 || y >= f.H {
+		return
+	}
+	f.cur[y][x] = Cell{Char: ch, True: true, FgOnly: true, Fg: fg}
 }
 
 // Print writes b at the current cursor with the fill attribute, advancing

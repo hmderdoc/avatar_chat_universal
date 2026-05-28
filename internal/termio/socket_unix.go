@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"syscall"
 	"time"
 )
 
@@ -42,7 +43,45 @@ func NewSocketFD(fd int) (Conn, error) {
 	return &socketConn{conn: c}, nil
 }
 
-func (c *socketConn) Read(p []byte) (int, error)         { return c.conn.Read(p) }
-func (c *socketConn) Write(p []byte) (int, error)        { return c.conn.Write(p) }
-func (c *socketConn) Close() error                       { return c.conn.Close() }
-func (c *socketConn) SetReadDeadline(t time.Time) error  { return c.conn.SetReadDeadline(t) }
+func (c *socketConn) Read(p []byte) (int, error)        { return c.conn.Read(p) }
+func (c *socketConn) Write(p []byte) (int, error)       { return c.conn.Write(p) }
+func (c *socketConn) Close() error                      { return c.conn.Close() }
+func (c *socketConn) SetReadDeadline(t time.Time) error { return c.conn.SetReadDeadline(t) }
+
+// WriteNB implements termio.NonBlockingWriter. The fd is already in
+// non-blocking mode (Go's net package manages it via the runtime poller), so
+// a raw write(2) issued through RawConn.Control returns EAGAIN when the send
+// buffer is full instead of blocking. We do a single attempt and report the
+// short count; the caller retries the remainder on the next tick. If the conn
+// can't expose a raw fd, we fall back to the blocking Write so behavior never
+// regresses.
+func (c *socketConn) WriteNB(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	sc, ok := c.conn.(syscall.Conn)
+	if !ok {
+		return c.conn.Write(p)
+	}
+	raw, err := sc.SyscallConn()
+	if err != nil {
+		return c.conn.Write(p)
+	}
+	var n int
+	var werr error
+	if cerr := raw.Control(func(fd uintptr) {
+		n, werr = syscall.Write(int(fd), p)
+	}); cerr != nil {
+		return 0, cerr
+	}
+	if werr != nil {
+		if werr == syscall.EAGAIN || werr == syscall.EWOULDBLOCK {
+			return 0, nil // send buffer full; retry remainder next tick
+		}
+		return 0, werr
+	}
+	if n < 0 {
+		n = 0
+	}
+	return n, nil
+}

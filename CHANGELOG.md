@@ -7,6 +7,28 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-05-28
+
+### Fixed
+
+- **TV lounge no longer disconnects the session over SSH under load.**
+  Watching a tuned feed for a while could drop the connection (the client
+  logging `peer ignored channel window`): the lounge wrote every video
+  frame to the wire with no backpressure, so it outran a slow SSH link and
+  overflowed Synchronet's output pipeline until the client gave up. The
+  render loop now keeps a single frame in flight and writes it
+  non-blocking, composing the next frame only once the previous has fully
+  drained -- viewers get frames at their own link-limited rate (newest
+  frame wins, no stale backlog) instead of a firehose.
+
+### Added
+
+- **TV rendering now honors the broadcaster's per-frame mode/ramp hint.**
+  A `mode=1` (ramp) frame paints as a single foreground-colored glyph
+  chosen by brightness (ASCII ` .:-=+*#%@` or CP437 shade blocks) rather
+  than two-color half-blocks -- roughly a third of the bytes, which the
+  broadcaster sends for material that reads fine as a gradient.
+
 ## [0.2.1] - 2026-05-26
 
 ### Fixed
@@ -343,6 +365,7 @@ relative to a clean checkout.
   displays bitmaps that other clients post but there's no built-in
   encoder yet.
 
-[Unreleased]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.2.1...v0.2.2
 [0.1.2]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.1.0...v0.1.2
 [0.1.0]: https://github.com/hmderdoc/avatar_chat_universal/releases/tag/v0.1.0

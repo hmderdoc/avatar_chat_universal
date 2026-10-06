@@ -12,6 +12,8 @@ const {WebhookClient} = require("discord.js");
 const {AvatarChat} = require("./avatar_chat");
 let hourly_saver;
 
+const HEARTBEAT_MS = 30 * 1000;
+
 function send(ws, type, data = {}) {
     ws.send(JSON.stringify({type, data}));
 }
@@ -228,6 +230,8 @@ class Joint {
     }
 
     connection(ws, ip) {
+        ws.is_alive = true;
+        ws.on("pong", () => ws.is_alive = true);
         ws.on("message", msg => this.message(ws, JSON.parse(msg), ip));
         ws.on("close", () => {
             for (let id = 0; id < this.data_store.length; id++) {
@@ -250,6 +254,20 @@ class Joint {
         this.hostname = os.hostname();
         this.doc = await libtextmode.read_file(this.file);
         this.wss = new ws.Server({noServer: true});
+        // Heartbeat: clients that vanish without a FIN (sleep, NAT timeout,
+        // scanners) never fire "close", so they piled up for weeks. Ping every
+        // 30s and terminate anything that missed the previous ping; terminate()
+        // fires "close", which runs the normal leave/cleanup path.
+        this.heartbeat = setInterval(() => {
+            for (const client of this.wss.clients) {
+                if (!client.is_alive) {
+                    client.terminate();
+                    continue;
+                }
+                client.is_alive = false;
+                client.ping();
+            }
+        }, HEARTBEAT_MS);
         this.log(`started`);
         hourly_saver.start();
     }
@@ -259,6 +277,7 @@ class Joint {
             if (!data.closed) data.ws.close();
         }
         if (this.avatar_chat) this.avatar_chat.close();
+        clearInterval(this.heartbeat);
         this.wss.close();
         hourly_saver.stop();
         this.save();

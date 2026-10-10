@@ -48,7 +48,7 @@ type Config struct {
 	Theme string // theme name (resolved to themes/<name>.ini) or full .ini path
 
 	// TV lounge mode (telnetvision). See internal/ui/tvlounge.go.
-	TVColor      string // "truecolor" (default) or "16"
+	TVColor      string // "auto" (default: ask the terminal), "truecolor" or "16"
 	TVPopupSecs  int    // how long a comment lingers over the video (5-15, default 10)
 	TVAvatars    bool   // show avatars in popups (default off; they compete with video)
 
@@ -77,7 +77,7 @@ func Default() *Config {
 		OutputCharset:        "cp437",
 		SplashTimeoutSeconds: 5,
 		Theme:                "futurewave",
-		TVColor:              "truecolor",
+		TVColor:              "auto",
 		TVPopupSecs:          10,
 		Raw:                  map[string]string{},
 	}

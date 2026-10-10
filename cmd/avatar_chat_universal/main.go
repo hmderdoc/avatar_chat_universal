@@ -19,6 +19,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/theme"
 	"github.com/hmderdoc/avatar_chat_universal/internal/ui"
 	"github.com/hmderdoc/avatar_chat_universal/internal/upload"
+	"github.com/hmderdoc/termprobe"
 )
 
 func main() {
@@ -103,7 +104,26 @@ func run() error {
 	// would consume the terminal's response packet as if it were keystrokes.
 	cols, rows := resolveScreen(*colsFlag, *rowsFlag, cfg, conn)
 
-	input := ansi.NewInput(conn)
+	// TV lounge color depth. tv_color = auto asks the terminal in band
+	// (github.com/hmderdoc/termprobe): SyncTERM, fTelnet and the xterm family
+	// identify themselves and get 24-bit; a terminal that answers nothing
+	// (NetRunner, the Linux console) is a 16-color one. Same ordering rule as
+	// the size probe: before the input pump starts reading. Keystrokes typed
+	// during the probe are replayed ahead of the connection.
+	var inputSrc io.Reader = conn
+	if v := strings.ToLower(strings.TrimSpace(cfg.TVColor)); v == "" || v == "auto" {
+		res := termprobe.ColorDepth(conn, termprobe.DeadlineReader(conn), 400*time.Millisecond)
+		if res.Depth == termprobe.DepthTrue {
+			cfg.TVColor = "truecolor"
+		} else {
+			cfg.TVColor = "16"
+		}
+		if len(res.Leftover) > 0 {
+			inputSrc = &replayConn{Conn: conn, pending: res.Leftover}
+		}
+	}
+
+	input := ansi.NewInput(inputSrc)
 
 	bbsID := resolveBBSID(*bbsFlag, cfg, user)
 	store := &avatar.Store{Root: *dataDir, BBSID: bbsID}
@@ -501,6 +521,23 @@ func resolveBBSID(cliBBS string, cfg *config.Config, user *dropfile.User) string
 // The terminal query is sent to conn directly before the ansi input pump
 // starts, so the response (`\x1b[8;R;Ct`) reaches us instead of being
 // consumed as keystrokes.
+// replayConn hands back bytes a startup probe read past (the caller typing
+// ahead) before reading the connection again. Embedding keeps SetReadDeadline
+// visible to the input pump.
+type replayConn struct {
+	termio.Conn
+	pending []byte
+}
+
+func (r *replayConn) Read(p []byte) (int, error) {
+	if len(r.pending) > 0 {
+		n := copy(p, r.pending)
+		r.pending = r.pending[n:]
+		return n, nil
+	}
+	return r.Conn.Read(p)
+}
+
 func resolveScreen(flagCols, flagRows int, cfg *config.Config, conn termio.Conn) (cols, rows int) {
 	cols, rows = 80, 24
 	if c, r, ok := ansi.ScreenSize(conn, 300*time.Millisecond); ok {

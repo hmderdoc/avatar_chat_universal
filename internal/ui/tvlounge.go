@@ -18,7 +18,7 @@ import (
 // pills normally sit), with popups stacking up just above it.
 //
 // Layered defaults (overridable via config / commands):
-//   - 24-bit truecolor (TVColor), with a 16-color toggle
+//   - color depth probed from the terminal (TVColor), with a truecolor/16 toggle
 //   - message popups linger 5-15s (TVPopupSecs) then vanish
 //   - avatars in popups off by default (they compete with video)
 
@@ -44,9 +44,9 @@ func (a *App) tvColorTrue() bool {
 }
 
 // toggleTVColor flips the video between 24-bit truecolor and the 16-color CGA
-// approximation. Truecolor support can't be sniffed reliably over a BBS wire
-// (it isn't in the dropfile and there's no portable in-band query), so this is
-// a manual switch — bound to both /tvcolor and Ctrl-T while in the lounge.
+// approximation. The starting depth comes from tv_color, which by default is
+// probed from the terminal at startup (see cmd/avatar_chat_universal); this is
+// the manual override — bound to both /tvcolor and Ctrl-T while in the lounge.
 func (a *App) toggleTVColor() {
 	if a.tvColorTrue() {
 		a.TVColor = "16"
@@ -196,6 +196,7 @@ func (a *App) drawLounge() {
 	if fr != nil {
 		fr.RenderTo(bg, 0, 0, bg.W, bg.H, telnetvision.RenderOpts{
 			Truecolor:  a.tvColorTrue(),
+			Shade:      true,
 			Saturation: 1.8,
 			Dither:     true,
 			// Honor the broadcaster's per-frame render hint: mode=1 frames

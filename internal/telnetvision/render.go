@@ -1,6 +1,9 @@
 package telnetvision
 
-import "github.com/hmderdoc/avatar_chat_universal/internal/ansi"
+import (
+	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
+	"github.com/hmderdoc/shadecell"
+)
 
 // halfBlock is the upper-half-block glyph (CP437 0xDF / U+2580): the cell's
 // foreground paints the top pixel, the background paints the bottom pixel, so
@@ -9,9 +12,14 @@ const halfBlock = 0xDF
 
 // RenderOpts controls how a frame is painted into a target region.
 type RenderOpts struct {
-	Truecolor  bool    // true: 24-bit cells; false: CGA-16 (quantized + dithered)
+	Truecolor  bool    // true: 24-bit cells; false: CGA-16
 	Saturation float64 // CGA only: saturation boost before quantizing (e.g. 1.8)
-	Dither     bool    // CGA only: ordered (Bayer) dithering
+	Dither     bool    // CGA only, Shade off: ordered (Bayer) dithering
+	// Shade (CGA only) picks, per cell, a shade glyph (░ ▒ ▓), half block,
+	// full block or space with the fg/bg pair whose eye-mixed colour is
+	// closest to the two pixels in Oklab (github.com/hmderdoc/shadecell), so
+	// 16 colours give a few hundred tones. Off = plain dithered half blocks.
+	Shade bool
 
 	// Mode mirrors the broadcaster's per-frame render hint (telnetvision wire
 	// byte f[5]): 0 = color half-block, 1 = ASCII/shade ramp (one FG-colored
@@ -93,6 +101,15 @@ func (fr *Frame) RenderTo(dst *ansi.Frame, ox, oy, w, h int, opts RenderOpts) {
 				dst.SetCellTrue(ox+tx, oy+ty, halfBlock,
 					ansi.RGB{R: uint8(tr), G: uint8(tg), B: uint8(tb)},
 					ansi.RGB{R: uint8(br), G: uint8(bg), B: uint8(bb)})
+			} else if opts.Shade {
+				if sat != 1.0 {
+					tr, tg, tb = saturate(tr, tg, tb, sat)
+					br, bg, bb = saturate(br, bg, bb, sat)
+				}
+				c := shadeQ.Pair(
+					shadecell.RGB{R: uint8(tr), G: uint8(tg), B: uint8(tb)},
+					shadecell.RGB{R: uint8(br), G: uint8(bg), B: uint8(bb)})
+				dst.SetCell(ox+tx, oy+ty, c.Ch, ansi.Attr(c.Attr))
 			} else {
 				top := quantCGA(tr, tg, tb, tx, 2*ty, sat, opts.Dither)
 				bot := quantCGA(br, bg, bb, tx, 2*ty+1, sat, opts.Dither)
@@ -103,6 +120,10 @@ func (fr *Frame) RenderTo(dst *ansi.Frame, ox, oy, w, h int, opts RenderOpts) {
 		}
 	}
 }
+
+// shadeQ is the perceptual 16-colour quantizer; RenderTo runs on the UI
+// goroutine only, so one shared instance is fine.
+var shadeQ = shadecell.New()
 
 // --- CGA quantization (ported from telnetvision/door/main.go) ----------------
 

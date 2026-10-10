@@ -12,6 +12,8 @@ require (
 )
 
 require (
+	github.com/hmderdoc/shadecell v0.1.0
+	github.com/hmderdoc/termprobe v0.1.0
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	golang.org/x/crypto v0.0.0-20210421170649-83a5a9bb288b // indirect
 )

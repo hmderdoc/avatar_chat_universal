@@ -64,3 +64,25 @@ func TestUploadErrorsAndUnconfigured(t *testing.T) {
 		t.Fatalf("error notice = %q, input %q", n, a.inputLine.Value())
 	}
 }
+
+func TestParseDrawSize(t *testing.T) {
+	cases := []struct {
+		args []string
+		w, h int
+		ok   bool
+	}{
+		{nil, 80, 25, true},
+		{[]string{"40x10"}, 40, 10, true},
+		{[]string{"40X10"}, 40, 10, true},
+		{[]string{"60", "20"}, 60, 20, true},
+		{[]string{"200x99"}, 80, 40, true},
+		{[]string{"big"}, 0, 0, false},
+		{[]string{"0x5"}, 0, 0, false},
+	}
+	for _, c := range cases {
+		w, h, ok := parseDrawSize(c.args)
+		if w != c.w || h != c.h || ok != c.ok {
+			t.Errorf("%v: got %d %d %v, want %d %d %v", c.args, w, h, ok, c.w, c.h, c.ok)
+		}
+	}
+}

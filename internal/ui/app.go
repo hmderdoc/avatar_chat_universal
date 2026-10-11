@@ -12,6 +12,7 @@ import (
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
+	"github.com/hmderdoc/avatar_chat_universal/internal/canvas"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
 	"github.com/hmderdoc/avatar_chat_universal/internal/idle"
 	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
@@ -55,6 +56,10 @@ type App struct {
 	// OnAvatarEditor opens the in-door drawing UI. Returns the new
 	// avatar's base64 on save; empty string + nil error on cancel.
 	OnAvatarEditor func() (b64 string, err error)
+	// OnDraw opens the full-screen ANSI art editor on a w x h canvas and
+	// returns the [BITMAP|...] message to post (with the size sent), or
+	// "" when the user left without sending.
+	OnDraw func(w, h int) (msg string, sentW, sentH int, err error)
 	// OnStyleSave persists the user's handle style from /settings (an
 	// empty style clears it). On success the App puts it on Session.Self
 	// so it rides on the next message.
@@ -1063,8 +1068,11 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 	case "/upload":
 		a.handleMediaUpload()
 		return false, true
+	case "/draw", "/art":
+		a.handleDraw(parts[1:])
+		return false, true
 	case "/help", "/?":
-		a.Session.Notice("/me /msg /r /join /part /who /img /channels /clear /avatar /settings /quit")
+		a.Session.Notice("/me /msg /r /join /part /who /img /channels /clear /avatar /settings /draw /quit")
 		a.Session.Notice("/join keeps the old channel joined (unread counts in /channels); /part leaves it")
 		if a.BoardWide {
 			a.Session.Notice("/avatar and /settings change your BBS avatar and handle style everywhere on this system")
@@ -1077,6 +1085,9 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		if a.cards != nil {
 			a.Session.Notice("other links get a preview card (site, title, summary) under the message")
 		}
+		if a.OnDraw != nil {
+			a.Session.Notice("/draw [WxH] opens an ANSI art editor (default 80x25, up to 80x40); Ctrl-Y posts it")
+		}
 		if a.OnMediaUpload != nil {
 			a.Session.Notice("/upload sends a picture or ANSI art by Zmodem; its link lands in your input line")
 		}
@@ -1086,6 +1097,66 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 	}
 	a.Session.Notice(fmt.Sprintf("unknown command: %s", cmd))
 	return false, true
+}
+
+// handleDraw parses "/draw [WxH]" (or "/draw W H"), runs the art editor and
+// posts what it returns.
+func (a *App) handleDraw(args []string) {
+	if a.OnDraw == nil {
+		a.Session.Notice("/draw: the art editor is not available here")
+		return
+	}
+	w, h, ok := parseDrawSize(args)
+	if !ok {
+		a.Session.Notice("/draw: size is WxH, e.g. /draw 80x25 (up to 80x40)")
+		return
+	}
+	msg, sw, sh, err := a.OnDraw(w, h)
+	a.forceFullRedraw()
+	if err != nil {
+		a.Session.Notice(fmt.Sprintf("/draw: %v", err))
+		return
+	}
+	if msg == "" {
+		a.Session.Notice("/draw: nothing sent")
+		return
+	}
+	if err := a.Session.Send(msg); err != nil {
+		a.Session.Notice(fmt.Sprintf("/draw: send failed: %v", err))
+		return
+	}
+	a.transcript.Scroll = 0
+	a.Session.Notice(fmt.Sprintf("\x01Gart sent\x01n (%dx%d)", sw, sh))
+}
+
+// parseDrawSize reads an optional canvas size; the default matches the web
+// chat's art editor. Sizes are clamped to what the editor allows.
+func parseDrawSize(args []string) (w, h int, ok bool) {
+	w, h = 80, 25
+	switch len(args) {
+	case 0:
+		return w, h, true
+	case 1:
+		if _, err := fmt.Sscanf(strings.ToLower(args[0]), "%dx%d", &w, &h); err != nil {
+			return 0, 0, false
+		}
+	case 2:
+		if _, err := fmt.Sscanf(args[0]+" "+args[1], "%d %d", &w, &h); err != nil {
+			return 0, 0, false
+		}
+	default:
+		return 0, 0, false
+	}
+	if w < 1 || h < 1 {
+		return 0, 0, false
+	}
+	if w > canvas.MaxWidth {
+		w = canvas.MaxWidth
+	}
+	if h > canvas.MaxHeight {
+		h = canvas.MaxHeight
+	}
+	return w, h, true
 }
 
 // handleMediaUpload receives one file by Zmodem, hands it to the media

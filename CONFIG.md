@@ -188,6 +188,36 @@ also the on-screen action bars and `/help`.
 | `/avatar off`                 | Disable your avatar without losing it (re-enable by picking again).           |
 | `/avatar pick`                | Open the selector directly.                                                   |
 | `/settings` / `/prefs` / `/options` | Settings panel: avatar (pick, draw, upload, disable) and handle style (a colour per letter, presets, a tag). On Synchronet these are the user's BBS-wide records. |
+| `/draw [WxH]` / `/art`        | ANSI art editor (default 80x25, up to 80x40). Ctrl-Y posts the art as a `[BITMAP]` message every client draws; see "Art editor". |
+
+---
+
+## Art editor
+
+`/draw` opens a full-screen CP437 canvas in the 16 CGA colours (16
+foregrounds, 8 backgrounds, no iCE), the same palette the web's Moebius
+editor and the shell's resource editor use. A canvas larger than the
+screen scrolls with the cursor. Ctrl-Y posts the drawn part (blank rows and
+columns to the right and below are trimmed) as a normal `[BITMAP|...]`
+message, so the website, the shell, Moebius and the bridges all show it.
+Esc leaves; it asks first if you drew something you have not sent.
+
+| Key | Does |
+| --- | --- |
+| letters, digits, punctuation | Type at the cursor and move right; Enter goes to the next line. |
+| F1-F10 | Stamp a glyph from the current F-key set (PabloDraw's sets, as in Moebius; set 6, shades and blocks, is the default). |
+| Ctrl-N / Ctrl-P | Next / previous F-key set (16 sets). |
+| Ctrl-F / Ctrl-G | Next foreground (16) / background (8) colour. Tab swaps them. |
+| Ctrl-E | Pick the colours (and glyph) under the cursor. |
+| Ctrl-O | Half-block mode: the cursor moves by half rows and Space paints the half under it, two pixels per cell. |
+| Ctrl-B | Brush: moving the cursor paints (the last glyph, or a pixel in half-block mode). |
+| Ctrl-K | Flood fill the area of identical cells under the cursor. |
+| Backspace / Del | Erase left / under the cursor. |
+| Ctrl-Z or Ctrl-U | Undo (64 steps). Ctrl-X clears the canvas (undoable). |
+| Ctrl-Y | Send. Esc: leave. Ctrl-L: redraw. |
+
+A full 80x40 canvas of noise still fits the web chat's 32000-character
+limit for art; the editor refuses to send anything larger and says so.
 
 ---
 

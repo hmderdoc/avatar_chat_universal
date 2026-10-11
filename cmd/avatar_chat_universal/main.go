@@ -12,6 +12,7 @@ import (
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
+	"github.com/hmderdoc/avatar_chat_universal/internal/canvas"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chatmedia"
 	"github.com/hmderdoc/avatar_chat_universal/internal/config"
@@ -430,6 +431,16 @@ func run() error {
 			return "", err
 		}
 		return a.Base64(), nil
+	}
+	app.OnDraw = func(w, h int) (string, int, int, error) {
+		ed := canvas.NewEditor(conn, input, app.Width, app.Height, w, h)
+		ed.Charset = charset
+		ed.From = user.DisplayName()
+		res, err := ed.Run()
+		if err != nil || !res.Sent {
+			return "", 0, 0, err
+		}
+		return res.Message, res.W, res.H, nil
 	}
 	// One-shot terminal size probe. The drop file's reported dimensions
 	// are sometimes wrong (BBS client reconfigured between login and door

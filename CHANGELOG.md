@@ -9,6 +9,13 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Added
 
+- **`/draw`: ANSI art editor.** A full-screen CP437 canvas (default 80x25,
+  up to 80x40) in the 16 CGA colours with PabloDraw/Moebius F-key glyph
+  sets, half-block pixel mode, brush, flood fill, colour pick and 64-step
+  undo. Ctrl-Y posts the art as a `[BITMAP]` message, byte-compatible with
+  the web chat's and Moebius's encoders (including their palette order), so
+  every client draws it.
+
 - **Deny list for `avatar_chat_server`.** `-deny <file>` (`deny_file`) lists
   IP addresses and CIDR ranges to refuse on the chat port and the media
   endpoint; edits take effect within a second. See MEDIA.md.

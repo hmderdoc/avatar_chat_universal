@@ -84,10 +84,19 @@ var (
 // PreviewURL returns the link in text that gets a card: the first one that
 // is not drawn some other way (an inline picture, a video, audio or ANSI
 // file, a chat attachment). "" when there is none.
+//
+// File types are judged by the path alone. A page such as
+// /?page=records&track=Song.mp3 ends in ".mp3" only in its query; it is an
+// HTML page whose card (og:audio) is what makes it playable, so it must not
+// be skipped as an audio file.
 func PreviewURL(text string) string {
 	for _, u := range inlineimg.FindURLs(text) {
-		if inlineimg.IsImageURL(u) || videoExt.MatchString(u) || audioExt.MatchString(u) ||
-			ansiExt.MatchString(u) || mediaPath.MatchString(u) || len(u) > MaxURLLength {
+		p := u
+		if pu, err := url.Parse(u); err == nil {
+			p = pu.Path
+		}
+		if inlineimg.IsImageURL(p) || videoExt.MatchString(p) || audioExt.MatchString(p) ||
+			ansiExt.MatchString(p) || mediaPath.MatchString(u) || len(u) > MaxURLLength {
 			continue
 		}
 		return u

@@ -103,8 +103,11 @@ func TestPreviewURL(t *testing.T) {
 		"https://futureland.today/chatmedia/2026-10-10/6985f2d16fe3fa4eb6f70bfb.txt": "",
 		"song https://x.org/a.mp3 vid https://x.org/b.webm art https://x.org/c.ans":  "",
 		"two https://one.example/ and https://two.example/":                          "https://one.example/",
-		"no links here":          "",
-		"ftp://example.com/file": "",
+		// A page whose query names a file is still a page: it gets the card.
+		`["Song" by X](https://futureland.today/?page=011-futureland-records.xjs&track=Song_x.mp3) -- uploaded`: "https://futureland.today/?page=011-futureland-records.xjs&track=Song_x.mp3",
+		"https://x.org/a.mp3?dl=1": "",
+		"no links here":            "",
+		"ftp://example.com/file":   "",
 	}
 	for in, want := range cases {
 		if got := PreviewURL(in); got != want {

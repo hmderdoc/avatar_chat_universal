@@ -16,18 +16,22 @@ var staticTypes = map[string]string{
 	".png":   "image/png",
 	".ico":   "image/x-icon",
 	".woff2": "font/woff2",
+	".f16":   "application/octet-stream", // the ANSI editor's VGA font
+	".txt":   "text/plain; charset=utf-8",
 }
 
-// pageCSP keeps the page on its own origin: scripts, styles, sockets and
-// pictures from here only ('self' covers ws:// and wss:// to this host),
-// plus data: and blob: pictures the page draws itself.
+// pageCSP keeps the page on its own origin: scripts, styles, sockets,
+// pictures and players from here only ('self' covers ws:// and wss:// to
+// this host), plus data: and blob: pictures the page draws itself.
 const pageCSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; " +
-	"connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+	"media-src 'self'; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
 
 func (s *Server) staticHandler() http.Handler {
+	// A sysop's web_dir copy wins file by file; anything it leaves out
+	// (the shared editor and styles, say) comes from the built-in page.
 	files := s.Static
 	if s.cfg.WebDir != "" {
-		files = os.DirFS(s.cfg.WebDir)
+		files = overlay{os.DirFS(s.cfg.WebDir), s.Static}
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -38,7 +42,7 @@ func (s *Server) staticHandler() http.Handler {
 		if name == "" {
 			name = "index.html"
 		}
-		ct, ok := staticTypes[path.Ext(name)]
+		ct, ok := staticTypes[strings.ToLower(path.Ext(name))]
 		if !ok || files == nil || strings.HasPrefix(path.Base(name), ".") {
 			http.NotFound(w, r)
 			return
@@ -62,4 +66,15 @@ func (s *Server) staticHandler() http.Handler {
 		}
 		_, _ = w.Write(body)
 	})
+}
+
+// overlay reads from top, then from under when top lacks the file.
+type overlay struct{ top, under fs.FS }
+
+func (o overlay) Open(name string) (fs.File, error) {
+	f, err := o.top.Open(name)
+	if err == nil || o.under == nil {
+		return f, err
+	}
+	return o.under.Open(name)
 }

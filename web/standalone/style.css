@@ -1,144 +1,219 @@
-/* Avatar Chat standalone page. CGA palette, the door's futurewave look.
-   To theme it, copy web/standalone somewhere, edit this file and point
-   web_dir at the copy. */
-:root {
-  --black: #000000; --blue: #0000aa; --green: #00aa00; --cyan: #00aaaa;
-  --red: #aa0000; --magenta: #aa00aa; --brown: #aa5500; --lightgray: #aaaaaa;
-  --darkgray: #555555; --lightblue: #5555ff; --lightgreen: #55ff55; --lightcyan: #55ffff;
-  --lightred: #ff5555; --lightmagenta: #ff55ff; --yellow: #ffff55; --white: #ffffff;
-
-  --bg: var(--black);
-  --panel: #00002a;
-  --bar: var(--blue);
-  --bar-text: var(--white);
-  --text: var(--lightgray);
-  --muted: var(--darkgray);
-  --accent: var(--lightcyan);
-  --self-bubble: #001a3a;
-  --other-bubble: #111111;
-  --mention: #2a1a00;
-  --mention-edge: var(--yellow);
-  --link: var(--lightcyan);
-  --error: var(--lightred);
-  --font: "IBM Plex Mono", "DejaVu Sans Mono", Consolas, "Courier New", monospace;
-}
+/* Avatar Chat, standalone page.
+ *
+ * The look comes from shared/app.css, the Synchronet page's stylesheet
+ * (its --ac-* tokens and .ac-style-<id> page styles), so both pages wear
+ * the same styles. This file adds only what the standalone page has that
+ * the Synchronet one doesn't: a full-window layout, the members list, the
+ * member card and the nickname prompt. Colours and shape stay on the
+ * tokens, so every page style applies here too. */
 
 * { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; }
+html, body {
+    height: 100%;
+    margin: 0;
+}
 body {
-  background: var(--bg); color: var(--text); font: 15px/1.4 var(--font);
-  display: flex; flex-direction: column; overflow: hidden;
+    background: #08080a;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
 }
-button { font: inherit; cursor: pointer; }
 
-.bar {
-  display: flex; align-items: center; gap: .6rem; padding: .35rem .75rem;
-  background: var(--bar); color: var(--bar-text); flex: none;
+/* The page is the whole window, not a box inside a site. */
+.avatar-chat-web.sa-root {
+    height: 100%;
+    padding: 0.6rem;
+    background: var(--ac-shell-bg);
 }
-.brand { color: var(--yellow); font-weight: bold; }
-.room { background: none; border: 0; color: var(--lightcyan); padding: 0; }
-.room:hover { text-decoration: underline; }
-.spacer { flex: 1; }
-.status { font-size: .8rem; padding: 0 .4rem; }
-.status.on { color: var(--lightgreen); }
-.status.off { color: var(--yellow); }
-.pill {
-  background: var(--black); color: var(--lightcyan); border: 1px solid var(--cyan);
-  padding: .1rem .55rem;
+.avatar-chat-web.sa-root .avatar-chat-shell {
+    height: 100%;
 }
-.pill:hover { background: var(--cyan); color: var(--black); }
+.avatar-chat-web .sa-layout {
+    grid-template-columns: 240px minmax(0, 1fr) 230px;
+}
 
-.layout { flex: 1; display: flex; min-height: 0; }
-.transcript { flex: 1; overflow-y: auto; padding: .75rem; overscroll-behavior: contain; }
-.roster {
-  width: 14rem; flex: none; background: var(--panel); border-left: 1px solid var(--blue);
-  overflow-y: auto; padding: .5rem .75rem;
+/* ---- you, in the sidebar ---- */
+.avatar-chat-web .sa-me {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-width: 0;
 }
-.roster h2 { font-size: .85rem; color: var(--yellow); margin: .2rem 0 .5rem; font-weight: normal; }
-.roster ul { list-style: none; margin: 0; padding: 0; }
-.roster li { padding: .1rem 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.roster .sys { color: var(--muted); font-size: .8rem; }
+.avatar-chat-web .sa-me-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 
-.group { display: flex; gap: .6rem; margin: .5rem 0; align-items: flex-start; }
-.group.self { flex-direction: row-reverse; }
-.avatar { width: 40px; height: 48px; flex: none; }
-.avatar canvas, .avatar .initial { width: 40px; height: 48px; }
-.initial {
-  display: flex; align-items: center; justify-content: center;
-  background: var(--blue); color: var(--white); font-weight: bold;
+/* ---- members ---- */
+.avatar-chat-web .sa-members {
+    gap: 0.5rem;
 }
-.bubbles { max-width: min(46rem, 85%); display: flex; flex-direction: column; gap: .2rem; }
-.self .bubbles { align-items: flex-end; }
-.who { font-size: .85rem; }
-.who .host { color: var(--muted); }
-.who .time { color: var(--muted); margin-left: .4rem; }
-.tag { padding: 0 .3rem; margin-left: .35rem; font-size: .8rem; }
-.bubble {
-  background: var(--other-bubble); padding: .3rem .6rem; border-left: 3px solid var(--darkgray);
-  overflow-wrap: anywhere; white-space: pre-wrap;
+.avatar-chat-web .sa-member-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-height: 0;
 }
-.self .bubble { background: var(--self-bubble); border-left-color: var(--lightblue); }
-.bubble.mention { background: var(--mention); border-left-color: var(--mention-edge); outline: 1px solid var(--mention-edge); }
-.bubble a { color: var(--link); }
-.bubble .pics { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .3rem; }
-.bubble .pics img { max-width: 18rem; max-height: 14rem; display: block; border: 1px solid var(--darkgray); }
-.art { image-rendering: pixelated; image-rendering: crisp-edges; display: block; max-width: 100%; }
-.bitmap .art { width: auto; }
-.bitmap .from { color: var(--muted); font-size: .8rem; }
-.card {
-  display: flex; gap: .5rem; margin-top: .35rem; padding: .35rem; text-decoration: none;
-  border: 1px solid var(--blue); background: var(--panel); color: var(--text); max-width: 32rem;
+.avatar-chat-web .sa-member-group {
+    margin: 0.6rem 0 0.2rem;
+    color: var(--ac-muted);
+    font-size: 0.74rem;
+    font-weight: bold;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
 }
-.card img { width: 5rem; height: 5rem; object-fit: cover; flex: none; }
-.card .site { color: var(--muted); font-size: .8rem; }
-.card .title { color: var(--lightcyan); }
-.card .desc { font-size: .85rem; max-height: 3.6em; overflow: hidden; }
-.notice { color: var(--muted); font-size: .85rem; text-align: center; margin: .3rem 0; }
-.notice.error { color: var(--error); }
+.avatar-chat-web .sa-member-group:first-child {
+    margin-top: 0;
+}
+.avatar-chat-web .sa-member {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    width: 100%;
+    padding: 0.3rem 0.4rem;
+    border: var(--ac-bw) var(--ac-bs) transparent;
+    border-radius: var(--ac-radius-sm);
+    background: transparent;
+    color: var(--ac-fg);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.avatar-chat-web .sa-member:hover,
+.avatar-chat-web .sa-member:focus-visible {
+    background: var(--ac-item-bg);
+    border-color: var(--ac-border-soft);
+    outline: none;
+}
+.avatar-chat-web .sa-member-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 
-.composer { flex: none; background: var(--panel); border-top: 1px solid var(--blue); padding: .5rem .75rem; }
-#send-form { display: flex; gap: .5rem; align-items: flex-end; }
-#input {
-  flex: 1; resize: none; background: var(--black); color: var(--white); border: 1px solid var(--cyan);
-  font: inherit; padding: .35rem .5rem; max-height: 8rem;
+/* Small art boxes: a 10x6 avatar is 80x96 pixels, shown at a third.
+   Fixed size and a black ground in every style, like the art elsewhere. */
+.avatar-chat-web .sa-mini-avatar {
+    flex: 0 0 auto;
+    width: 30px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--ac-border);
+    border-radius: var(--ac-radius-art);
+    background: #000000;
+    color: #9e9e9e;
+    font-weight: bold;
+    font-size: 0.85rem;
+    overflow: hidden;
 }
-#input:focus { outline: 1px solid var(--lightcyan); }
-.counter { color: var(--muted); font-size: .75rem; min-width: 3.5rem; text-align: right; }
-.send { background: var(--cyan); color: var(--black); border: 0; padding: .35rem .9rem; }
-.send:hover { background: var(--lightcyan); }
-.drop-hint { color: var(--muted); font-size: .75rem; margin-top: .25rem; }
-.drop-veil {
-  position: fixed; inset: 0; background: rgba(0, 0, 170, .7); color: var(--yellow);
-  display: flex; align-items: center; justify-content: center; font-size: 1.5rem; z-index: 10;
-  pointer-events: none;
+.avatar-chat-web .sa-mini-avatar img {
+    width: 30px;
+    height: 36px;
+    image-rendering: pixelated;
 }
-.drop-veil[hidden] { display: none; }
 
-dialog {
-  background: var(--panel); color: var(--text); border: 2px solid var(--cyan); padding: 1rem 1.25rem;
-  max-width: min(28rem, calc(100vw - 32px)); width: 100%;
+/* ---- the member card ---- */
+.avatar-chat-web .sa-card-body {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
 }
-dialog::backdrop { background: rgba(0, 0, 0, .75); }
-dialog h2 { color: var(--yellow); font-size: 1rem; margin: 0 0 .6rem; font-weight: normal; }
-dialog input {
-  width: 100%; background: var(--black); color: var(--white); border: 1px solid var(--cyan);
-  font: inherit; padding: .35rem .5rem;
+.avatar-chat-web .sa-card-name {
+    font-size: 1.15rem;
 }
-dialog menu { display: flex; justify-content: flex-end; gap: .5rem; padding: 0; margin: .9rem 0 0; }
-.hint { color: var(--muted); font-size: .8rem; }
-.error { color: var(--error); font-size: .85rem; }
-.rooms-list { list-style: none; padding: 0; margin: 0; max-height: 50vh; overflow-y: auto; }
-.rooms-list button {
-  width: 100%; text-align: left; background: none; border: 0; color: var(--lightcyan); padding: .25rem .2rem;
-}
-.rooms-list button:hover, .rooms-list button.current { background: var(--blue); color: var(--white); }
-.create-room { display: flex; gap: .5rem; margin-top: .6rem; }
 
-@media (max-width: 700px) {
-  body { font-size: 14px; }
-  .roster { display: none; position: fixed; right: 0; top: 2.2rem; bottom: 4rem; z-index: 5; }
-  .roster.open { display: block; }
-  .bubbles { max-width: 80%; }
-  .bubble .pics img { max-width: 100%; }
-  .brand { display: none; }
+/* ---- nickname and settings ---- */
+.avatar-chat-web .sa-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    color: var(--ac-muted);
+}
+.avatar-chat-web .sa-field select {
+    color: var(--ac-fg);
+    background: var(--ac-input-bg);
+    border: 1px var(--ac-bs) var(--ac-border);
+    border-radius: var(--ac-radius-sm);
+    padding: 0.35rem 0.5rem;
+    font: inherit;
+    box-shadow: var(--ac-shadow-input);
+}
+.avatar-chat-web .sa-error {
+    color: var(--ac-error);
+}
+
+/* Narrow windows: rooms over the chat, members a drawer the header's
+   user count opens. */
+.avatar-chat-web .sa-narrow-only {
+    display: none;
+}
+@media (max-width: 980px) {
+    .avatar-chat-web .sa-layout {
+        grid-template-columns: 1fr;
+    }
+    .avatar-chat-web .sa-members {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: min(300px, 86vw);
+        max-height: none;
+        z-index: 1040;
+        display: none;
+        border-radius: 0;
+    }
+    .avatar-chat-web .sa-members.is-open {
+        display: flex;
+    }
+    .avatar-chat-web .sa-narrow-only {
+        display: inline-flex;
+    }
+}
+@media (max-width: 768px) {
+    .avatar-chat-web.sa-root {
+        padding: 0.3rem;
+    }
+    .avatar-chat-web.sa-root .avatar-chat-shell {
+        padding: 0.4rem;
+    }
+    .avatar-chat-web .avatar-chat-sidebar {
+        max-height: 30vh;
+        padding: 0.6rem;
+    }
+    /* You and your two buttons on one line. */
+    .avatar-chat-web .sa-you {
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    .avatar-chat-web .sa-you .sa-me {
+        flex: 1 1 100%;
+    }
+    .avatar-chat-web .sa-you .avatar-chat-sidebar-button {
+        flex: 1 1 0;
+    }
+    /* The composer fits a phone: narrower icons, a smaller Send. */
+    .avatar-chat-web .avatar-chat-form {
+        padding: 0.5rem;
+    }
+    .avatar-chat-web .avatar-chat-compose-row {
+        gap: 0.35rem;
+    }
+    .avatar-chat-web .avatar-chat-icon-button {
+        width: 2.25rem;
+    }
+    .avatar-chat-web .avatar-chat-input {
+        width: 0;
+        padding-left: 0.6rem;
+        padding-right: 0.6rem;
+    }
+    .avatar-chat-web .avatar-chat-send {
+        flex: 0 0 auto;
+        padding-left: 0.7rem;
+        padding-right: 0.7rem;
+    }
 }

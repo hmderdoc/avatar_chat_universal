@@ -9,6 +9,14 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Added
 
+- **Standalone web page caught up.** A members column with avatars and
+  handle colours; avatar settings (bundled collections and an optional
+  `avatars_dir`, a 10x6 editor, `.bin`/`.ans` upload, kept in the browser
+  and sent on messages); the NSFW blur with the door's keyword list
+  (`nsfw_keywords`); the Synchronet page's rooms UI; the ANSI editor and
+  attach icon; the same eight page styles (`web_styles`,
+  `web_default_style`). Every action has a button; no slash commands
+  needed. WEB.md has an "Enabling uploads" section.
 - **Ignore list in the door.** `/ignore <name>` hides someone's lines,
   art, private messages and join/leave notices (live, from history and in
   other joined rooms' unread counts) and stops them ringing; `/ignore`

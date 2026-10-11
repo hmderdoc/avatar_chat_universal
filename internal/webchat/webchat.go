@@ -4,7 +4,9 @@
 //
 //	/              the page's static files (embedded, or Config.WebDir)
 //	/chat          WebSocket carrying chat packets
-//	/config.json   what the page needs to know (default channel, uploads)
+//	/config.json   what the page needs to know (default channel, uploads,
+//	               NSFW keywords, page styles)
+//	/avatars/...   the avatar library, read only (avatars.go)
 //	/preview?url=  a link's card, fetched here
 //	/img?url=      a picture from a chat message, fetched here
 //	/upload, /chatmedia/...  attachments, when media is configured
@@ -37,9 +39,11 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chatmedia"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chatserver"
 	"github.com/hmderdoc/avatar_chat_universal/internal/denylist"
+	"github.com/hmderdoc/avatar_chat_universal/internal/inlineimg"
 	"github.com/hmderdoc/avatar_chat_universal/internal/linkprev"
 )
 
@@ -58,6 +62,14 @@ type Config struct {
 	MaxMessage     int      // longest message, in characters
 	FetchPerMinute int      // /img plus /preview requests per address per minute
 	ImageMaxMB     int      // largest picture /img passes through
+
+	// NSFWKeywords veil pictures and link cards whose link or text has one
+	// as a whole word, until clicked. With NSFWSet false the door's
+	// default list applies; NSFWSet with no keywords turns the veil off.
+	NSFWKeywords []string
+	NSFWSet      bool
+	Styles       []string // page style ids offered (web_styles); empty = all
+	DefaultStyle string   // web_default_style
 }
 
 // Defaults are the front end's built-in settings.
@@ -115,8 +127,10 @@ type Server struct {
 	// Media, when set, is mounted at /upload and /chatmedia/. Its purge
 	// loop is the caller's to run (ListenAndServe on its own port runs it).
 	Media *chatmedia.Server
-	// Static is the page's files; Config.WebDir overrides it.
+	// Static is the page's files; a file in Config.WebDir wins over it.
 	Static fs.FS
+	// Avatars is the library the page's Avatar modal offers, read only.
+	Avatars []*avatar.Collection
 	// Images and Pages fetch for /img and /preview; Previews caches cards.
 	Images   ImageFetcher
 	Pages    linkprev.PageFetcher
@@ -163,6 +177,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/config.json", s.handleConfig)
 	mux.HandleFunc("/img", s.handleImage)
 	mux.HandleFunc("/preview", s.handlePreview)
+	mux.HandleFunc("/avatars/", s.handleAvatars)
 	if s.Media != nil {
 		mh := s.Media.Handler()
 		mux.Handle("/upload", mh)
@@ -226,6 +241,22 @@ type pageConfig struct {
 	CreateRooms    bool   `json:"createRooms"`
 	Uploads        bool   `json:"uploads"`
 	Mode           string `json:"mode"` // "local" or "relay"
+
+	NSFWKeywords []string    `json:"nsfwKeywords"`
+	Styles       []PageStyle `json:"styles"`
+	DefaultStyle string      `json:"defaultStyle"`
+	Avatars      bool        `json:"avatars"` // the library has something to pick
+}
+
+// nsfwKeywords is the veil's list: the sysop's, or the door's default.
+func (c Config) nsfwKeywords() []string {
+	if c.NSFWSet {
+		if c.NSFWKeywords == nil {
+			return []string{}
+		}
+		return c.NSFWKeywords
+	}
+	return inlineimg.DefaultNSFWKeywords
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
@@ -237,6 +268,8 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	h.Set("Content-Type", "application/json; charset=utf-8")
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Content-Type-Options", "nosniff")
+	styles := offeredStyles(s.cfg.Styles)
+	index, _ := s.avatarIndex()
 	_ = json.NewEncoder(w).Encode(pageConfig{
 		DefaultChannel: s.cfg.DefaultChannel,
 		SystemName:     s.cfg.SystemName,
@@ -244,6 +277,10 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		CreateRooms:    s.cfg.CreateRooms,
 		Uploads:        s.Media != nil,
 		Mode:           mode,
+		NSFWKeywords:   s.cfg.nsfwKeywords(),
+		Styles:         styles,
+		DefaultStyle:   defaultStyle(s.cfg.DefaultStyle, styles),
+		Avatars:        len(index) > 0,
 	})
 }
 

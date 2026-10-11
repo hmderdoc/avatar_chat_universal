@@ -24,13 +24,14 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chatmedia"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chatserver"
 	"github.com/hmderdoc/avatar_chat_universal/internal/denylist"
 	"github.com/hmderdoc/avatar_chat_universal/internal/inlineimg"
 	"github.com/hmderdoc/avatar_chat_universal/internal/linkprev"
 	"github.com/hmderdoc/avatar_chat_universal/internal/webchat"
-	"github.com/hmderdoc/avatar_chat_universal/web/standalone"
+	webpage "github.com/hmderdoc/avatar_chat_universal/web"
 )
 
 func main() {
@@ -50,6 +51,10 @@ func main() {
 	flag.IntVar(&wc.FetchPerMinute, "fetch-per-minute", wc.FetchPerMinute, "picture and link-card fetches per address per minute")
 	flag.IntVar(&wc.ImageMaxMB, "image-max-mb", wc.ImageMaxMB, "largest picture the web page's /img passes through, MB")
 	webCache := flag.String("web-cache-dir", "webcache", "where fetched pictures and link cards are cached (\"\" for none)")
+	avatarsDir := flag.String("avatars-dir", "", "extra .bin avatar collections the web page offers, besides the bundled ones")
+	nsfw := flag.String("nsfw-keywords", "", "comma-separated words that veil a picture or link card on the web page (\"none\" turns the veil off; default the door's list)")
+	styles := flag.String("web-styles", "", "comma-separated page style ids the web page offers (default all; see WEB.md)")
+	flag.StringVar(&wc.DefaultStyle, "web-default-style", "", "page style the web page opens in (default classic)")
 	mcfg := chatmedia.Defaults()
 	flag.StringVar(&mcfg.Addr, "media-addr", "", "HTTP address for chat attachments, e.g. :10089, or \"web\" for the web listener only (off when empty)")
 	flag.StringVar(&mcfg.Dir, "media-dir", mcfg.Dir, "directory for stored attachments")
@@ -121,6 +126,13 @@ func main() {
 		str("system-name", &wc.SystemName, "system_name")
 		str("default-channel", &wc.DefaultChannel, "default_channel")
 		str("web-cache-dir", webCache, "web_cache_dir")
+		str("avatars-dir", avatarsDir, "avatars_dir")
+		str("nsfw-keywords", nsfw, "nsfw_keywords")
+		str("web-styles", styles, "web_styles")
+		str("web-default-style", &wc.DefaultStyle, "web_default_style")
+		if _, ok := keys["nsfw_keywords"]; ok {
+			wc.NSFWSet = true
+		}
 		num("web-max-conns", &wc.MaxConns, "web_max_conns")
 		num("web-max-per-ip", &wc.MaxPerIP, "web_max_per_ip")
 		num("fetch-per-minute", &wc.FetchPerMinute, "fetch_per_minute")
@@ -130,6 +142,15 @@ func main() {
 		}
 	}
 	wc.Addr = *webAddr
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "nsfw-keywords" {
+			wc.NSFWSet = true
+		}
+	})
+	if wc.NSFWSet && !strings.EqualFold(strings.TrimSpace(*nsfw), "none") {
+		wc.NSFWKeywords = splitList(*nsfw)
+	}
+	wc.Styles = splitList(*styles)
 	for _, o := range strings.Split(*origins, ",") {
 		if o = strings.TrimSpace(o); o != "" {
 			wc.Origins = append(wc.Origins, o)
@@ -184,9 +205,10 @@ func main() {
 		web.Logger = logger
 		web.Deny = deny
 		web.Chat = srv
-		web.Static = standalone.Files
+		web.Static = webpage.Standalone
 		web.Media = media
 		web.Images, web.Pages, web.Previews = webFetchers(*webCache, web.Config().ImageMaxMB)
+		web.Avatars = webAvatars(*avatarsDir, logger)
 		run := func() {
 			if err := web.ListenAndServe(ctx); err != nil {
 				log.Fatalf("web listener stopped: %v", err)
@@ -215,6 +237,33 @@ func webFetchers(dir string, imageMaxMB int) (*inlineimg.Fetcher, *inlineimg.Fet
 	img.MaxBytes = int64(imageMaxMB) << 20
 	pages := inlineimg.NewFetcher("")
 	return img, pages, &linkprev.Cache{Dir: cardDir}
+}
+
+// webAvatars is the web page's avatar library: the door's bundled
+// collections plus any in dir.
+func webAvatars(dir string, logger *log.Logger) []*avatar.Collection {
+	all, err := avatar.LoadBundled()
+	if err != nil {
+		logger.Printf("web: bundled avatars: %v", err)
+	}
+	if dir != "" {
+		extra, err := avatar.LoadDir(dir)
+		if err != nil {
+			logger.Printf("web: avatars_dir: %v", err)
+		}
+		all = append(all, extra...)
+	}
+	return all
+}
+
+func splitList(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.ToLower(strings.TrimSpace(p)); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func iniBool(v string) bool {

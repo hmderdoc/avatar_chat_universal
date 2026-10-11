@@ -1,36 +1,207 @@
 // Avatar Chat, standalone page. Talks only to the server that served it:
 // the chat over WebSocket at /chat, pictures through /img, link cards
-// through /preview, uploads to /upload. See WEB.md.
+// through /preview, the avatar library under /avatars/, uploads to
+// /upload. See WEB.md.
+//
+// The markup and classes are the Synchronet page's (web/synchronet), so
+// shared/app.css and its page styles dress both; the rooms, avatar and
+// attach behaviour follow that page too. There are no accounts here, so
+// the nickname, avatar, page style and joined rooms live in this browser.
 "use strict";
 
 (function () {
     const $ = (id) => document.getElementById(id);
     const els = {
-        transcript: $("transcript"), roster: $("roster"), rosterList: $("roster-list"),
-        input: $("input"), form: $("send-form"), counter: $("counter"), status: $("status"),
-        roomName: $("room-name"), roomBtn: $("room-btn"), whoBtn: $("who-btn"), whoCount: $("who-count"),
-        nickBtn: $("nick-btn"), nickName: $("nick-name"),
-        nickDialog: $("nick-dialog"), nickForm: $("nick-form"), nickInput: $("nick-input"), nickError: $("nick-error"),
-        roomsDialog: $("rooms-dialog"), roomsList: $("rooms-list"), createRoom: $("create-room"),
-        createInput: $("create-input"), createBtn: $("create-btn"),
-        dropHint: $("drop-hint"), dropVeil: $("drop-veil"),
+        app: $("app"), chatpanel: $("chatpanel"), messages: $("messages"),
+        rooms: $("rooms"), roomLabel: $("room-label"), count: $("count"), roomActions: $("room-actions"),
+        status: $("status"), statusText: $("status-text"),
+        form: $("form"), input: $("input"), file: $("file"), attach: $("attach"), draw: $("draw"),
+        members: $("members"), membersTitle: $("members-title"), membersList: $("members-list"), membersClose: $("members-close"),
+        meAvatar: $("me-avatar"), meName: $("me-name"), avatarOpen: $("avatar-open"), settingsOpen: $("settings-open"),
+        nickModal: $("nick-modal"), nickForm: $("nick-form"), nickInput: $("nick-input"), nickError: $("nick-error"),
+        roomModal: $("room-modal"), roomClose: $("room-close"), roomText: $("room-modal-text"), roomList: $("room-list"),
+        roomForm: $("room-form"), roomInput: $("room-input"), roomSubmit: $("room-submit"),
+        noRoomsModal: $("norooms-modal"), noRoomsDefault: $("norooms-default"), noRoomsMain: $("norooms-main"),
+        noRoomsPick: $("norooms-pick"), noRoomsCancel: $("norooms-cancel"),
+        settingsModal: $("settings-modal"), settingsForm: $("settings-form"), settingsNick: $("settings-nick"),
+        settingsStyle: $("settings-style"), settingsStatus: $("settings-status"), settingsCancel: $("settings-cancel"),
+        avatarModal: $("avatar-modal"), avatarPreview: $("avatar-preview"), avatarDraw: $("avatar-draw"),
+        avatarUpload: $("avatar-upload"), avatarRemove: $("avatar-remove"), avatarFile: $("avatar-file"),
+        avatarLibrary: $("avatar-library"), avatarCollection: $("avatar-collection"), avatarGrid: $("avatar-grid"),
+        avatarStatus: $("avatar-status"), avatarUse: $("avatar-use"), avatarClose: $("avatar-close"),
+        cardModal: $("card-modal"), cardAvatar: $("card-avatar"), cardName: $("card-name"), cardBoard: $("card-board"),
+        cardClose: $("card-close"),
     };
 
-    const HISTORY = 60;          // messages loaded on joining a room
-    const GROUP_MS = 2 * 60000;  // same sender within this joins one group
-    const KEEP = 400;            // messages kept in the transcript
+    const HISTORY = 60;            // messages loaded when a room is opened
+    const GROUP_MS = 2 * 60000;    // same sender within this joins one group
+    const KEEP = 400;              // messages kept on screen
+    const COUNTS_EVERY = 30000;    // user counts for the joined rooms
+    const MAX_ROOMS = 50;          // joined rooms kept
+    const PICKER_COUNTS = 40;      // rooms whose user count the picker asks for
+    const ART_EXTENSIONS = /\.(ans|asc|nfo|diz|ice|txt)$/i;
+    const ART_MAX_BYTES = 1024 * 1024;
+    const ROOM_NAME = /^[A-Za-z0-9_-]{1,32}$/;
 
-    const cfg = {defaultChannel: "main", systemName: "", maxMessage: 1000, createRooms: false, uploads: false};
+    const cfg = {
+        defaultChannel: "main", systemName: "", maxMessage: 1000, createRooms: false, uploads: false,
+        mode: "local", nsfwKeywords: [], styles: [{id: "classic", label: "Classic"}], defaultStyle: "classic", avatars: false,
+    };
     const state = {
-        nick: "", room: "", ws: null, open: false, retry: 0, retryTimer: 0,
-        messages: [], who: [], pendingSelf: [], whoTimer: 0, lastGroup: null,
+        nick: "", avatar: "", style: "", joined: [], view: "",
+        ws: null, open: false, retry: 0, retryTimer: 0, subscribed: new Set(),
+        messages: [], lastGroup: null, pendingSelf: [], pendingArt: null, busy: false,
+        who: new Map(),        // room (lower) -> [{nick, system}]
+        unread: new Map(),     // room (lower) -> count
+        publicRooms: [],       // names from public_channels
+        whoTimers: new Map(),
     };
 
-    // --- storage (per browser; may be unavailable) -----------------------
+    // --- storage (this browser only; may be unavailable) -------------------
     function load(key) { try { return localStorage.getItem("avchat." + key) || ""; } catch (e) { return ""; } }
-    function save(key, v) { try { localStorage.setItem("avchat." + key, v); } catch (e) { /* private mode */ } }
+    function save(key, v) {
+        try {
+            if (v) localStorage.setItem("avchat." + key, v);
+            else localStorage.removeItem("avchat." + key);
+        } catch (e) { /* private mode */ }
+    }
+    function loadJSON(key, fallback) { try { return JSON.parse(load(key)) || fallback; } catch (e) { return fallback; } }
 
-    // --- protocol ----------------------------------------------------------
+    const lower = (s) => String(s || "").toLowerCase();
+    const plain = (s) => String(s || "").replace(/\x01./g, "").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "");
+    function el(tag, cls, text) {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text !== undefined) e.textContent = text;
+        return e;
+    }
+
+    // --- avatars and styles seen on messages -------------------------------
+    // Keyed by name and board, kept in this browser so the members list
+    // has faces before those people speak again.
+    const seen = new Map(Object.entries(loadJSON("seen", {})));
+    let seenDirty = 0;
+    function seenKey(name, host) { return lower(name) + "|" + lower(host); }
+    // remember reports whether it learned anything new.
+    function remember(nick) {
+        if (!nick || !nick.name) return false;
+        const key = seenKey(nick.name, nick.host);
+        const prev = seen.get(key) || {};
+        const next = {a: nick.avatar || prev.a || "", s: nick.style && Array.isArray(nick.style.colors) ? nick.style.colors : prev.s || null};
+        if (next.a === prev.a && JSON.stringify(next.s) === JSON.stringify(prev.s)) return false;
+        seen.delete(key);
+        seen.set(key, next);
+        while (seen.size > 300) seen.delete(seen.keys().next().value);
+        clearTimeout(seenDirty);
+        seenDirty = setTimeout(() => save("seen", JSON.stringify(Object.fromEntries(seen))), 1000);
+        return true;
+    }
+    function isMe(name, host) { return lower(name) === lower(state.nick) && (!host || lower(host) === lower(cfg.systemName)); }
+    // seenFor finds what was seen for name on host; with no host (the
+    // bundled server's WHO lists bare names) the latest from any board.
+    function seenFor(name, host) {
+        if (host) return seen.get(seenKey(name, host)) || null;
+        const prefix = lower(name) + "|";
+        let hit = null;
+        seen.forEach((v, k) => { if (k.indexOf(prefix) === 0) hit = v; });
+        return hit;
+    }
+    function avatarOf(name, host) {
+        if (isMe(name, host)) return state.avatar;
+        const e = seenFor(name, host);
+        return e ? e.a : "";
+    }
+    function colorsOf(name, host) {
+        const e = seenFor(name, host);
+        return e && Array.isArray(e.s) ? e.s : null;
+    }
+
+    // An avatar as a picture: drawn once per avatar, then reused.
+    const avatarURLs = new Map();
+    function avatarURL(b64) {
+        if (!avatarURLs.has(b64)) {
+            const blocks = AvatarCodec.avatarToBlocks(b64);
+            avatarURLs.set(b64, blocks ? AvatarCodec.render(blocks).then((c) => c.toDataURL()) : Promise.resolve(""));
+        }
+        return avatarURLs.get(b64);
+    }
+    // fillAvatar puts name's avatar (or its initial) into box.
+    function fillAvatar(box, b64, name) {
+        box.textContent = "";
+        if (b64) {
+            const img = el("img");
+            img.alt = "";
+            box.appendChild(img);
+            avatarURL(b64).then((u) => { if (u) img.src = u; else box.textContent = initial(name); });
+            return;
+        }
+        if (name !== undefined) box.textContent = initial(name);
+    }
+    function initial(name) { return String(name || "?").charAt(0).toUpperCase(); }
+
+    // --- handle styles, links, NSFW -------------------------------------------
+    const HEX = /^#[0-9a-fA-F]{6}$/;
+    function handle(name, colors) {
+        const strong = el("strong", "avatar-chat-handle");
+        const list = Array.isArray(colors) ? colors : [];
+        if (!list.some((c) => HEX.test(c || ""))) {
+            strong.textContent = name;
+            return strong;
+        }
+        Array.from(name).forEach((ch, i) => {
+            if (HEX.test(list[i] || "")) {
+                const s = el("span", "", ch);
+                s.style.color = list[i];
+                strong.appendChild(s);
+            } else {
+                strong.appendChild(document.createTextNode(ch));
+            }
+        });
+        return strong;
+    }
+
+    // The URL rules are the door's and the Synchronet page's: links up to
+    // whitespace, quotes, angle brackets or a pipe, trailing punctuation
+    // dropped; pictures by the path's extension, three at most.
+    const URL_RE = /https?:\/\/[^\s<>"'\x01|]+/gi;
+    const TRAILING = /[).,;:!?]+$/;
+    const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp)$/i;
+    const AUDIO_EXT = /\.(mp3|ogg|oga|opus|wav|flac|m4a|aac)$/i;
+    const VIDEO_EXT = /\.(mp4|webm|mov|m4v)$/i;
+    const ANSI_EXT = /\.(ans|asc)$/i;
+    const MEDIA_PATH = /\/chatmedia\/\d{4}-\d{2}-\d{2}\/[a-f0-9]{24}\.[a-z0-9]{1,4}$/i;
+
+    function findURLs(text) {
+        const out = [];
+        (String(text).match(URL_RE) || []).forEach((m) => {
+            const u = m.replace(TRAILING, "");
+            try { if (!new URL(u).host) return; } catch (e) { return; }
+            if (out.indexOf(u) < 0) out.push(u);
+        });
+        return out;
+    }
+    function pathOf(u) { try { return new URL(u).pathname; } catch (e) { return ""; } }
+    function sameOrigin(u) { try { return new URL(u, location.href).origin === location.origin; } catch (e) { return false; } }
+    function imgSrc(u) { return sameOrigin(u) ? u : "img?url=" + encodeURIComponent(u); }
+
+    // The keyword rule (the door's inlineimg.LooksNSFW): any keyword as a
+    // whole word, any case, in the text or its percent-decoded form.
+    function looksNSFW(text) {
+        const words = cfg.nsfwKeywords || [];
+        if (!words.length) return false;
+        let s = String(text || "");
+        try { s += " " + decodeURIComponent(s); } catch (e) { /* not encoded */ }
+        const found = new Set(s.toLowerCase().split(/[^a-z0-9]+/));
+        return words.some((w) => found.has(String(w).toLowerCase()));
+    }
+
+    function mentionsMe(text) {
+        if (!state.nick) return false;
+        const esc = state.nick.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return new RegExp("(^|[^a-z0-9])@?" + esc + "([^a-z0-9]|$)", "i").test(text);
+    }
+
+    // --- protocol ---------------------------------------------------------------
     const loc = {
         messages: (room) => "channels." + room + ".messages",
         history: (room) => "channels." + room + ".history",
@@ -47,11 +218,9 @@
         return send(Object.assign({scope: "chat", func: "QUERY", oper, location, timeout: -1}, extra || {}));
     }
 
-    // Frames are buffered and split on newlines, so one packet may span
-    // frames or one frame carry several (Synchronet's websocketservice.js
-    // does both); the bundled server sends one packet per frame.
+    // Frames are buffered and split on newlines: one packet may span frames
+    // or one frame carry several.
     function receive(data) {
-        // A text frame (the bundled server's) is one whole packet.
         const bytes = typeof data === "string" ? enc.encode(data + "\n") : new Uint8Array(data);
         const joined = new Uint8Array(rx.length + bytes.length);
         joined.set(rx);
@@ -61,10 +230,10 @@
             if (joined[i] !== 10) continue;
             const line = dec.decode(joined.subarray(start, i)).trim();
             start = i + 1;
-            if (!line || line[0] !== "{") continue; // e.g. "Redirecting to server..."
+            if (!line || line[0] !== "{") continue;
             let pkt;
             try { pkt = JSON.parse(line); } catch (e) { continue; }
-            handle(pkt);
+            handle_(pkt);
         }
         rx = joined.slice(start);
     }
@@ -75,24 +244,28 @@
         const ws = new WebSocket(scheme + location.host + "/chat", ["binary"]);
         ws.binaryType = "arraybuffer";
         state.ws = ws;
+        state.subscribed = new Set();
         rx = new Uint8Array(0);
-        setStatus(false, "connecting");
+        setStatus("info", "Connecting...");
         ws.onopen = () => {
             state.open = true;
             state.retry = 0;
-            setStatus(true, "connected");
-            join(state.room || cfg.defaultChannel, true);
+            clearStatus("info");
+            clearStatus("warning");
+            state.joined.forEach(subscribe);
+            openView(state.view || state.joined[0] || cfg.defaultChannel);
+            refreshCounts();
+            if (!state.joined.length) openModal(els.noRoomsModal, els.noRoomsMain);
         };
         ws.onmessage = (ev) => receive(ev.data);
         ws.onclose = () => {
             if (state.ws !== ws) return;
             state.open = false;
             const wait = Math.min(30000, 1000 * Math.pow(2, state.retry++));
-            setStatus(false, "reconnecting in " + Math.round(wait / 1000) + "s");
+            setStatus("warning", "Disconnected. Reconnecting in " + Math.round(wait / 1000) + "s...");
             state.retryTimer = setTimeout(connect, wait);
         };
     }
-
     function reconnect() {
         const old = state.ws;
         state.ws = null;
@@ -100,80 +273,88 @@
         connect();
     }
 
-    function join(room, fresh) {
-        room = String(room || "").replace(/^#/, "");
-        if (!/^[A-Za-z0-9_-]{1,32}$/.test(room)) {
-            notice("room names are letters, digits, - and _ (up to 32)", true);
-            return;
-        }
-        if (!fresh && state.room && state.room !== room) {
-            query("UNSUBSCRIBE", loc.messages(state.room), {nick: state.nick, system: cfg.systemName});
-        }
-        state.room = room;
-        save("room", room);
-        els.roomName.textContent = room;
-        document.title = "#" + room + " · Avatar Chat";
-        state.messages = [];
-        state.lastGroup = null;
-        els.transcript.textContent = "";
+    function subscribe(room) {
+        if (state.subscribed.has(lower(room))) return;
+        state.subscribed.add(lower(room));
         query("SUBSCRIBE", loc.messages(room), {nick: state.nick, system: cfg.systemName});
-        query("SLICE", loc.history(room), {data: {start: -HISTORY}, lock: 1});
-        refreshWho(0);
+    }
+    function unsubscribe(room) {
+        if (!state.subscribed.delete(lower(room))) return;
+        query("UNSUBSCRIBE", loc.messages(room), {nick: state.nick, system: cfg.systemName});
+    }
+    function askWho(room, delay) {
+        const key = lower(room);
+        clearTimeout(state.whoTimers.get(key));
+        state.whoTimers.set(key, setTimeout(() => query("WHO", loc.messages(room)), delay || 0));
+    }
+    function refreshCounts() {
+        state.joined.forEach((r) => askWho(r, 0));
+        if (state.view && !isJoined(state.view)) askWho(state.view, 0);
     }
 
-    function refreshWho(delay) {
-        clearTimeout(state.whoTimer);
-        state.whoTimer = setTimeout(() => query("WHO", loc.messages(state.room)), delay);
+    function roomOf(location) {
+        const m = /^channels\.([A-Za-z0-9_-]{1,32})\.(messages|history)$/.exec(String(location || ""));
+        return m ? m[1] : "";
     }
 
-    function handle(pkt) {
+    function handle_(pkt) {
         if (pkt.scope === "SOCKET") {
             if (pkt.func === "PING") send({scope: "SOCKET", func: "PONG", data: pkt.data});
             return;
         }
         if (pkt.func === "ERROR") {
-            const why = pkt.data && pkt.data.description ? pkt.data.description : "error";
-            // A room that isn't public (any more): go home, then say why.
-            if (/^no public room/.test(why) && state.room.toLowerCase() !== cfg.defaultChannel.toLowerCase()) {
-                join(cfg.defaultChannel, true);
+            const why = pkt.data && pkt.data.description ? String(pkt.data.description) : "error";
+            if (/nickname/.test(why)) { askNick(why); return; }
+            if (/^no public room named (\S+)/.test(why)) {
+                const gone = /^no public room named (\S+)/.exec(why)[1];
+                state.joined = state.joined.filter((r) => lower(r) !== lower(gone));
+                saveRooms();
+                state.subscribed.delete(lower(gone));
+                if (lower(state.view) === lower(gone)) openView(state.joined[0] || cfg.defaultChannel);
+                renderRooms();
             }
-            notice(why, true);
-            if (/nickname/.test(why)) askNick(why);
+            setStatus("error", why);
             return;
         }
-        const here = state.room && pkt.location === loc.messages(state.room);
+        const room = roomOf(pkt.location);
         if (pkt.func === "RESPONSE") {
-            if (pkt.oper === "SLICE" && pkt.location === loc.history(state.room)) {
+            if (pkt.oper === "SLICE" && room && lower(room) === lower(state.view)) {
                 setHistory(Array.isArray(pkt.data) ? pkt.data : []);
-            } else if (pkt.oper === "WHO" && here) {
-                setWho(Array.isArray(pkt.data) ? pkt.data : []);
+            } else if (pkt.oper === "WHO" && room) {
+                setWho(room, Array.isArray(pkt.data) ? pkt.data : []);
             } else if (pkt.oper === "KEYS" && pkt.location === "public_channels") {
-                showRooms(pkt.data);
+                setPublicRooms(pkt.data);
             }
             return;
         }
-        if (pkt.func !== "UPDATE" || !here) return;
+        if (pkt.func !== "UPDATE" || !room) return;
         const oper = String(pkt.oper || "").toUpperCase();
+        const here = lower(room) === lower(state.view);
         if (oper === "WRITE") {
             const m = pkt.data;
-            if (!m || typeof m !== "object" || isSelfEcho(m)) return;
-            addMessage(m, true);
+            if (!m || typeof m !== "object") return;
+            const learned = m.nick && typeof m.nick === "object" && remember(m.nick);
+            if (here && learned) renderMembers();
+            if (here) {
+                if (!isSelfEcho(m)) addMessage(m, true);
+            } else if (isJoined(room) && !(m.nick && isMe(m.nick.name, m.nick.host))) {
+                state.unread.set(lower(room), (state.unread.get(lower(room)) || 0) + 1);
+                renderRooms();
+            }
         } else if (oper === "SUBSCRIBE" || oper === "UNSUBSCRIBE") {
             const who = pkt.data && pkt.data.nick;
-            if (who && who !== state.nick) {
-                const sys = pkt.data.system ? " (" + pkt.data.system + ")" : "";
-                notice(who + sys + (oper === "SUBSCRIBE" ? " joined" : " left"));
+            if (here && who && !isMe(who, pkt.data.system)) {
+                const sys = pkt.data.system ? " (" + plain(pkt.data.system) + ")" : "";
+                systemLine(plain(who) + sys + (oper === "SUBSCRIBE" ? " joined" : " left"));
             }
-            refreshWho(400);
+            askWho(room, 400);
         }
     }
 
-    // --- messages ----------------------------------------------------------
-    function plain(s) { return String(s || "").replace(/\x01./g, "").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, ""); }
+    // --- messages -------------------------------------------------------------
     function isTuner(s) { return /^\[TVTUNER\|.*\]$/.test(s); }
-
     function isSelfEcho(m) {
-        if (!m.nick || m.nick.name !== state.nick) return false;
+        if (!m.nick || !isMe(m.nick.name, m.nick.host)) return false;
         const now = Date.now();
         state.pendingSelf = state.pendingSelf.filter((p) => now - p.at < 30000);
         const i = state.pendingSelf.findIndex((p) => p.str === m.str);
@@ -183,15 +364,17 @@
     }
 
     function setHistory(list) {
-        // Notices since joining (an error, someone joining) stay after it.
-        const kept = Array.from(els.transcript.querySelectorAll(".notice"));
         state.messages = [];
         state.lastGroup = null;
-        els.transcript.textContent = "";
-        list.forEach((m) => { if (m && typeof m === "object") addMessage(m, false); });
-        if (!list.length) notice("No messages yet in #" + state.room + ". Say hello.");
-        kept.forEach((n) => els.transcript.appendChild(n));
-        state.lastGroup = null;
+        els.messages.textContent = "";
+        list.forEach((m) => {
+            if (m && typeof m === "object") {
+                if (m.nick && typeof m.nick === "object") remember(m.nick);
+                addMessage(m, false);
+            }
+        });
+        if (!state.messages.length) els.messages.appendChild(el("div", "avatar-chat-empty", "No messages yet in #" + state.view + ". Say hello."));
+        renderMembers();
         scrollDown(true);
     }
 
@@ -200,447 +383,1000 @@
         if (isTuner(str)) return;
         const nick = m.nick && typeof m.nick === "object" ? m.nick : {name: String(m.nick || "")};
         const name = plain(nick.name).trim();
-        if (!name) { notice(plain(str)); return; }
+        if (!name) { systemLine(plain(str)); return; }
+        const empty = els.messages.querySelector(".avatar-chat-empty");
+        if (empty) empty.remove();
         const pinned = nearBottom();
         state.messages.push(m);
         const time = Number(m.time) || Date.now();
-        const self = name === state.nick && (!nick.host || nick.host === cfg.systemName);
+        const host = plain(nick.host || "");
+        const self = isMe(name, host);
         let g = state.lastGroup;
-        if (!g || g.name !== name || g.host !== (nick.host || "") || time - g.time > GROUP_MS) {
-            g = newGroup(nick, name, time, self);
+        if (!g || g.name !== name || g.host !== host || time - g.time > GROUP_MS) {
+            g = newGroup(nick, name, host, time, self);
             state.lastGroup = g;
         }
         g.time = time;
-        g.bubbles.appendChild(bubble(str, self));
-        while (els.transcript.childElementCount > KEEP) els.transcript.firstElementChild.remove();
-        if (live || pinned) scrollDown(pinned);
+        g.content.appendChild(bubble(str, self));
+        while (els.messages.childElementCount > KEEP) els.messages.firstElementChild.remove();
+        if (live || pinned) scrollDown(pinned || (live && self));
     }
 
-    function newGroup(nick, name, time, self) {
-        const row = document.createElement("div");
-        row.className = "group" + (self ? " self" : "");
-        const av = document.createElement("div");
-        av.className = "avatar";
-        const blocks = AvatarCodec.avatarToBlocks(nick.avatar);
-        if (blocks) {
-            AvatarCodec.render(blocks).then((c) => av.appendChild(c)).catch(() => {});
-        } else {
-            const i = document.createElement("div");
-            i.className = "initial";
-            i.textContent = name.charAt(0).toUpperCase();
-            av.appendChild(i);
+    function newGroup(nick, name, host, time, self) {
+        const row = el("div", "avatar-chat-group" + (self ? " is-self" : ""));
+        const av = el(self ? "div" : "button", "avatar-chat-avatar" + (self ? "" : " avatar-chat-actor"));
+        if (!self) {
+            av.type = "button";
+            av.title = name;
+            av.onclick = () => openCard(name, host);
         }
-        const col = document.createElement("div");
-        col.className = "bubbles";
-        const who = document.createElement("div");
-        who.className = "who";
-        who.appendChild(styledName(name, nick.style));
-        if (nick.host) {
-            const h = document.createElement("span");
-            h.className = "host";
-            h.textContent = " @ " + plain(nick.host);
-            who.appendChild(h);
+        fillAvatar(av, nick.avatar || avatarOf(name, host), name);
+        if (!av.querySelector("img")) av.replaceChildren(el("div", "avatar-chat-avatar-placeholder", initial(name)));
+        const content = el("div", "avatar-chat-content");
+        const header = el("div", "avatar-chat-header");
+        const who = self ? header : el("button", "avatar-chat-sender-button");
+        if (!self) {
+            who.type = "button";
+            who.onclick = () => openCard(name, host);
+            header.appendChild(who);
         }
-        const t = document.createElement("span");
-        t.className = "time";
-        t.textContent = new Date(time).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
-        who.appendChild(t);
-        col.appendChild(who);
+        who.appendChild(handle(name, nick.style && nick.style.colors));
+        if (host) {
+            who.appendChild(document.createTextNode(" "));
+            who.appendChild(el("span", "avatar-chat-system-name", "- " + host));
+        }
+        who.appendChild(document.createTextNode(" "));
+        who.appendChild(el("span", "avatar-chat-time", new Date(time).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})));
+        content.appendChild(header);
         row.appendChild(av);
-        row.appendChild(col);
-        els.transcript.appendChild(row);
-        return {name, host: nick.host || "", time, bubbles: col};
-    }
-
-    const HEX = /^#[0-9a-fA-F]{6}$/;
-    function styledName(name, style) {
-        const span = document.createElement("span");
-        span.className = "name";
-        const colors = style && Array.isArray(style.colors) ? style.colors : [];
-        if (!colors.some((c) => HEX.test(c))) {
-            span.style.color = "var(--white)";
-            span.textContent = name;
-        } else {
-            Array.from(name).forEach((ch, i) => {
-                const s = document.createElement("span");
-                s.textContent = ch;
-                s.style.color = HEX.test(colors[i] || "") ? colors[i] : "var(--white)";
-                span.appendChild(s);
-            });
-        }
-        const tag = style && style.tag;
-        if (tag && tag.text) {
-            const tg = document.createElement("span");
-            tg.className = "tag";
-            tg.textContent = tag.text;
-            tg.style.color = HEX.test(tag.fg) ? tag.fg : "var(--black)";
-            tg.style.background = HEX.test(tag.bg) ? tag.bg : "var(--lightgray)";
-            span.appendChild(tg);
-        }
-        return span;
-    }
-
-    // The URL rules are the door's (internal/inlineimg/urls.go): links up
-    // to whitespace, quotes, angle brackets or a pipe, trailing punctuation
-    // dropped; pictures by the path's extension, at most three a message.
-    const URL_RE = /https?:\/\/[^\s<>"'\x01|]+/gi;
-    const TRAILING = /[).,;:!?]+$/;
-    const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp)(?:[?#]|$)/i;
-    const NO_CARD = /\.(png|jpe?g|gif|webp|bmp|mp4|webm|ogv|m4v|mov|mp3|ogg|oga|m4a|flac|wav|ans|asc)(?:[?#]|$)/i;
-    const MEDIA_PATH = /\/chatmedia\/\d{4}-\d{2}-\d{2}\/[a-f0-9]{24}\.[a-z0-9]{1,4}(?:[?#]|$)/i;
-
-    function findURLs(text) {
-        const out = [];
-        (text.match(URL_RE) || []).forEach((m) => {
-            const u = m.replace(TRAILING, "");
-            try { if (!new URL(u).host) return; } catch (e) { return; }
-            if (u && out.indexOf(u) < 0) out.push(u);
-        });
-        return out;
-    }
-    function pathOf(u) { try { return new URL(u).pathname; } catch (e) { return u; } }
-    function sameOrigin(u) { try { return new URL(u).origin === location.origin; } catch (e) { return false; } }
-    function imgSrc(u) { return sameOrigin(u) ? u : "img?url=" + encodeURIComponent(u); }
-
-    function mentionsMe(text) {
-        if (!state.nick) return false;
-        const esc = state.nick.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        return new RegExp("(^|[^A-Za-z0-9_])@?" + esc + "(?![A-Za-z0-9_])", "i").test(text);
+        row.appendChild(content);
+        els.messages.appendChild(row);
+        return {name, host, time, content};
     }
 
     function bubble(str, self) {
-        const b = document.createElement("div");
-        b.className = "bubble";
-        if (AvatarCodec.isBitmap(str)) {
-            b.classList.add("bitmap");
-            b.textContent = "…";
-            AvatarCodec.decodeBitmap(str).then((art) => {
-                if (!art) { b.textContent = "(unreadable ANSI art)"; return; }
-                return AvatarCodec.render(art).then((c) => {
-                    const pinned = nearBottom();
-                    b.textContent = "";
-                    b.appendChild(c);
-                    if (art.from) {
-                        const f = document.createElement("div");
-                        f.className = "from";
-                        f.textContent = "art from " + art.from;
-                        b.appendChild(f);
-                    }
-                    if (pinned) scrollDown(true);
-                });
-            }).catch(() => { b.textContent = "(unreadable ANSI art)"; });
-            return b;
-        }
+        if (AvatarCodec.isBitmap(str)) return bitmapBubble(str);
+        const b = el("div", "avatar-chat-bubble");
         const text = plain(str);
-        if (!self && mentionsMe(text)) b.classList.add("mention");
+        if (!self && mentionsMe(text)) b.classList.add("is-mention");
+        const rich = el("div", "avatar-chat-rich-text");
         const urls = findURLs(text);
         let rest = text;
         urls.forEach((u) => {
             const at = rest.indexOf(u);
             if (at < 0) return;
-            b.appendChild(document.createTextNode(rest.slice(0, at)));
-            const a = document.createElement("a");
+            rich.appendChild(document.createTextNode(rest.slice(0, at)));
+            const a = el("a", "", u);
             a.href = u;
             a.target = "_blank";
             a.rel = "noopener noreferrer";
-            a.textContent = u;
-            b.appendChild(a);
+            rich.appendChild(a);
             rest = rest.slice(at + u.length);
         });
-        b.appendChild(document.createTextNode(rest));
+        rich.appendChild(document.createTextNode(rest));
+        b.appendChild(rich);
 
-        const pics = urls.filter((u) => IMAGE_EXT.test(pathOf(u))).slice(0, 3);
-        if (pics.length) {
-            const box = document.createElement("div");
-            box.className = "pics";
-            pics.forEach((u) => {
-                const img = document.createElement("img");
+        const veiled = looksNSFW(text);
+        const media = el("div", "avatar-chat-rich-media");
+        let pictures = 0, card = "";
+        urls.forEach((u) => {
+            const path = pathOf(u);
+            if (IMAGE_EXT.test(path)) {
+                if (pictures >= 3) return;
+                pictures++;
+                const a = el("a", "avatar-chat-rich-image" + (veiled || looksNSFW(u) ? " is-veiled" : ""));
+                a.href = u;
+                a.target = "_blank";
+                a.rel = "noopener noreferrer";
+                const img = el("img");
+                img.alt = "";
                 img.loading = "lazy";
-                img.alt = "picture";
                 img.referrerPolicy = "no-referrer";
-                img.onload = () => { if (nearBottom(img.height + 40)) scrollDown(true); };
-                img.onerror = () => img.remove();
+                img.onload = () => { if (nearBottom(img.height + 60)) scrollDown(true); };
+                img.onerror = () => a.remove();
                 img.src = imgSrc(u);
-                box.appendChild(img);
+                a.appendChild(img);
+                media.appendChild(a);
+            } else if ((AUDIO_EXT.test(path) || VIDEO_EXT.test(path)) && sameOrigin(u)) {
+                // Players only for this server's own files: the page never
+                // makes the browser fetch from another site.
+                const player = el(AUDIO_EXT.test(path) ? "audio" : "video", AUDIO_EXT.test(path) ? "avatar-chat-rich-audio" : "avatar-chat-rich-video");
+                player.controls = true;
+                player.preload = "none";
+                player.src = u;
+                media.appendChild(player);
+            } else if (!card && !ANSI_EXT.test(path) && !MEDIA_PATH.test(u) && !AUDIO_EXT.test(path) && !VIDEO_EXT.test(path) && u.length <= 2048) {
+                card = u;
+            }
+        });
+        if (media.childElementCount) b.appendChild(media);
+        if (card) linkCard(card, b);
+        return b;
+    }
+
+    function bitmapBubble(str) {
+        const b = el("div", "avatar-chat-bubble avatar-chat-bitmap-bubble");
+        const shell = el("div", "avatar-chat-bitmap-shell");
+        const frame = el("div", "avatar-chat-bitmap-frame");
+        const stage = el("div", "avatar-chat-bitmap-stage");
+        stage.appendChild(el("div", "avatar-chat-bitmap-placeholder", "Rendering art..."));
+        frame.appendChild(stage);
+        shell.appendChild(frame);
+        b.appendChild(shell);
+        AvatarCodec.decodeBitmap(str).then((art) => {
+            if (!art) throw new Error("unreadable");
+            return AvatarCodec.render(art).then((c) => {
+                const pinned = nearBottom();
+                shell.style.maxWidth = c.width + "px";
+                c.className = "avatar-chat-bitmap-image";
+                c.title = "ANSI art " + art.columns + "x" + art.rows + (art.from ? " from " + art.from : "");
+                stage.replaceChildren(c);
+                if (pinned) scrollDown(true);
             });
-            b.appendChild(box);
-        }
-        const cardURL = urls.find((u) => !NO_CARD.test(pathOf(u)) && !MEDIA_PATH.test(u) && u.length <= 2048);
-        if (cardURL) card(cardURL, b);
+        }).catch(() => {
+            stage.classList.add("is-error");
+            stage.replaceChildren(el("div", "avatar-chat-bitmap-placeholder", "Unreadable ANSI art"));
+        });
         return b;
     }
 
     const cards = new Map();
-    function card(u, into) {
+    function linkCard(u, into) {
         if (!cards.has(u)) {
             cards.set(u, fetch("preview?url=" + encodeURIComponent(u), {credentials: "same-origin"})
                 .then((r) => (r.ok ? r.json() : null)).catch(() => null));
         }
-        cards.get(u).then((m) => {
-            if (!m || (!m.title && !m.description)) return;
+        const box = el("div", "avatar-chat-card");
+        into.appendChild(box);
+        cards.get(u).then((d) => {
+            if (!d || d.error || !(d.title || d.description || d.image)) { box.remove(); return; }
             const pinned = nearBottom();
-            const a = document.createElement("a");
-            a.className = "card";
-            a.href = m.finalUrl || u;
-            a.target = "_blank";
-            a.rel = "noopener noreferrer";
-            if (m.image) {
-                const img = document.createElement("img");
+            if (d.image && /^https?:\/\//i.test(d.image)) {
+                const img = el("img", "avatar-chat-card-image" + (looksNSFW(d.title + " " + d.description + " " + u) ? " is-veiled" : ""));
                 img.alt = "";
+                img.loading = "lazy";
                 img.referrerPolicy = "no-referrer";
                 img.onerror = () => img.remove();
-                img.src = imgSrc(m.image);
-                a.appendChild(img);
+                img.src = imgSrc(d.image);
+                box.appendChild(img);
             }
-            const body = document.createElement("div");
-            const add = (cls, text) => {
-                if (!text) return;
-                const d = document.createElement("div");
-                d.className = cls;
-                d.textContent = text;
-                body.appendChild(d);
-            };
-            add("site", m.siteName || (() => { try { return new URL(a.href).host; } catch (e) { return ""; } })());
-            add("title", m.title);
-            add("desc", m.description);
-            a.appendChild(body);
-            into.appendChild(a);
+            const body = el("div", "avatar-chat-card-body");
+            let site = d.siteName || "";
+            if (!site) { try { site = new URL(d.finalUrl || u).host; } catch (e) { /* none */ } }
+            if (site) body.appendChild(el("div", "avatar-chat-card-site", site));
+            const title = el("a", "avatar-chat-card-title", d.title || u);
+            title.href = d.finalUrl || u;
+            title.target = "_blank";
+            title.rel = "noopener noreferrer";
+            body.appendChild(title);
+            if (d.description) body.appendChild(el("div", "avatar-chat-card-text", d.description));
+            box.appendChild(body);
+            box.classList.add("is-ready");
             if (pinned) scrollDown(true);
         });
     }
 
-    function notice(text, error) {
+    function systemLine(text) {
         const pinned = nearBottom();
-        const d = document.createElement("div");
-        d.className = "notice" + (error ? " error" : "");
-        d.textContent = text;
-        els.transcript.appendChild(d);
+        els.messages.appendChild(el("div", "avatar-chat-system", text));
         state.lastGroup = null;
         if (pinned) scrollDown(true);
     }
-
     function nearBottom(slack) {
-        const t = els.transcript;
+        const t = els.messages;
         return t.scrollHeight - t.scrollTop - t.clientHeight < (slack || 80);
     }
     function scrollDown(force) {
-        if (force) requestAnimationFrame(() => { els.transcript.scrollTop = els.transcript.scrollHeight; });
+        if (force) requestAnimationFrame(() => { els.messages.scrollTop = els.messages.scrollHeight; });
     }
 
-    // --- roster and rooms ----------------------------------------------------
-    function setWho(list) {
-        const seen = new Set();
-        const people = [];
-        list.forEach((e) => {
-            const nick = typeof e === "string" ? e : e && e.nick;
-            const sys = typeof e === "object" && e ? e.system || "" : "";
-            const key = String(nick || "").toLowerCase() + "|" + sys.toLowerCase();
-            if (!nick || seen.has(key)) return;
-            seen.add(key);
-            people.push({nick: plain(nick), sys: plain(sys)});
-        });
-        people.sort((a, b) => a.nick.localeCompare(b.nick));
-        els.rosterList.textContent = "";
-        people.forEach((p) => {
-            const li = document.createElement("li");
-            li.textContent = p.nick;
-            if (p.sys) {
-                const s = document.createElement("span");
-                s.className = "sys";
-                s.textContent = " " + p.sys;
-                li.appendChild(s);
+    // A veiled picture shows on the first click.
+    els.messages.addEventListener("click", (ev) => {
+        const veiled = ev.target && ev.target.closest ? ev.target.closest(".is-veiled") : null;
+        if (veiled) {
+            ev.preventDefault();
+            veiled.classList.remove("is-veiled");
+        }
+    });
+
+    // --- status bar --------------------------------------------------------------
+    // Notes (info) fade after a few seconds; warnings and errors stay
+    // until what they are about changes.
+    let statusType = "", statusTimer = 0;
+    function setStatus(type, text) {
+        statusType = type;
+        els.status.className = "avatar-chat-status is-visible is-" + type;
+        els.statusText.textContent = text;
+        clearTimeout(statusTimer);
+        if (type === "info" && state.open) statusTimer = setTimeout(() => clearStatus("info"), 4000);
+    }
+    function clearStatus(type) {
+        if (type && statusType !== type) return;
+        statusType = "";
+        els.status.className = "avatar-chat-status";
+        els.statusText.textContent = "";
+    }
+
+    // --- rooms -----------------------------------------------------------------
+    function isJoined(name) { return state.joined.some((r) => lower(r) === lower(name)); }
+    function saveRooms() { save("rooms", JSON.stringify(state.joined)); }
+    function userCount(room) { return (state.who.get(lower(room)) || []).length; }
+    function plural(n) { return n + " user" + (n === 1 ? "" : "s"); }
+
+    function openView(room) {
+        room = String(room || "").replace(/^#/, "");
+        if (!ROOM_NAME.test(room)) room = cfg.defaultChannel;
+        state.view = room;
+        state.unread.delete(lower(room));
+        state.messages = [];
+        state.lastGroup = null;
+        els.messages.replaceChildren(el("div", "avatar-chat-empty", "Loading #" + room + "..."));
+        document.title = "#" + room + " - Avatar Chat";
+        query("SLICE", loc.history(room), {data: {start: -HISTORY}, lock: 1});
+        askWho(room, 0);
+        renderHeader();
+        renderRooms();
+        renderMembers();
+    }
+
+    function joinRoom(name, create) {
+        name = String(name || "").trim().replace(/^#/, "");
+        if (!ROOM_NAME.test(name)) {
+            setStatus("error", "Room names are letters, digits, - and _ (up to 32).");
+            return;
+        }
+        const known = knownRoom(name);
+        if (known) name = known;
+        if (create && !known) {
+            query("WRITE", "public_channels." + name, {data: true, lock: 2});
+            state.publicRooms.push(name);
+        }
+        if (!isJoined(name)) {
+            state.joined.push(name);
+            while (state.joined.length > MAX_ROOMS) state.joined.shift();
+            saveRooms();
+        }
+        subscribe(name);
+        closeModal(els.roomModal);
+        closeModal(els.noRoomsModal);
+        openView(name);
+        if (create && !known) setStatus("info", "Created #" + name + " and joined it.");
+    }
+
+    function leaveRoom(name) {
+        state.joined = state.joined.filter((r) => lower(r) !== lower(name));
+        saveRooms();
+        unsubscribe(name);
+        state.unread.delete(lower(name));
+        if (lower(state.view) === lower(name)) {
+            if (state.joined.length) {
+                openView(state.joined[state.joined.length - 1]);
+            } else {
+                renderHeader();
+                renderRooms();
+                openModal(els.noRoomsModal, els.noRoomsMain);
             }
-            els.rosterList.appendChild(li);
-        });
-        els.whoCount.textContent = String(people.length);
+            return;
+        }
+        renderRooms();
     }
 
-    function openRooms() {
-        els.roomsList.innerHTML = '<li class="hint">loading…</li>';
-        els.createRoom.hidden = !cfg.createRooms;
-        if (!els.roomsDialog.open) els.roomsDialog.showModal();
+    function knownRoom(name) {
+        const all = [cfg.defaultChannel].concat(state.publicRooms, state.joined);
+        return all.find((r) => lower(r) === lower(name)) || "";
+    }
+
+    function renderHeader() {
+        els.roomLabel.textContent = "#" + state.view;
+        els.count.textContent = plural(userCount(state.view));
+        els.roomActions.replaceChildren();
+        const action = (label, cls, fn) => {
+            const b = el("button", "avatar-chat-room-action" + (cls ? " " + cls : ""), label);
+            b.type = "button";
+            b.onclick = fn;
+            els.roomActions.appendChild(b);
+            return b;
+        };
+        if (isJoined(state.view)) {
+            action("Join a room", "", openRoomModal);
+            action("Leave", "is-leave", () => leaveRoom(state.view)).title = "Leave #" + state.view;
+        } else {
+            action("Join #" + state.view, "is-primary", () => joinRoom(state.view));
+            action("Other rooms", "", openRoomModal);
+        }
+    }
+
+    function renderRooms() {
+        els.rooms.replaceChildren();
+        if (!state.joined.length) {
+            els.rooms.appendChild(el("div", "avatar-chat-nav-empty", "No rooms joined."));
+            return;
+        }
+        state.joined.slice().sort((a, b) => {
+            const ua = state.unread.get(lower(a)) ? 1 : 0, ub = state.unread.get(lower(b)) ? 1 : 0;
+            return ub - ua || a.toLowerCase().localeCompare(b.toLowerCase());
+        }).forEach((room) => {
+            const active = lower(room) === lower(state.view);
+            const row = el("div", "avatar-chat-nav-item avatar-chat-room" + (active ? " is-active" : ""));
+            row.setAttribute("role", "button");
+            row.tabIndex = 0;
+            row.dataset.room = room;
+            const top = el("div", "avatar-chat-nav-top");
+            top.appendChild(el("span", "avatar-chat-nav-title", "#" + room));
+            const unread = state.unread.get(lower(room)) || 0;
+            if (unread) top.appendChild(el("span", "avatar-chat-badge is-unread", String(unread)));
+            const x = el("button", "avatar-chat-nav-icon is-leave", "×");
+            x.type = "button";
+            x.title = "Leave #" + room;
+            x.setAttribute("aria-label", "Leave #" + room);
+            x.onclick = (ev) => { ev.stopPropagation(); leaveRoom(room); };
+            top.appendChild(x);
+            row.appendChild(top);
+            row.appendChild(el("div", "avatar-chat-nav-secondary", plural(userCount(room)) + (active ? " · Current" : "")));
+            const open = () => { if (!active) openView(room); };
+            row.onclick = open;
+            row.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); open(); } };
+            els.rooms.appendChild(row);
+        });
+    }
+
+    // The picker: every public room with its user count, one click to join;
+    // a typed name joins it, or creates it where the server allows.
+    function openRoomModal() {
+        closeModal(els.noRoomsModal);
+        els.roomInput.value = "";
+        els.roomText.textContent = cfg.createRooms
+            ? "Pick a room, or type a name (letters, numbers, _ or -). A new name creates the room."
+            : "Pick a room, or type its name.";
+        renderPicker();
+        openModal(els.roomModal, els.roomInput);
         query("KEYS", "public_channels", {lock: 1});
     }
 
-    function showRooms(data) {
+    function setPublicRooms(data) {
         let names = Array.isArray(data) ? data.slice() : data && typeof data === "object" ? Object.keys(data) : [];
-        names = names.map(String).filter((n) => /^[A-Za-z0-9_-]{1,32}$/.test(n));
-        const lower = names.map((n) => n.toLowerCase());
-        if (lower.indexOf(cfg.defaultChannel.toLowerCase()) < 0) names.push(cfg.defaultChannel);
-        names.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-        els.roomsList.textContent = "";
-        names.forEach((n) => {
-            const li = document.createElement("li");
-            const btn = document.createElement("button");
-            btn.type = "button";
-            btn.textContent = "#" + n;
-            if (n.toLowerCase() === state.room.toLowerCase()) btn.className = "current";
-            btn.onclick = () => { els.roomsDialog.close(); if (n !== state.room) join(n); };
-            li.appendChild(btn);
-            els.roomsList.appendChild(li);
-        });
+        names = names.map(String).filter((n) => ROOM_NAME.test(n));
+        const seenNames = new Set();
+        state.publicRooms = names.filter((n) => !seenNames.has(lower(n)) && seenNames.add(lower(n)));
+        pickerRooms().slice(0, PICKER_COUNTS).forEach((r) => askWho(r, 0));
+        renderPicker();
     }
 
-    function createRoom() {
-        const n = els.createInput.value.trim().replace(/^#/, "");
-        if (!/^[A-Za-z0-9_-]{1,32}$/.test(n)) {
-            notice("room names are letters, digits, - and _ (up to 32)", true);
+    function pickerRooms() {
+        const out = [];
+        const have = new Set();
+        [cfg.defaultChannel].concat(state.publicRooms, state.joined).forEach((r) => {
+            if (!have.has(lower(r))) { have.add(lower(r)); out.push(r); }
+        });
+        return out.sort((a, b) => userCount(b) - userCount(a) || a.toLowerCase().localeCompare(b.toLowerCase()));
+    }
+
+    function renderPicker() {
+        if (!els.roomModal.classList.contains("is-open")) return;
+        els.roomList.replaceChildren();
+        pickerRooms().forEach((room) => {
+            const current = lower(room) === lower(state.view);
+            const btn = el("button", "avatar-chat-picker-room" + (current ? " is-current" : ""));
+            btn.type = "button";
+            btn.dataset.room = room;
+            btn.appendChild(el("span", "avatar-chat-picker-room-name", "#" + room));
+            btn.appendChild(el("span", "avatar-chat-picker-room-count", plural(userCount(room))));
+            const st = current ? "Current" : isJoined(room) ? "Joined" : "";
+            if (st) btn.appendChild(el("span", "avatar-chat-nav-state", st));
+            btn.onclick = () => joinRoom(room);
+            els.roomList.appendChild(btn);
+        });
+        updateRoomSubmit();
+    }
+
+    // Join #x when x is a room, Create #x when it would be new.
+    function updateRoomSubmit() {
+        const typed = els.roomInput.value.trim().replace(/^#/, "");
+        const b = els.roomSubmit;
+        delete b.dataset.create;
+        if (!typed || !ROOM_NAME.test(typed)) {
+            b.textContent = "Join";
+            b.disabled = true;
             return;
         }
-        query("WRITE", "public_channels." + n, {data: true, lock: 2});
-        els.createInput.value = "";
-        els.roomsDialog.close();
-        join(n);
+        const known = knownRoom(typed);
+        if (known) {
+            b.textContent = "Join #" + known;
+            b.disabled = false;
+        } else if (cfg.createRooms) {
+            b.textContent = "Create #" + typed;
+            b.dataset.create = "1";
+            b.disabled = false;
+        } else {
+            b.textContent = "No room #" + typed;
+            b.disabled = true;
+        }
     }
 
-    // --- nickname ------------------------------------------------------------
+    // --- members -----------------------------------------------------------------
+    function setWho(room, list) {
+        const people = [];
+        const have = new Set();
+        list.forEach((e) => {
+            const nick = plain(typeof e === "string" ? e : e && e.nick).trim();
+            const system = plain(e && typeof e === "object" ? e.system || "" : "").trim();
+            const key = lower(nick) + "|" + lower(system);
+            if (!nick || have.has(key)) return;
+            have.add(key);
+            people.push({nick, system});
+        });
+        state.who.set(lower(room), people);
+        if (lower(room) === lower(state.view)) {
+            renderHeader();
+            renderMembers();
+        }
+        renderRooms();
+        renderPicker();
+    }
+
+    // Grouped by board like a member list, names sorted in each, your own
+    // board first.
+    function renderMembers() {
+        const people = state.who.get(lower(state.view)) || [];
+        els.membersTitle.textContent = "Members — " + people.length;
+        els.membersList.replaceChildren();
+        const groups = new Map();
+        people.forEach((p) => {
+            const k = p.system || "";
+            if (!groups.has(k)) groups.set(k, []);
+            groups.get(k).push(p);
+        });
+        const order = Array.from(groups.keys()).sort((a, b) => {
+            if (lower(a) === lower(cfg.systemName)) return -1;
+            if (lower(b) === lower(cfg.systemName)) return 1;
+            return a.toLowerCase().localeCompare(b.toLowerCase());
+        });
+        order.forEach((board) => {
+            const list = groups.get(board).sort((a, b) => a.nick.toLowerCase().localeCompare(b.nick.toLowerCase()));
+            els.membersList.appendChild(el("div", "sa-member-group", (board || "Online") + " — " + list.length));
+            list.forEach((p) => {
+                const row = el("button", "sa-member");
+                row.type = "button";
+                row.dataset.nick = p.nick;
+                const box = el("div", "sa-mini-avatar");
+                fillAvatar(box, avatarOf(p.nick, p.system), p.nick);
+                row.appendChild(box);
+                const name = el("span", "sa-member-name");
+                name.appendChild(handle(p.nick, colorsOf(p.nick, p.system)));
+                row.appendChild(name);
+                row.onclick = () => openCard(p.nick, p.system);
+                els.membersList.appendChild(row);
+            });
+        });
+        if (!people.length) els.membersList.appendChild(el("div", "avatar-chat-nav-empty", "Nobody here yet."));
+    }
+
+    function openCard(name, host) {
+        fillAvatar(els.cardAvatar, avatarOf(name, host), name);
+        els.cardName.replaceChildren(handle(name, colorsOf(name, host)));
+        els.cardBoard.textContent = host || "";
+        openModal(els.cardModal, els.cardClose);
+    }
+
+    function renderMe() {
+        els.meName.replaceChildren(handle(state.nick || "?", null));
+        fillAvatar(els.meAvatar, state.avatar, state.nick);
+    }
+
+    // --- modals --------------------------------------------------------------------
+    function openModal(m, focus) {
+        m.classList.add("is-open");
+        m.setAttribute("aria-hidden", "false");
+        if (focus) focus.focus();
+    }
+    function closeModal(m) {
+        m.classList.remove("is-open");
+        m.setAttribute("aria-hidden", "true");
+    }
+    function anyModalOpen() { return !!document.querySelector(".avatar-chat-modal.is-open"); }
+
+    // --- nickname and settings --------------------------------------------------------
+    function validNick(n) { return /^[\p{L}\p{N} _-]{1,25}$/u.test(n); }
     function askNick(why) {
         els.nickInput.value = state.nick;
-        els.nickError.hidden = !why;
         els.nickError.textContent = why || "";
-        if (!els.nickDialog.open) els.nickDialog.showModal();
-        els.nickInput.focus();
+        openModal(els.nickModal, els.nickInput);
     }
-
     function setNick(n) {
-        n = n.replace(/\s+/g, " ").trim();
-        if (!/^[\p{L}\p{N} _-]{1,25}$/u.test(n)) {
-            askNick("Letters, digits, spaces, - and _ only, up to 25.");
-            return false;
-        }
+        n = String(n || "").replace(/\s+/g, " ").trim();
+        if (!validNick(n)) return false;
         const changed = n !== state.nick;
         state.nick = n;
         save("nick", n);
-        els.nickName.textContent = n;
+        renderMe();
         if (changed && state.ws) reconnect(); // the server fixes a nick per connection
         else if (!state.ws) connect();
         return true;
     }
 
-    // --- composer ------------------------------------------------------------
-    const HELP = [
-        "/join <room>  switch rooms     /rooms  list rooms",
-        "/who          who's here        /nick <name>  change nickname",
-    ];
+    function styleOffered(id) { return cfg.styles.some((s) => s.id === id); }
+    function applyStyle(id) {
+        if (!styleOffered(id)) id = cfg.defaultStyle;
+        Array.from(els.app.classList).filter((c) => c.indexOf("ac-style-") === 0).forEach((c) => els.app.classList.remove(c));
+        els.app.classList.add("ac-style-" + id);
+    }
 
-    function submit(text) {
-        text = text.replace(/[\r\n]+/g, " ").trim();
+    function openSettings() {
+        els.settingsNick.value = state.nick;
+        els.settingsStyle.replaceChildren();
+        cfg.styles.forEach((s) => {
+            const o = el("option", "", s.label);
+            o.value = s.id;
+            els.settingsStyle.appendChild(o);
+        });
+        els.settingsStyle.value = styleOffered(state.style) ? state.style : cfg.defaultStyle;
+        els.settingsStatus.textContent = "";
+        els.settingsStatus.classList.remove("sa-error");
+        openModal(els.settingsModal, els.settingsNick);
+    }
+    function closeSettings(saved) {
+        if (!saved) applyStyle(state.style);
+        closeModal(els.settingsModal);
+    }
+
+    // --- composer ----------------------------------------------------------------------
+    function submit() {
+        if (state.pendingArt) { sendArt(); return; }
+        const text = els.input.value.replace(/[\r\n]+/g, " ").trim();
         if (!text) return;
-        if (text[0] === "/") {
-            const [cmd, ...args] = text.slice(1).split(/\s+/);
-            switch (cmd.toLowerCase()) {
-            case "join": case "j": if (args[0]) join(args[0]); else openRooms(); return;
-            case "rooms": case "channels": case "list": openRooms(); return;
-            case "who": toggleRoster(true); refreshWho(0); return;
-            case "nick": if (args.length) setNick(args.join(" ")); else askNick(); return;
-            case "help": case "?": HELP.forEach((l) => notice(l)); return;
-            }
-            if (!text.startsWith("//")) { notice("unknown command /" + cmd + " (/help)", true); return; }
-            text = text.slice(1);
-        }
         if (Array.from(text).length > cfg.maxMessage) {
-            notice("message is longer than " + cfg.maxMessage + " characters", true);
+            setStatus("error", "That message is longer than " + cfg.maxMessage + " characters.");
             return;
         }
-        if (!state.open) { notice("not connected yet", true); return; }
-        const msg = {nick: {name: state.nick, host: cfg.systemName}, str: text, time: Date.now()};
+        if (postText(text)) els.input.value = "";
+    }
+
+    function postText(text) {
+        if (!state.open) { setStatus("error", "Not connected yet."); return false; }
+        if (!isJoined(state.view)) joinRoom(state.view);
+        const nick = {name: state.nick, host: cfg.systemName};
+        if (state.avatar) nick.avatar = state.avatar;
+        const msg = {nick, str: text, time: Date.now()};
         const lp = {data: msg, lock: 2};
-        query("WRITE", loc.messages(state.room), lp);
-        query("PUSH", loc.history(state.room), lp);
+        query("WRITE", loc.messages(state.view), lp);
+        query("PUSH", loc.history(state.view), lp);
         state.pendingSelf.push({str: text, at: Date.now()});
         addMessage(msg, true);
-        scrollDown(true);
-        els.input.value = "";
-        updateCounter();
+        clearStatus("error");
+        return true;
     }
 
-    function updateCounter() {
-        const n = Array.from(els.input.value).length;
-        els.counter.textContent = n > cfg.maxMessage * 0.8 ? n + "/" + cfg.maxMessage : "";
-        els.input.style.height = "auto";
-        els.input.style.height = Math.min(els.input.scrollHeight, 128) + "px";
+    function fromName() { return (cfg.systemName && state.nick) ? cfg.systemName + ":" + state.nick : state.nick || cfg.systemName; }
+
+    function setPending(art) {
+        state.pendingArt = art;
+        els.form.classList.toggle("has-art", !!art);
+        els.input.readOnly = !!art;
+        els.input.placeholder = art
+            ? "ANSI art ready (" + art.width + "x" + art.height + "): Send posts it, Esc drops it"
+            : "Type a message...";
     }
 
-    function toggleRoster(open) {
-        els.roster.classList.toggle("open", open === undefined ? !els.roster.classList.contains("open") : open);
+    function sendArt() {
+        const art = state.pendingArt;
+        if (!art || state.busy) return;
+        state.busy = true;
+        AvatarArt.buildBitmapPayload(art.cells, art.width, art.height, fromName()).then((payload) => {
+            if (payload.length > 32000) throw new Error("That art is too big to send (BITMAP messages are capped at 32,000 characters).");
+            if (postText(payload)) setPending(null);
+        }).catch((e) => setStatus("error", String(e.message || e))).then(() => { state.busy = false; });
     }
 
-    function setStatus(on, text) {
-        els.status.className = "status " + (on ? "on" : "off");
-        els.status.textContent = text;
+    function readBytes(file) {
+        return new Promise((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(new Uint8Array(r.result));
+            r.onerror = () => reject(new Error("Could not read " + file.name + "."));
+            r.readAsArrayBuffer(file);
+        });
     }
 
-    // --- uploads -------------------------------------------------------------
+    // A dropped, pasted or chosen file: ANSI art by its name, or anything
+    // that isn't a picture, sound or video, is tried as art; pictures go up
+    // when the server has uploads on.
+    function looksLikeArt(file) {
+        if (ART_EXTENSIONS.test(file.name || "")) return true;
+        return !/^(image|audio|video)\//.test(file.type || "") && file.size <= ART_MAX_BYTES;
+    }
+
+    function acceptFile(file) {
+        if (!file || state.busy) return;
+        clearStatus("error");
+        if (looksLikeArt(file)) {
+            readBytes(file).then((bytes) => setPending(AvatarArt.prepareAnsiBitmap(bytes)))
+                .catch((e) => setStatus("error", String(e.message || e)));
+            return;
+        }
+        if (!cfg.uploads) {
+            setStatus("error", "This server only takes ANSI art here; picture uploads are off.");
+            return;
+        }
+        upload(file);
+    }
+
     async function upload(file) {
-        if (!cfg.uploads || !file) return;
-        notice("uploading " + file.name + "…");
+        state.busy = true;
+        els.attach.disabled = true;
+        els.input.placeholder = "Uploading " + file.name + "...";
         try {
             const r = await fetch("upload?name=" + encodeURIComponent(file.name), {
                 method: "POST", body: file, credentials: "same-origin",
                 headers: {"Content-Type": "application/octet-stream"},
             });
             const reply = await r.json().catch(() => ({}));
-            if (!r.ok || !reply.url) throw new Error(reply.error || "upload failed (HTTP " + r.status + ")");
+            if (!r.ok || !reply.url) throw new Error(reply.error || "Upload failed (HTTP " + r.status + ").");
             const v = els.input.value;
             els.input.value = (v && !/\s$/.test(v) ? v + " " : v) + reply.url;
-            updateCounter();
             els.input.focus();
-            notice("uploaded: press Enter to send the link (kept " + (reply.expiresDays || "?") + " days)");
         } catch (e) {
-            notice(String(e.message || e), true);
+            setStatus("error", String(e.message || e));
+        } finally {
+            state.busy = false;
+            els.attach.disabled = false;
+            els.input.placeholder = "Type a message...";
         }
     }
 
-    function setupUploads() {
-        if (!cfg.uploads) return;
-        els.dropHint.hidden = false;
-        let depth = 0;
-        const hasFiles = (ev) => ev.dataTransfer && Array.from(ev.dataTransfer.types || []).indexOf("Files") >= 0;
-        window.addEventListener("dragenter", (ev) => { if (hasFiles(ev)) { depth++; els.dropVeil.hidden = false; } });
-        window.addEventListener("dragleave", () => { if (--depth <= 0) { depth = 0; els.dropVeil.hidden = true; } });
-        window.addEventListener("dragover", (ev) => { if (hasFiles(ev)) ev.preventDefault(); });
-        window.addEventListener("drop", (ev) => {
-            if (!hasFiles(ev)) return;
-            ev.preventDefault();
-            depth = 0;
-            els.dropVeil.hidden = true;
-            Array.from(ev.dataTransfer.files).slice(0, 3).forEach(upload);
-        });
-        els.input.addEventListener("paste", (ev) => {
-            const files = Array.from((ev.clipboardData && ev.clipboardData.files) || []);
-            if (files.length) { ev.preventDefault(); files.slice(0, 3).forEach(upload); }
+    // --- the ANSI editor (the Synchronet page's vendored copy, in shared/) ---------------
+    let editorLoading = null;
+    function loadScript(src) {
+        return new Promise((resolve, reject) => {
+            const s = document.createElement("script");
+            s.src = src;
+            s.onload = resolve;
+            s.onerror = () => reject(new Error("The ANSI editor could not be loaded."));
+            document.head.appendChild(s);
         });
     }
+    function addSheet(href, id) {
+        const l = document.createElement("link");
+        l.rel = "stylesheet";
+        l.href = href;
+        if (id) l.id = id;
+        document.head.appendChild(l);
+    }
+    function ensureEditor() {
+        if (window.AnsiEditorModal && window.AnsiEditor) return Promise.resolve();
+        if (!editorLoading) {
+            // The editor's own sheet as a file under the id it looks for, so
+            // it doesn't inject a <style> this page's CSP would refuse.
+            addSheet("shared/editor.css", "me-editor-styles");
+            addSheet("shared/ansi-editor-modal.css");
+            editorLoading = loadScript("shared/ansi-editor.js").then(() => loadScript("shared/ansi-editor-modal.js")).then(() => {
+                if (!window.AnsiEditorModal || !window.AnsiEditor) throw new Error("The ANSI editor could not be loaded.");
+            }).catch((e) => { editorLoading = null; throw e; });
+        }
+        return editorLoading;
+    }
+    const EDITOR_FONT = "shared/fonts/CP437.F16";
+    function editorSize(w, h) {
+        return {
+            width: Math.min(w, window.innerWidth), height: Math.min(h, window.innerHeight),
+            minWidth: Math.min(480, window.innerWidth), minHeight: Math.min(360, window.innerHeight),
+        };
+    }
 
-    // --- start -----------------------------------------------------------------
-    els.form.addEventListener("submit", (ev) => { ev.preventDefault(); submit(els.input.value); });
+    function openArtEditor() {
+        if (state.busy) return;
+        ensureEditor().then(() => {
+            if (AnsiEditorModal.isOpen) return;
+            AnsiEditorModal.open(Object.assign({
+                title: "ANSI Editor", className: "avatar-chat-ae", columns: 80, rows: 25, fontUrl: EDITOR_FONT,
+                onDone: (editor) => {
+                    const doc = editor && editor.doc;
+                    if (!doc || !doc.data) return;
+                    setPending({cells: doc.data, width: doc.columns, height: doc.rows});
+                    sendArt();
+                },
+            }, editorSize(980, 620)));
+        }).catch((e) => setStatus("error", String(e.message || e)));
+    }
+
+    // --- avatar ---------------------------------------------------------------------
+    const FILE_COLLECTION = "__file__";
+    const avatarState = {collections: [], loaded: new Map(), list: [], selected: -1};
+
+    function avatarNote(text, isError) {
+        els.avatarStatus.textContent = text || "";
+        els.avatarStatus.classList.toggle("sa-error", !!isError);
+    }
+    function setAvatar(b64, note) {
+        state.avatar = b64 || "";
+        save("avatar", state.avatar);
+        renderMe();
+        renderMembers();
+        renderAvatarCurrent();
+        avatarNote(note || "");
+    }
+    function renderAvatarCurrent() {
+        fillAvatar(els.avatarPreview, state.avatar);
+        if (!state.avatar) els.avatarPreview.textContent = "none";
+        els.avatarRemove.hidden = !state.avatar;
+    }
+
+    function openAvatarModal() {
+        avatarNote("");
+        renderAvatarCurrent();
+        els.avatarLibrary.hidden = !cfg.avatars;
+        openModal(els.avatarModal, els.avatarClose);
+        if (cfg.avatars && !avatarState.collections.length) {
+            fetch("avatars/index.json", {credentials: "same-origin"}).then((r) => r.json()).then((list) => {
+                avatarState.collections = Array.isArray(list) ? list : [];
+                fillCollections();
+                if (avatarState.collections.length) showCollection(avatarState.collections[0].id);
+            }).catch(() => avatarNote("The avatar library could not be loaded.", true));
+        }
+    }
+
+    function fillCollections() {
+        els.avatarCollection.replaceChildren();
+        avatarState.collections.forEach((c) => {
+            const o = el("option", "", (c.title || c.name) + " (" + c.count + ")");
+            o.value = c.id;
+            els.avatarCollection.appendChild(o);
+        });
+        if (avatarState.fromFile) {
+            const o = el("option", "", "From your file");
+            o.value = FILE_COLLECTION;
+            els.avatarCollection.appendChild(o);
+        }
+    }
+
+    function showCollection(id) {
+        if (id === FILE_COLLECTION) { renderGrid(); return; }
+        const done = (list) => {
+            avatarState.list = list;
+            avatarState.selected = -1;
+            renderGrid();
+        };
+        if (avatarState.loaded.has(id)) { done(avatarState.loaded.get(id)); return; }
+        avatarNote("Loading...");
+        fetch("avatars/" + encodeURIComponent(id) + ".json", {credentials: "same-origin"}).then((r) => r.json()).then((c) => {
+            const list = Array.isArray(c.avatars) ? c.avatars : [];
+            avatarState.loaded.set(id, list);
+            avatarNote("");
+            if (els.avatarCollection.value === id) done(list);
+        }).catch(() => avatarNote("That collection could not be loaded.", true));
+    }
+
+    function renderGrid() {
+        els.avatarGrid.replaceChildren();
+        avatarState.list.forEach((b64, i) => {
+            const tile = el("button", "avatar-chat-avatar-tile" + (i === avatarState.selected ? " is-selected" : ""));
+            tile.type = "button";
+            tile.title = "Avatar " + (i + 1);
+            const img = el("img");
+            img.alt = "";
+            avatarURL(b64).then((u) => { img.src = u; });
+            tile.appendChild(img);
+            tile.onclick = () => {
+                avatarState.selected = i;
+                els.avatarGrid.querySelectorAll(".is-selected").forEach((t) => t.classList.remove("is-selected"));
+                tile.classList.add("is-selected");
+                els.avatarUse.disabled = false;
+            };
+            tile.ondblclick = () => setAvatar(b64, "Saved. Your next message carries it.");
+            els.avatarGrid.appendChild(tile);
+        });
+        els.avatarUse.disabled = avatarState.selected < 0;
+    }
+
+    function openAvatarEditor(seed) {
+        ensureEditor().then(() => {
+            closeModal(els.avatarModal);
+            const A = AvatarArt;
+            AnsiEditorModal.open(Object.assign({
+                title: "Avatar Editor (10x6)", className: "avatar-chat-ae avatar-chat-ae-avatar",
+                columns: A.AVATAR_COLS, rows: A.AVATAR_ROWS, fontUrl: EDITOR_FONT,
+                onReady: (editor) => {
+                    if (editor && editor.doc && typeof editor.doc.replaceAll === "function") {
+                        editor.doc.replaceAll(seed, A.AVATAR_COLS, A.AVATAR_ROWS);
+                        editor.columns = A.AVATAR_COLS;
+                        editor.rows = A.AVATAR_ROWS;
+                        if (editor._rebuildCanvas) editor._rebuildCanvas();
+                        if (editor._moveCursor) editor._moveCursor(0, 0);
+                        if (editor._updateStatusBar) editor._updateStatusBar();
+                        if (editor._selectTool) editor._selectTool("brush");
+                        if (editor._setBrushMode) editor._setBrushMode("custom_block");
+                    }
+                    if (editor && editor.el && editor.el.canvasContainer) editor.el.canvasContainer.style.zoom = "5";
+                },
+                onDone: (editor) => {
+                    const doc = editor && editor.doc;
+                    openModal(els.avatarModal, els.avatarClose);
+                    if (!doc || doc.columns !== A.AVATAR_COLS || doc.rows !== A.AVATAR_ROWS || !doc.data) {
+                        avatarNote("The avatar has to stay 10x6.", true);
+                        return;
+                    }
+                    setAvatar(A.cellsToAvatarBase64(doc.data), "Saved. Your next message carries it.");
+                },
+                onCancel: () => setTimeout(() => openModal(els.avatarModal, els.avatarClose), 0),
+            }, editorSize(900, 620)));
+        }).catch((e) => avatarNote(String(e.message || e), true));
+    }
+
+    // An uploaded file: one 120-byte .bin is used as is; a .bin of several
+    // is shown to pick from; ANSI opens in the editor, cropped to 10x6.
+    function acceptAvatarFile(file) {
+        const A = AvatarArt;
+        avatarNote("Reading " + file.name + "...");
+        readBytes(file).then((bytes) => {
+            if (/\.bin$/i.test(file.name) && bytes.length >= A.AVATAR_BYTES && bytes.length % A.AVATAR_BYTES === 0) {
+                if (bytes.length === A.AVATAR_BYTES) {
+                    setAvatar(A.binToBase64(bytes), "Saved. Your next message carries it.");
+                    return;
+                }
+                avatarState.list = [];
+                for (let i = 0; i * A.AVATAR_BYTES < bytes.length && i < 500; i++) {
+                    avatarState.list.push(A.binToBase64(bytes.subarray(i * A.AVATAR_BYTES, (i + 1) * A.AVATAR_BYTES)));
+                }
+                avatarState.selected = -1;
+                avatarState.fromFile = true;
+                els.avatarLibrary.hidden = false;
+                fillCollections();
+                els.avatarCollection.value = FILE_COLLECTION;
+                renderGrid();
+                avatarNote("Pick one from your file, then Use selected.");
+                return;
+            }
+            avatarNote("");
+            openAvatarEditor(A.ansiToAvatarCells(bytes));
+        }).catch((e) => avatarNote(String(e.message || e), true));
+    }
+
+    // --- wiring -----------------------------------------------------------------------
+    els.form.addEventListener("submit", (ev) => { ev.preventDefault(); submit(); });
     els.input.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) { ev.preventDefault(); submit(els.input.value); }
+        if (ev.key === "Escape" && state.pendingArt) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            setPending(null);
+        }
     });
-    els.input.addEventListener("input", updateCounter);
-    els.roomBtn.onclick = openRooms;
-    els.whoBtn.onclick = () => { toggleRoster(); refreshWho(0); };
-    els.nickBtn.onclick = () => askNick();
-    els.createBtn.onclick = createRoom;
-    els.createInput.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); createRoom(); } });
+    els.input.addEventListener("paste", (ev) => {
+        const files = ev.clipboardData && ev.clipboardData.files;
+        if (files && files.length) { ev.preventDefault(); acceptFile(files[0]); }
+    });
+    els.attach.onclick = () => { if (!state.busy) els.file.click(); };
+    els.file.onchange = () => {
+        const f = els.file.files && els.file.files[0];
+        els.file.value = "";
+        if (f) acceptFile(f);
+    };
+    els.draw.onclick = openArtEditor;
+
+    let dragDepth = 0;
+    const hasFiles = (ev) => ev.dataTransfer && Array.prototype.indexOf.call(ev.dataTransfer.types || [], "Files") >= 0;
+    els.chatpanel.addEventListener("dragenter", (ev) => {
+        if (!hasFiles(ev)) return;
+        ev.preventDefault();
+        dragDepth++;
+        els.chatpanel.classList.add("is-dragover");
+    });
+    els.chatpanel.addEventListener("dragover", (ev) => { if (hasFiles(ev)) ev.preventDefault(); });
+    els.chatpanel.addEventListener("dragleave", () => {
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (!dragDepth) els.chatpanel.classList.remove("is-dragover");
+    });
+    els.chatpanel.addEventListener("drop", (ev) => {
+        const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+        dragDepth = 0;
+        els.chatpanel.classList.remove("is-dragover");
+        if (!f) return;
+        ev.preventDefault();
+        acceptFile(f);
+    });
+
+    els.count.onclick = () => els.members.classList.toggle("is-open");
+    els.membersClose.onclick = () => els.members.classList.remove("is-open");
+
+    els.roomClose.onclick = () => closeModal(els.roomModal);
+    els.roomInput.addEventListener("input", updateRoomSubmit);
+    els.roomForm.addEventListener("submit", (ev) => {
+        ev.preventDefault();
+        if (els.roomSubmit.disabled) return;
+        joinRoom(els.roomInput.value, !!els.roomSubmit.dataset.create);
+    });
+    els.noRoomsMain.onclick = () => joinRoom(cfg.defaultChannel);
+    els.noRoomsPick.onclick = openRoomModal;
+    els.noRoomsCancel.onclick = () => closeModal(els.noRoomsModal);
+
     els.nickForm.addEventListener("submit", (ev) => {
         ev.preventDefault();
-        if (setNick(els.nickInput.value)) els.nickDialog.close();
+        if (setNick(els.nickInput.value)) closeModal(els.nickModal);
+        else els.nickError.textContent = "Letters, digits, spaces, - and _ only, up to 25.";
     });
-    els.nickDialog.addEventListener("cancel", (ev) => { if (!state.nick) ev.preventDefault(); });
 
+    els.settingsOpen.onclick = openSettings;
+    els.settingsStyle.onchange = () => applyStyle(els.settingsStyle.value);
+    els.settingsCancel.onclick = () => closeSettings(false);
+    els.settingsForm.addEventListener("submit", (ev) => {
+        ev.preventDefault();
+        const n = els.settingsNick.value.replace(/\s+/g, " ").trim();
+        if (!validNick(n)) {
+            els.settingsStatus.textContent = "Nicknames are letters, digits, spaces, - and _, up to 25.";
+            els.settingsStatus.classList.add("sa-error");
+            return;
+        }
+        state.style = els.settingsStyle.value;
+        save("style", state.style === cfg.defaultStyle ? "" : state.style);
+        applyStyle(state.style);
+        setNick(n);
+        closeSettings(true);
+    });
+
+    els.avatarOpen.onclick = openAvatarModal;
+    els.avatarClose.onclick = () => closeModal(els.avatarModal);
+    els.avatarDraw.onclick = () => openAvatarEditor(AvatarArt.avatarBase64ToCells(state.avatar));
+    els.avatarUpload.onclick = () => els.avatarFile.click();
+    els.avatarFile.onchange = () => {
+        const f = els.avatarFile.files && els.avatarFile.files[0];
+        els.avatarFile.value = "";
+        if (f) acceptAvatarFile(f);
+    };
+    els.avatarRemove.onclick = () => setAvatar("", "Removed. Your messages go out without an avatar.");
+    els.avatarCollection.onchange = () => showCollection(els.avatarCollection.value);
+    els.avatarUse.onclick = () => {
+        const b64 = avatarState.list[avatarState.selected];
+        if (b64) setAvatar(b64, "Saved. Your next message carries it.");
+    };
+    els.cardClose.onclick = () => closeModal(els.cardModal);
+
+    // Escape closes the top modal (not the nickname prompt before there is
+    // a nickname, and not while the editor is open).
+    document.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Escape" || (window.AnsiEditorModal && AnsiEditorModal.isOpen)) return;
+        if (els.settingsModal.classList.contains("is-open")) { closeSettings(false); return; }
+        [els.cardModal, els.avatarModal, els.roomModal, els.noRoomsModal].some((m) => {
+            if (!m.classList.contains("is-open")) return false;
+            closeModal(m);
+            return true;
+        });
+        if (state.nick && els.nickModal.classList.contains("is-open")) closeModal(els.nickModal);
+    });
+    // A click on the dark overlay closes it too.
+    document.querySelectorAll(".avatar-chat-modal").forEach((m) => {
+        m.addEventListener("click", (ev) => {
+            if (ev.target !== m || m === els.nickModal) return;
+            if (m === els.settingsModal) closeSettings(false);
+            else closeModal(m);
+        });
+    });
+
+    setInterval(() => { if (state.open) refreshCounts(); }, COUNTS_EVERY);
+
+    // --- start ---------------------------------------------------------------------
+    state.style = load("style");
+    applyStyle(state.style || "classic");
     fetch("config.json", {credentials: "same-origin"}).then((r) => r.json()).catch(() => ({})).then((c) => {
         Object.assign(cfg, c || {});
+        if (!Array.isArray(cfg.styles) || !cfg.styles.length) cfg.styles = [{id: "classic", label: "Classic"}];
+        applyStyle(state.style);
         els.input.maxLength = cfg.maxMessage;
+        els.noRoomsDefault.textContent = "#" + cfg.defaultChannel;
+        els.noRoomsMain.textContent = "Join #" + cfg.defaultChannel;
+        els.attach.title = cfg.uploads
+            ? "Attach a picture or ANSI art (or drop or paste it on the chat)"
+            : "Attach ANSI art (or drop or paste it on the chat)";
+        els.file.accept = [".ans", ".asc", ".nfo", ".diz", ".ice", ".txt"].concat(cfg.uploads ? ["image/png", "image/jpeg", "image/gif", "image/webp"] : []).join(",");
+        state.avatar = load("avatar");
+        const rooms = loadJSON("rooms", null);
+        state.joined = Array.isArray(rooms) ? rooms.filter((r) => ROOM_NAME.test(r)).slice(-MAX_ROOMS) : [cfg.defaultChannel];
         const q = new URLSearchParams(location.search).get("room");
-        state.room = (q && /^[A-Za-z0-9_-]{1,32}$/.test(q) ? q : load("room")) || cfg.defaultChannel;
-        els.roomName.textContent = state.room;
-        setupUploads();
+        state.view = q && ROOM_NAME.test(q) ? q : (state.joined[state.joined.length - 1] || cfg.defaultChannel);
+        renderHeader();
+        renderRooms();
         const nick = load("nick");
-        if (nick) setNick(nick);
+        if (nick && validNick(nick)) setNick(nick);
         else askNick();
+        renderMe();
     });
 
-    // For the browser tests: decode with the page's own codec.
-    window.AvatarChatPage = {state, cfg, submit, join};
+    // For the browser tests.
+    window.AvatarChatPage = {state, cfg, joinRoom, leaveRoom, openView};
 })();

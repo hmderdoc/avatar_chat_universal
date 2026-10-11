@@ -9,10 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chatmedia"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chatserver"
 	"github.com/hmderdoc/avatar_chat_universal/internal/inlineimg"
-	"github.com/hmderdoc/avatar_chat_universal/web/standalone"
+	webpage "github.com/hmderdoc/avatar_chat_universal/web"
 )
 
 // TestE2EServe runs the real page against a local chat for browser tests,
@@ -51,7 +52,10 @@ func TestE2EServe(t *testing.T) {
 	web.Logger = logger
 	web.Chat = cs
 	web.Media = media
-	web.Static = standalone.Files
+	web.Static = webpage.Standalone
+	if web.Avatars, err = avatar.LoadBundled(); err != nil {
+		t.Fatal(err)
+	}
 	if dir := os.Getenv("WEBCHAT_E2E_DIR"); dir != "" {
 		web.cfg.WebDir = dir // serve the working copy without rebuilding
 	}
@@ -67,7 +71,8 @@ func TestE2EServe(t *testing.T) {
 // bytes under that name; anything else 404s.
 func e2eCanned() map[string][]byte {
 	return map[string][]byte{
-		"https://pics.e2e.example/cat.png": pngBytes(),
+		"https://pics.e2e.example/cat.png":      pngBytes(),
+		"https://pics.e2e.example/nude-cat.png": pngBytes(),
 		"https://news.e2e.example/story": []byte(`<html><head><title>x</title>` +
 			`<meta property="og:title" content="E2E headline">` +
 			`<meta property="og:description" content="A card fetched by the server, not the browser.">` +

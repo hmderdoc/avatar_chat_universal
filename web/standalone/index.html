@@ -4,60 +4,177 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Avatar Chat</title>
+<link rel="stylesheet" href="shared/app.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header class="bar">
-  <span class="brand">Avatar Chat</span>
-  <button type="button" id="room-btn" class="room" title="Rooms">#<span id="room-name">main</span></button>
-  <span id="status" class="status off">connecting</span>
-  <span class="spacer"></span>
-  <button type="button" id="who-btn" class="pill" title="Who's here">who <span id="who-count">0</span></button>
-  <button type="button" id="nick-btn" class="pill" title="Change nickname"><span id="nick-name">nick</span></button>
-</header>
+<div id="app" class="avatar-chat-web sa-root ac-style-classic">
+    <div class="avatar-chat-shell">
+        <div class="avatar-chat-layout sa-layout">
+            <aside class="avatar-chat-sidebar">
+                <div class="avatar-chat-sidebar-section">
+                    <div id="rooms" class="avatar-chat-nav-list"></div>
+                </div>
+                <div class="avatar-chat-sidebar-section sa-you">
+                    <div class="sa-me">
+                        <div id="me-avatar" class="sa-mini-avatar"></div>
+                        <div id="me-name" class="sa-me-name"></div>
+                    </div>
+                    <button id="avatar-open" class="avatar-chat-sidebar-button" type="button">Avatar</button>
+                    <button id="settings-open" class="avatar-chat-sidebar-button" type="button">Settings</button>
+                </div>
+            </aside>
 
-<main class="layout">
-  <section id="transcript" class="transcript" aria-live="polite"></section>
-  <aside id="roster" class="roster" aria-label="Who's here">
-    <h2>Here now</h2>
-    <ul id="roster-list"></ul>
-  </aside>
-</main>
+            <div class="avatar-chat-main">
+                <div id="chatpanel" class="avatar-chat-chatpanel">
+                    <div class="avatar-chat-topbar">
+                        <div class="avatar-chat-topbar-meta">
+                            <span id="room-label" class="avatar-chat-topbar-chip">#main</span>
+                            <button id="count" class="avatar-chat-count" type="button" title="Members">0 users</button>
+                            <div id="room-actions" class="avatar-chat-room-actions"></div>
+                        </div>
+                    </div>
 
-<footer class="composer">
-  <form id="send-form" autocomplete="off">
-    <textarea id="input" rows="1" maxlength="1000" placeholder="Say something (/help for commands)" enterkeyhint="send"></textarea>
-    <span id="counter" class="counter"></span>
-    <button type="submit" class="send">Send</button>
-  </form>
-  <div id="drop-hint" class="drop-hint" hidden>Drop a picture or ANSI file to upload it</div>
-</footer>
+                    <div id="status" class="avatar-chat-status" aria-live="polite">
+                        <div id="status-text" class="avatar-chat-status-text"></div>
+                    </div>
 
-<div id="drop-veil" class="drop-veil" hidden>Drop to upload</div>
+                    <div id="messages" class="avatar-chat-messages">
+                        <div class="avatar-chat-empty">Connecting...</div>
+                    </div>
 
-<dialog id="nick-dialog">
-  <form method="dialog" id="nick-form">
-    <h2>Pick a nickname</h2>
-    <p class="hint">Letters, digits, spaces, - and _, up to 25. Anyone can take any name here: there are no accounts.</p>
-    <input id="nick-input" maxlength="25" required autocomplete="nickname">
-    <p id="nick-error" class="error" hidden></p>
-    <menu><button type="submit" class="send">Chat</button></menu>
-  </form>
-</dialog>
+                    <form id="form" class="avatar-chat-form" autocomplete="off">
+                        <input id="file" class="avatar-chat-file-input" type="file" tabindex="-1" aria-hidden="true">
+                        <div class="avatar-chat-compose-row">
+                            <button id="attach" class="avatar-chat-icon-button" type="button" title="Attach ANSI art (or drop or paste it on the chat)" aria-label="Attach a file">
+                                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg>
+                            </button>
+                            <button id="draw" class="avatar-chat-icon-button" type="button" title="Draw ANSI art" aria-label="Draw ANSI art">
+                                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4zM13.5 6.5l4 4"/></svg>
+                            </button>
+                            <input id="input" class="avatar-chat-input" type="text" maxlength="1000" placeholder="Type a message..." enterkeyhint="send">
+                            <button class="avatar-chat-send" type="submit">Send</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
 
-<dialog id="rooms-dialog">
-  <form method="dialog">
-    <h2>Rooms</h2>
-    <ul id="rooms-list" class="rooms-list"><li class="hint">loading…</li></ul>
-    <div id="create-room" class="create-room" hidden>
-      <input id="create-input" maxlength="32" placeholder="new room name">
-      <button type="button" id="create-btn" class="pill">Create</button>
+            <aside id="members" class="avatar-chat-sidebar sa-members" aria-label="Members">
+                <div class="avatar-chat-sidebar-header">
+                    <h4 id="members-title" class="avatar-chat-sidebar-heading">Members</h4>
+                    <button id="members-close" class="avatar-chat-users-close sa-narrow-only" type="button" aria-label="Close">&times;</button>
+                </div>
+                <div id="members-list" class="sa-member-list"></div>
+            </aside>
+        </div>
     </div>
-    <menu><button value="close" class="pill">Close</button></menu>
-  </form>
-</dialog>
 
+    <div id="nick-modal" class="avatar-chat-modal" aria-hidden="true">
+        <form id="nick-form" class="avatar-chat-modal-card" role="dialog" aria-modal="true" aria-labelledby="nick-title" autocomplete="off">
+            <div class="avatar-chat-modal-header">
+                <h4 id="nick-title" class="avatar-chat-modal-title">Pick a nickname</h4>
+            </div>
+            <p class="avatar-chat-modal-text">Letters, digits, spaces, - and _, up to 25. There are no accounts here: anyone can take any name.</p>
+            <input id="nick-input" class="avatar-chat-sidebar-input" maxlength="25" autocomplete="nickname">
+            <div id="nick-error" class="avatar-chat-modal-text sa-error" aria-live="polite"></div>
+            <div class="avatar-chat-modal-actions">
+                <button class="avatar-chat-sidebar-button is-primary" type="submit">Chat</button>
+            </div>
+        </form>
+    </div>
+
+    <div id="room-modal" class="avatar-chat-modal" aria-hidden="true">
+        <div class="avatar-chat-modal-card" role="dialog" aria-modal="true" aria-labelledby="room-modal-title">
+            <div class="avatar-chat-modal-header">
+                <h4 id="room-modal-title" class="avatar-chat-modal-title">Join a Room</h4>
+                <button id="room-close" class="avatar-chat-users-close" type="button" aria-label="Close">&times;</button>
+            </div>
+            <p id="room-modal-text" class="avatar-chat-modal-text">Pick a room, or type its name.</p>
+            <div id="room-list" class="avatar-chat-picker-list"></div>
+            <form id="room-form" class="avatar-chat-sidebar-form" autocomplete="off">
+                <input id="room-input" class="avatar-chat-sidebar-input" type="text" maxlength="32" placeholder="room-name">
+                <button id="room-submit" class="avatar-chat-sidebar-button" type="submit" disabled>Join</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="norooms-modal" class="avatar-chat-modal" aria-hidden="true">
+        <div class="avatar-chat-modal-card" role="dialog" aria-modal="true" aria-labelledby="norooms-title">
+            <div class="avatar-chat-modal-header">
+                <h4 id="norooms-title" class="avatar-chat-modal-title">No rooms joined</h4>
+            </div>
+            <p class="avatar-chat-modal-text">You are not in any chat rooms. Would you like to join <span id="norooms-default">#main</span>?</p>
+            <div class="avatar-chat-modal-actions">
+                <button id="norooms-main" class="avatar-chat-sidebar-button is-primary" type="button">Join #main</button>
+                <button id="norooms-pick" class="avatar-chat-sidebar-button" type="button">Pick a room</button>
+                <button id="norooms-cancel" class="avatar-chat-sidebar-button" type="button">Not now</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="settings-modal" class="avatar-chat-modal" aria-hidden="true">
+        <form id="settings-form" class="avatar-chat-modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title" autocomplete="off">
+            <div class="avatar-chat-modal-header">
+                <h4 id="settings-title" class="avatar-chat-modal-title">Settings</h4>
+            </div>
+            <label class="sa-field">Nickname
+                <input id="settings-nick" class="avatar-chat-sidebar-input" maxlength="25" autocomplete="nickname">
+            </label>
+            <label class="sa-field">Page style
+                <select id="settings-style"></select>
+            </label>
+            <div id="settings-status" class="avatar-chat-modal-text" aria-live="polite"></div>
+            <div class="avatar-chat-modal-actions">
+                <button class="avatar-chat-sidebar-button is-primary" type="submit">Save</button>
+                <button id="settings-cancel" class="avatar-chat-sidebar-button" type="button">Cancel</button>
+            </div>
+        </form>
+    </div>
+
+    <div id="avatar-modal" class="avatar-chat-modal" aria-hidden="true">
+        <div class="avatar-chat-modal-card avatar-chat-avatar-card" role="dialog" aria-modal="true" aria-labelledby="avatar-title">
+            <div class="avatar-chat-modal-header">
+                <h4 id="avatar-title" class="avatar-chat-modal-title">Avatar</h4>
+            </div>
+            <p class="avatar-chat-modal-text">Your avatar rides on each message you send. It is kept in this browser.</p>
+            <div class="avatar-chat-avatar-current">
+                <div id="avatar-preview" class="avatar-chat-avatar-preview"></div>
+                <div class="avatar-chat-avatar-buttons">
+                    <button id="avatar-draw" class="avatar-chat-sidebar-button" type="button">Draw</button>
+                    <button id="avatar-upload" class="avatar-chat-sidebar-button" type="button">Upload .bin / .ans</button>
+                    <button id="avatar-remove" class="avatar-chat-sidebar-button" type="button">Remove</button>
+                </div>
+                <input id="avatar-file" class="avatar-chat-file-input" type="file" accept=".bin,.ans,.asc,.txt" tabindex="-1" aria-hidden="true">
+            </div>
+            <div id="avatar-library" class="avatar-chat-avatar-library">
+                <label>Library <select id="avatar-collection"></select></label>
+                <div id="avatar-grid" class="avatar-chat-avatar-grid"></div>
+            </div>
+            <div id="avatar-status" class="avatar-chat-modal-text" aria-live="polite"></div>
+            <div class="avatar-chat-modal-actions">
+                <button id="avatar-use" class="avatar-chat-sidebar-button" type="button" disabled>Use selected</button>
+                <button id="avatar-close" class="avatar-chat-sidebar-button" type="button">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="card-modal" class="avatar-chat-modal" aria-hidden="true">
+        <div class="avatar-chat-modal-card" role="dialog" aria-modal="true" aria-labelledby="card-name">
+            <div class="avatar-chat-modal-header">
+                <div class="sa-card-body">
+                    <div id="card-avatar" class="avatar-chat-avatar-preview"></div>
+                    <div>
+                        <div id="card-name" class="sa-card-name"></div>
+                        <div id="card-board" class="avatar-chat-channel"></div>
+                    </div>
+                </div>
+                <button id="card-close" class="avatar-chat-users-close" type="button" aria-label="Close">&times;</button>
+            </div>
+        </div>
+    </div>
+</div>
 <script src="codec.js"></script>
+<script src="art.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

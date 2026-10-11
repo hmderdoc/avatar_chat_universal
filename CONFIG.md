@@ -193,7 +193,7 @@ also the on-screen action bars and `/help`.
 | `/avatar set <base64>`        | Power-user: set your avatar from a base64 120-byte payload.                   |
 | `/avatar off`                 | Disable your avatar without losing it (re-enable by picking again).           |
 | `/avatar pick`                | Open the selector directly.                                                   |
-| `/settings` / `/prefs` / `/options` | Settings panel: avatar (pick, draw, upload, disable) and handle style (a colour per letter, presets, a tag). On Synchronet these are the user's BBS-wide records. |
+| `/settings` / `/prefs` / `/options` | Settings panel: avatar (pick, draw, upload, disable) and handle style (a colour per letter, presets). On Synchronet these are the user's BBS-wide records. |
 | `/theme [name\|default]`      | List the colour themes, switch (remembered per user), or go back to the sysop's. See THEMING.md. |
 | `/mouse [on\|off]`            | Turn mouse reporting on or off for yourself (remembered). See "Mouse". |
 | `/draw [WxH]` / `/art`        | ANSI art editor (default 80x25, up to 80x40). Ctrl-Y posts the art as a `[BITMAP]` message every client draws; see "Art editor". |

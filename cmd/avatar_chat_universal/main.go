@@ -292,9 +292,7 @@ func run() error {
 		Host:   bbsID,
 		Avatar: avatarB64,
 	}
-	if !style.IsEmpty() {
-		self.Style = style
-	}
+	self.Style = style.Wire()
 
 	client := chat.NewClient(addr)
 	client.Nick = self.Name
@@ -413,7 +411,8 @@ func run() error {
 	}
 	app.BoardWide = boardWide
 	app.OnStyleSave = func(st *nickstyle.Style) error {
-		return store.WriteStyle(user.DisplayName(), st)
+		stored, _ := store.ReadStyle(user.DisplayName())
+		return store.WriteStyle(user.DisplayName(), nickstyle.KeepTag(st, stored))
 	}
 	app.OnAvatarSet = func(b64 string) error {
 		a, err := avatar.FromBase64(b64)

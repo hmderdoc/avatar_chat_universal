@@ -86,7 +86,7 @@ Synchronet's avatar exporter also writes this file (it updates
 instant the door replaces the file, one of the two changes is lost. That is
 rare and harmless: the next avatar change, or the next export, corrects it.
 
-The handle style (per-letter colours and a tag) is
+The handle style (per-letter colours) is
 `<data>/chat/nickstyle/NNNN.json`, shared with the futureland shell and
 website through `mods/load/chat_style_lib.js`.
 
@@ -120,10 +120,11 @@ Once a handle style is set the same file gains a `[style]` section:
 ```ini
 [style]
 colors   = #ff4747,,#00ff00
-tag_text = sysop
-tag_fg   = #ffff55
-tag_bg   =
 ```
+
+Older records may also carry `tag_text`, `tag_fg` and `tag_bg`. The door
+no longer shows, edits or sends a tag (a tag after the name made handles
+read differently and broke name lookups), but a save keeps what's there.
 
 ---
 
@@ -178,7 +179,7 @@ twice (once "bundled", once with your filename).
 ## How a user picks an avatar
 
 Three paths in the door, all reachable from `/avatar` or from the
-`/settings` panel (which also edits the handle colours and tag):
+`/settings` panel (which also edits the handle colours):
 
 ### 1. Library picker (`/avatar`)
 

@@ -103,3 +103,20 @@ func TestIsEmpty(t *testing.T) {
 		t.Error("tag only is not empty")
 	}
 }
+
+func TestWireAndKeepTag(t *testing.T) {
+	st := &Style{Colors: []string{"#ff0000"}, Tag: Tag{Text: "op", Fg: "#000000"}}
+	if w := st.Wire(); w == nil || w.Tag.Text != "" || len(w.Colors) != 1 {
+		t.Fatalf("Wire = %+v", w)
+	}
+	if w := (&Style{Tag: Tag{Text: "op"}}).Wire(); w != nil {
+		t.Fatalf("tag-only style sent as %+v", w)
+	}
+	got := KeepTag(&Style{Colors: []string{"#00ff00"}}, st)
+	if got.Tag.Text != "op" || got.Colors[0] != "#00ff00" {
+		t.Fatalf("KeepTag = %+v", got)
+	}
+	if got := KeepTag(&Style{Colors: []string{"#00ff00"}}, nil); got.Tag.Text != "" {
+		t.Fatalf("KeepTag(nil) = %+v", got)
+	}
+}

@@ -1154,7 +1154,7 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		if a.BoardWide {
 			a.Session.Notice("/avatar and /settings change your BBS avatar and handle style everywhere on this system")
 		} else {
-			a.Session.Notice("/settings (/prefs): avatar, handle colours and tag in one panel")
+			a.Session.Notice("/settings (/prefs): avatar, handle colours and theme in one panel")
 		}
 		if a.images != nil {
 			a.Session.Notice("image links show inline; /img zooms them; /nsfw shows or hides veiled ones")

@@ -11,7 +11,7 @@ import (
 )
 
 // The /settings panel: the user's avatar (routed to the existing selector,
-// editor and uploader) and their handle style (per-letter colour and a tag),
+// editor and uploader) and their handle style (a colour per letter),
 // in one place, like the shell's and the website's settings cards. In
 // Synchronet mode both are the user's board-wide records.
 //
@@ -79,7 +79,6 @@ type settingsPanel struct {
 	frame   *ansi.Frame // kept across draws so only changed cells are sent
 	name    string
 	colors  []string // aligned to name
-	tag     nickstyle.Tag
 	cursor  int
 	status  string
 	changed bool
@@ -94,7 +93,6 @@ func newSettingsPanel(name string, style *nickstyle.Style) *settingsPanel {
 	p := &settingsPanel{name: name}
 	if style != nil {
 		p.colors = style.Align(name)
-		p.tag = style.Tag
 	} else {
 		p.colors = make([]string, len(name))
 	}
@@ -102,7 +100,7 @@ func newSettingsPanel(name string, style *nickstyle.Style) *settingsPanel {
 }
 
 func (p *settingsPanel) style() *nickstyle.Style {
-	st := nickstyle.Normalize(nickstyle.Style{Colors: p.colors, Tag: p.tag})
+	st := nickstyle.Normalize(nickstyle.Style{Colors: p.colors})
 	return &st
 }
 
@@ -228,29 +226,6 @@ func (a *App) runSettings() settingsResult {
 		case '4':
 			p.colors = make([]string, len(p.name))
 			p.changed = true
-		case 't', 'T':
-			if text, ok := a.editTagText(p, av); ok {
-				p.tag.Text = nickstyle.CleanTag(text)
-				p.changed = true
-			}
-		case 'g', 'G':
-			if p.tag.Text != "" {
-				dir := 1
-				if k.Rune == 'G' {
-					dir = -1
-				}
-				p.tag.Fg = cycleColor(p.tag.Fg, dir)
-				p.changed = true
-			}
-		case 'b', 'B':
-			if p.tag.Text != "" {
-				dir := 1
-				if k.Rune == 'B' {
-					dir = -1
-				}
-				p.tag.Bg = cycleColor(p.tag.Bg, dir)
-				p.changed = true
-			}
 		case 'c', 'C':
 			if a.UserThemes {
 				dir := 1
@@ -303,52 +278,10 @@ func (a *App) saveStyle(p *settingsPanel) {
 		if st.IsEmpty() {
 			a.Session.Self.Style = nil
 		} else {
-			a.Session.Self.Style = st
+			a.Session.Self.Style = st.Wire()
 		}
 	}
 	a.Session.Notice("\x01Ghandle style saved\x01n -- shown on your next message")
-}
-
-// editTagText reads the tag text inline: printable ASCII, Enter keeps,
-// Esc abandons.
-func (a *App) editTagText(p *settingsPanel, av avatar.Avatar) (string, bool) {
-	buf := []byte(p.tag.Text)
-	for {
-		p.status = "Tag text: " + string(buf) + "_   (Enter keep, Esc cancel)"
-		a.drawSettings(p, av)
-		var k ansi.Key
-		for {
-			key, ok, err := a.Input.Next(200 * time.Millisecond)
-			if err != nil {
-				p.status = ""
-				return "", false
-			}
-			if ok {
-				k = key
-				break
-			}
-		}
-		switch k.Type {
-		case ansi.KeyEnter:
-			p.status = ""
-			return string(buf), true
-		case ansi.KeyEsc:
-			p.status = ""
-			return "", false
-		case ansi.KeyBackspace, ansi.KeyDelete:
-			if len(buf) > 0 {
-				buf = buf[:len(buf)-1]
-			}
-		case ansi.KeyChar:
-			if k.Rune == 8 || k.Rune == 127 {
-				if len(buf) > 0 {
-					buf = buf[:len(buf)-1]
-				}
-			} else if k.Rune >= 0x20 && k.Rune <= 0x7e && k.Rune != '|' && len(buf) < nickstyle.MaxTag {
-				buf = append(buf, byte(k.Rune))
-			}
-		}
-	}
 }
 
 func (a *App) drawSettings(p *settingsPanel, av avatar.Avatar) {
@@ -443,13 +376,6 @@ func (a *App) drawSettings(p *settingsPanel, av avatar.Avatar) {
 		f.PrintAt(px+1, 13, []byte(ps[1:]), bg)
 		px += len(ps) + 2
 	}
-	tagText := p.tag.Text
-	if tagText == "" {
-		tagText = "(none)"
-	}
-	tagLine := fmt.Sprintf("Tag: %-12s  T text  g/G fg %s  b/B bg %s", tagText, colorLabel(p.tag.Fg), colorLabel(p.tag.Bg))
-	f.PrintAt(3, 14, []byte(truncate(tagLine, w-4)), bg)
-
 	rule(15, "Theme")
 	themeLine := fmt.Sprintf("Theme: %-16s (set by the sysop)", th.Name)
 	if a.UserThemes {

@@ -19,11 +19,7 @@ func cgaRGBOf(idx ansi.Attr) ansi.RGB {
 
 // handleWidth is how many cells paintHandle uses for name + style.
 func handleWidth(name string, style *nickstyle.Style) int {
-	w := len(name)
-	if style != nil && style.Tag.Text != "" {
-		w += 1 + len(style.Tag.Text)
-	}
-	return w
+	return len(name)
 }
 
 // paintHandle draws name at (x,y) in its owner's handle style, clipped to
@@ -31,13 +27,13 @@ func handleWidth(name string, style *nickstyle.Style) int {
 // With truecolor the stored hex is painted as is over base's background;
 // otherwise each colour goes to its nearest of the 16, and a colour that
 // would vanish into the background is lifted (black to dark gray, the way
-// chat_style_lib.js pipeName does it). The tag follows after one space in
-// its own colours.
+// chat_style_lib.js pipeName does it). A tag in the
+// style is never drawn.
 func paintHandle(f *ansi.Frame, x, y int, name string, style *nickstyle.Style, base ansi.Attr, maxW int, truecolor bool) int {
 	if maxW <= 0 {
 		return 0
 	}
-	if style.IsEmpty() {
+	if style.Wire() == nil {
 		if len(name) > maxW {
 			name = name[:maxW]
 		}
@@ -50,15 +46,6 @@ func paintHandle(f *ansi.Frame, x, y int, name string, style *nickstyle.Style, b
 	n := 0
 	for i := 0; i < len(name) && n < maxW; i++ {
 		paintStyledCell(f, x+n, y, name[i], colors[i], "", base, bgRGB, truecolor)
-		n++
-	}
-	if style.Tag.Text == "" || n+2 > maxW {
-		return n
-	}
-	f.SetCell(x+n, y, ' ', base)
-	n++
-	for i := 0; i < len(style.Tag.Text) && n < maxW; i++ {
-		paintStyledCell(f, x+n, y, style.Tag.Text[i], style.Tag.Fg, style.Tag.Bg, base, bgRGB, truecolor)
 		n++
 	}
 	return n

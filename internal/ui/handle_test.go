@@ -19,8 +19,8 @@ func TestPaintHandle16Color(t *testing.T) {
 		Tag:    nickstyle.Tag{Text: "op", Fg: "#000000", Bg: "#00aa00"},
 	}
 	n := paintHandle(f, 0, 0, "Abcd", st, ansi.Yellow|ansi.BgBlack, 20, false)
-	if n != len("Abcd op") {
-		t.Fatalf("width = %d", n)
+	if n != len("Abcd") {
+		t.Fatalf("width = %d, want the name only (tags aren't drawn)", n)
 	}
 	cell := func(x int) ansi.Cell { return f.CellAt(x, 0) }
 	if c := cell(0); c.True || c.Attr != ansi.LightRed|ansi.BgBlack {
@@ -35,8 +35,8 @@ func TestPaintHandle16Color(t *testing.T) {
 	if c := cell(3); c.Attr&0x0F == ansi.Red {
 		t.Errorf("pastel pink snapped to dark red: %+v", c)
 	}
-	if c := cell(5); c.Char != 'o' || c.Attr != ansi.Black|ansi.BgGreen {
-		t.Errorf("tag = %+v, want black on green", c)
+	if c := cell(5); c.Char == 'o' {
+		t.Errorf("tag drawn: %+v", c)
 	}
 }
 
@@ -79,23 +79,26 @@ func TestCycleColor(t *testing.T) {
 
 func TestSettingsPanelSavesStyle(t *testing.T) {
 	sess := chat.NewSession(nil, &chat.Nick{Name: "Alex"}, "main")
-	// f: letter 1 -> black; Right, f f: letter 2 -> blue; t, "op", Enter; s.
-	keys := "f\x1b[Cfft" + "op\r" + "s"
+	// f: letter 1 -> black; Right, f f: letter 2 -> blue; t (no longer a
+	// key) then s.
+	keys := "f\x1b[Cfft" + "s"
 	in := ansi.NewInput(bytes.NewReader([]byte(keys)))
 	app := NewApp(io.Discard, in, sess, 80, 24, ansi.CharsetCP437)
 	var saved *nickstyle.Style
 	app.OnStyleSave = func(st *nickstyle.Style) error { saved = st; return nil }
 	app.BoardWide = true
+	// Tags aren't edited or sent (main keeps a stored one via KeepTag).
+	sess.Self.Style = &nickstyle.Style{Tag: nickstyle.Tag{Text: "op", Fg: "#000000"}}
 	app.openSettings()
 	if saved == nil {
 		t.Fatal("style not saved")
 	}
 	want := []string{"#000000", "#0000aa"}
-	if len(saved.Colors) != 2 || saved.Colors[0] != want[0] || saved.Colors[1] != want[1] || saved.Tag.Text != "op" {
-		t.Fatalf("saved = %+v", saved)
+	if len(saved.Colors) != 2 || saved.Colors[0] != want[0] || saved.Colors[1] != want[1] || saved.Tag.Text != "" {
+		t.Fatalf("saved = %+v, want the colours only", saved)
 	}
-	if sess.Self.Style == nil || sess.Self.Style.Tag.Text != "op" {
-		t.Fatal("style not put on Self for the next message")
+	if sess.Self.Style == nil || sess.Self.Style.Tag.Text != "" || len(sess.Self.Style.Colors) != 2 {
+		t.Fatalf("Self.Style = %+v, want colours only", sess.Self.Style)
 	}
 }
 

@@ -153,6 +153,33 @@ func Normalize(in Style) Style {
 	return out
 }
 
+// Wire is the style as the door sends and draws it: the colours only. The
+// tag is no longer shown (it made names read differently and broke
+// lookups), but a stored one is left in the record. Nil when no colour.
+func (s *Style) Wire() *Style {
+	if s == nil {
+		return nil
+	}
+	out := &Style{Colors: append([]string(nil), s.Colors...)}
+	if out.IsEmpty() {
+		return nil
+	}
+	return out
+}
+
+// KeepTag returns next with stored's tag, so a save from a client that no
+// longer edits tags doesn't erase one another client wrote.
+func KeepTag(next, stored *Style) *Style {
+	out := Style{}
+	if next != nil {
+		out.Colors = append([]string(nil), next.Colors...)
+	}
+	if stored != nil {
+		out.Tag = stored.Tag
+	}
+	return &out
+}
+
 // IsEmpty reports whether the style changes nothing (no colour, no tag).
 func (s *Style) IsEmpty() bool {
 	if s == nil {

@@ -108,6 +108,17 @@ func (p *settingsPanel) style() *nickstyle.Style {
 // openSettings runs the panel until the user saves, cancels or picks an
 // avatar action, and routes that action through the avatar manager.
 func (a *App) openSettings() {
+	// The panel sits over the action bar, so the chat's own [X] would show
+	// beside the panel's. Hide it while the panel is open.
+	if a.actionBar.Close {
+		a.actionBar.CloseHidden = true
+		a.draw()
+		_ = a.renderBlocking()
+		defer func() {
+			a.actionBar.CloseHidden = false
+			a.dirty = true
+		}()
+	}
 	for {
 		result := a.runSettings()
 		a.forceFullRedraw()

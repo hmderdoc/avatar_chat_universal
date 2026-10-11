@@ -151,6 +151,9 @@ type ActionBar struct {
 	// closeW columns from the pills.
 	Close     bool
 	CloseAttr ansi.Attr
+	// CloseHidden blanks the [X] (keeping its columns, so the pills stay
+	// put) while a panel drawn over the bar has its own.
+	CloseHidden bool
 
 	// pills is where Render drew each visible button, for mouse clicks.
 	pills []pillSpan
@@ -201,8 +204,10 @@ func (a *ActionBar) Render() {
 	}
 	x := 1
 	if a.Close {
-		a.Frame.PrintAt(x, 0, []byte("[X]"), a.CloseAttr)
-		a.pills = append(a.pills, pillSpan{x0: x, x1: x + 3, label: "[X]"})
+		if !a.CloseHidden {
+			a.Frame.PrintAt(x, 0, []byte("[X]"), a.CloseAttr)
+			a.pills = append(a.pills, pillSpan{x0: x, x1: x + 3, label: "[X]"})
+		}
 		x += closeW
 	}
 	for i, btn := range a.Buttons {

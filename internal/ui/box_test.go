@@ -447,3 +447,29 @@ func TestImageViewerBoxCharset(t *testing.T) {
 		t.Fatalf("empty /img box not in UTF-8: %q", out.String()[:40])
 	}
 }
+
+// While /settings covers the bar, the bar's [X] is blank and unclickable,
+// and the pills don't move.
+func TestActionBarCloseHidden(t *testing.T) {
+	f := ansi.NewFrame(0, 0, 40, 1, ansi.White|ansi.BgBlack)
+	bar := NewActionBar(f)
+	bar.Close = true
+	bar.Buttons = []ActionButton{{Label: "/who"}}
+	bar.Render()
+	shown, _ := bar.LabelAt(2)
+	at := -1
+	for x := 0; x < 40; x++ {
+		if l, ok := bar.LabelAt(x); ok && l == "/who" {
+			at = x
+			break
+		}
+	}
+	bar.CloseHidden = true
+	bar.Render()
+	if _, ok := bar.LabelAt(2); shown != "[X]" || ok {
+		t.Fatalf("[X] shown=%q, still clickable when hidden=%v", shown, ok)
+	}
+	if l, ok := bar.LabelAt(at); !ok || l != "/who" {
+		t.Fatalf("pills moved when the [X] was hidden")
+	}
+}

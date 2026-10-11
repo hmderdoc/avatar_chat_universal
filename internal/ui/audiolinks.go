@@ -42,7 +42,7 @@ func (a *App) EnableAudioLinks(cfg AudioLinkConfig) {
 		return
 	}
 	a.alinks = &audioLinks{cfg: cfg, results: make(chan audioResult, 4)}
-	a.transcript.AudioLabel = a.audioLabel
+	a.transcript.AudioLabel = a.mediaLabel
 }
 
 // audioTrack resolves a link in chat to something /play can play: the link
@@ -77,7 +77,36 @@ func (a *App) audioLabel(u string) string {
 	return note + name + "  /play"
 }
 
-// audioURLs lists the audio links in the transcript, newest first.
+// playable reports that /play can play u here: audio when the terminal
+// plays it, video when the host has ffmpeg.
+func (a *App) playable(u string) bool {
+	if a.alinks != nil {
+		if _, _, _, ok := a.audioTrack(u); ok {
+			return true
+		}
+	}
+	_, _, _, ok := a.videoTrack(u)
+	return ok
+}
+
+// isAudio reports that u resolves to an audio track.
+func (a *App) isAudio(u string) bool {
+	_, _, _, ok := a.audioTrack(u)
+	return ok
+}
+
+// trackName names a playable link for /play list.
+func (a *App) trackName(u string) string {
+	if a.alinks != nil {
+		if _, _, name, ok := a.audioTrack(u); ok {
+			return string(rune(audioNote)) + " " + name
+		}
+	}
+	_, _, name, _ := a.videoTrack(u)
+	return string(rune(videoMark)) + " " + name
+}
+
+// audioURLs lists the playable links in the transcript, newest first.
 func (a *App) audioURLs() []string {
 	var out []string
 	seen := map[string]bool{}
@@ -88,7 +117,7 @@ func (a *App) audioURLs() []string {
 			continue
 		}
 		for _, u := range inlineimg.FindURLs(m.Str) {
-			if _, _, _, ok := a.audioTrack(u); ok && !seen[u] {
+			if a.playable(u) && !seen[u] {
 				seen[u] = true
 				out = append(out, u)
 			}
@@ -99,7 +128,7 @@ func (a *App) audioURLs() []string {
 
 // handlePlay runs "/play [N|list]".
 func (a *App) handlePlay(args []string) {
-	if a.alinks == nil {
+	if a.alinks == nil && a.videos == nil {
 		if !a.AudioOK {
 			a.Session.Notice("/play: your terminal does not play audio (SyncTERM does)")
 		} else {
@@ -109,7 +138,14 @@ func (a *App) handlePlay(args []string) {
 	}
 	urls := a.audioURLs()
 	if len(urls) == 0 {
-		a.Session.Notice("/play: no audio links in this channel yet")
+		switch {
+		case a.videos == nil:
+			a.Session.Notice("/play: no audio links in this channel yet")
+		case a.alinks == nil:
+			a.Session.Notice("/play: no video links in this channel yet (audio links need SyncTERM)")
+		default:
+			a.Session.Notice("/play: no audio or video links in this channel yet")
+		}
 		return
 	}
 	n := 1
@@ -119,8 +155,7 @@ func (a *App) handlePlay(args []string) {
 				if i == 9 {
 					break
 				}
-				_, _, name, _ := a.audioTrack(u)
-				a.Session.Notice(fmt.Sprintf("  /play %d  %s", i+1, name))
+				a.Session.Notice(fmt.Sprintf("  /play %d  %s", i+1, a.trackName(u)))
 			}
 			return
 		}
@@ -132,6 +167,12 @@ func (a *App) handlePlay(args []string) {
 		n = v
 	}
 	u := urls[n-1]
+	if a.alinks == nil || !a.isAudio(u) {
+		kind, vstream, vname, _ := a.videoTrack(u)
+		a.playVideo(u, kind, vstream, vname)
+		return
+	}
+	a.stopVideo()
 	stream, ext, name, _ := a.audioTrack(u)
 	if !audiolink.Playable(ext) {
 		a.Session.Notice("/play: ." + ext + " files can't be played here (mp3, ogg, flac and wav can)")

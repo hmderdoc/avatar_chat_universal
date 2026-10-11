@@ -346,6 +346,65 @@ clip, and a queue that runs ahead is flushed back to the present, so sound
 can skip briefly but never drifts far behind the picture. There is no
 picture-to-sound sync in the door; video is shown as it arrives.
 
+## Video links
+
+With **ffmpeg and ffprobe** installed on the host, video links play on the
+TV-lounge screen: the same renderer (24-bit half blocks on truecolor
+terminals, 16-colour shade cells everywhere else) and, on SyncTERM, the
+same sound path. With **yt-dlp** also installed, links to the sites in
+`video_sites` (YouTube, Vimeo by default) play too. Without ffmpeg the
+feature is simply absent. The door logs what it found to stderr (the BBS
+log) at startup.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `video` | `auto` | `auto`: on when ffmpeg and ffprobe are found; `off`: never. |
+| `video_ffmpeg`, `video_ffprobe` | PATH lookup | Paths to the tools. |
+| `video_ytdlp` | PATH lookup | Path to yt-dlp; `off` turns page links off. |
+| `video_sites` | `youtube.com,youtu.be,vimeo.com` | Hosts (and their subdomains) whose page links go to yt-dlp. |
+| `video_extractors` | `youtube,vimeo` | The only yt-dlp extractors it may use. |
+| `video_max_mb` | `100` | Largest download. |
+| `video_max_seconds` | `600` | Longest playback; ffmpeg stops there. |
+| `video_max_concurrent` | `2` | Playbacks at once across every door process on the host. |
+| `video_download_seconds` | `180` | Longest download. |
+
+**Which links.** A link naming `.mp4 .m4v .webm .mov .mkv`, a page whose
+preview card announces a direct `og:video`, or a page on an allowlisted
+site. Each gets a card line (`► clip.mp4  /play`). Nothing plays until the
+caller types `/play` (`/play N`, `/play list` share the audio list). The
+video takes over the screen, a tuned TV channel steps aside and comes back
+after; `Esc` or `/stop` ends it, `/tvmute` and `/tvcolor` work as in the
+lounge. NSFW-looking links stay veiled until `/nsfw`. HLS and DASH links
+(`.m3u8`, `.mpd`) are not played: ffmpeg would fetch their segments itself,
+outside the door's guards.
+
+**What the door enforces.** A chat line is written by whoever is on the
+other end, so no URL from one reaches ffmpeg or yt-dlp directly:
+
+- direct links and `og:video` are downloaded by the door's own fetcher with
+  the picture guards (http/https on ports 80/443, public addresses only,
+  every redirect re-checked, size cap) into a private `0700` directory
+  under `<data>/videocache`;
+- yt-dlp runs only for allowlisted hosts, limited to `video_extractors`,
+  with `--ignore-config --no-plugin-dirs --no-cookies --no-exec
+  --no-playlist --no-js-runtimes`, a size cap and a time limit, writing
+  into the same kind of directory;
+- ffprobe and ffmpeg read only that local file: protocol whitelist `file`,
+  demuxers `mov` and `matroska` only (a "video" that is really an HLS or
+  concat playlist naming other files is refused), the probed demuxer
+  pinned, no stdin;
+- every child runs with a minimal environment in its own process group at a
+  lower priority, is killed with its group on stop, exit or hangup (Linux
+  also kills it if the door dies), and is bounded by `video_max_seconds`;
+- the download is deleted when playback ends; leftovers from a killed door
+  are purged at the next start.
+
+yt-dlp itself follows the site's own links to its media servers; the door
+cannot put its address guard on those, only on which sites may be named.
+YouTube and Vimeo refuse many datacenter addresses without a logged-in
+account (cookies), which the door never passes, so page links may fail on
+a hosted BBS while direct links work.
+
 ## Attention cues
 
 - **Mentions.** A line from someone else that says your name as a whole

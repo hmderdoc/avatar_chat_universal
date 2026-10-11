@@ -38,7 +38,7 @@ type tvPopup struct {
 // loungeActive reports whether we should be rendering the TV screen right now:
 // the channel is tuned and the user hasn't opted out.
 func (a *App) loungeActive() bool {
-	return a.tvTuner != nil && !a.tvOptedOut
+	return (a.tvTuner != nil && !a.tvOptedOut) || a.videoPlaying()
 }
 
 func (a *App) tvColorTrue() bool {
@@ -93,7 +93,8 @@ func (a *App) tvSync() {
 		a.clearLoungeResidue()
 	}
 	// Stream only while tuned AND not opted out — so /tvoff stops the bytes.
-	want := a.tvTuner != nil && !a.tvOptedOut
+	// A video link playing has the screen; the feed comes back after it.
+	want := a.tvTuner != nil && !a.tvOptedOut && !a.videoPlaying()
 	switch {
 	case want && a.tvConsumer == nil:
 		a.openTVFeed()
@@ -130,10 +131,11 @@ const audioOutMax = 512 << 10
 
 // pumpTVAudio moves the feed's audio chunks into the caller's queue.
 func (a *App) pumpTVAudio(now time.Time) {
-	if a.tvAudio == nil || a.tvConsumer == nil {
+	src := a.feed()
+	if a.tvAudio == nil || src == nil {
 		return
 	}
-	chunks := a.tvConsumer.TakeAudio()
+	chunks := src.TakeAudio()
 	if a.audioOut.Len() > audioOutMax {
 		// The link is not keeping up with video plus sound: drop the unsent
 		// clips (whole sequences, so nothing is cut mid-escape) rather than
@@ -250,8 +252,8 @@ func (a *App) drawLounge() {
 	bg := a.bgAnimFrame
 	bg.Clear()
 	var fr *telnetvision.Frame
-	if a.tvConsumer != nil {
-		fr = a.tvConsumer.Latest()
+	if src := a.feed(); src != nil {
+		fr = src.Latest()
 	}
 	if fr != nil {
 		fr.RenderTo(bg, 0, 0, bg.W, bg.H, telnetvision.RenderOpts{
@@ -270,6 +272,9 @@ func (a *App) drawLounge() {
 			label = a.tvTuner.Channel
 		}
 		msg := "Tuning in to " + label + " ..."
+		if a.videoPlaying() {
+			msg = "Starting " + a.videos.player.Title + " ..."
+		}
 		bg.PrintAt((bg.W-len(msg))/2, bg.H/2, []byte(msg), ansi.White|ansi.BgBlack)
 	}
 
@@ -292,7 +297,9 @@ func (a *App) drawLounge() {
 	// Bottom action row: the live caption bar, replacing the command pills
 	// (which moved to the top strip above).
 	caption := ""
-	if fr != nil {
+	if a.videoPlaying() {
+		caption = a.videoCaption()
+	} else if fr != nil {
 		caption = fr.Caption
 	}
 	a.drawCaptionBar(caption)
@@ -316,7 +323,11 @@ func (a *App) drawHintsTop() {
 		f.SetCell(x, 0, ' ', barAttr)
 	}
 	x := 1
-	for i, lbl := range loungeHints {
+	hints := loungeHints
+	if a.videoPlaying() {
+		hints = videoHints
+	}
+	for i, lbl := range hints {
 		if i > 0 {
 			x += 2 // gap between pills, in bar bg
 		}

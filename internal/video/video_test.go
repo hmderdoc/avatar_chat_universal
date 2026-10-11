@@ -2,6 +2,7 @@ package video
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -313,4 +314,17 @@ func hasPair(argv []string, k, v string) bool {
 		}
 	}
 	return false
+}
+
+func TestSiteError(t *testing.T) {
+	cases := map[string]string{
+		"yt-dlp: ERROR: [youtube] x: Sign in to confirm you're not a bot. Use --cookies": "signed-in account",
+		"yt-dlp: ERROR: [vimeo] 1: The web client only works when logged-in":             "signed-in account",
+		"yt-dlp: ERROR: Unsupported URL: https://youtube.com/":                           "not a video page",
+	}
+	for in, want := range cases {
+		if got := siteError(errors.New(in)).Error(); !strings.Contains(got, want) || strings.Contains(got, "cookies") {
+			t.Errorf("%q -> %q", in, got)
+		}
+	}
 }

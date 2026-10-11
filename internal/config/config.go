@@ -60,6 +60,21 @@ type Config struct {
 	// AudioMaxMB caps a downloaded audio link (default 20).
 	AudioMaxMB int
 
+	// Video links (/play) through the host's ffmpeg. See CONFIG.md
+	// "Video links". Video is "auto" (default: on when ffmpeg and ffprobe
+	// are found) or "off". The tool paths default to a PATH lookup;
+	// VideoYtDlp "off" turns page links (YouTube, Vimeo) off.
+	Video                string
+	VideoFFmpeg          string
+	VideoFFprobe         string
+	VideoYtDlp           string
+	VideoSites           []string // hosts whose page links go to yt-dlp
+	VideoExtractors      []string // yt-dlp extractors those hosts need
+	VideoMaxMB           int      // per download, default 100
+	VideoMaxSeconds      int      // per playback, default 600
+	VideoMaxConcurrent   int      // playbacks at once on the host, default 2
+	VideoDownloadSeconds int      // per download, default 180
+
 	// Bell sends BEL (0x07) when a PM or a mention of your name arrives,
 	// at most once every few seconds. Default on.
 	Bell bool
@@ -117,6 +132,13 @@ func Default() *Config {
 		TVAudio:              "auto",
 		AudioLinks:           "auto",
 		AudioMaxMB:           20,
+		Video:                "auto",
+		VideoSites:           []string{"youtube.com", "youtu.be", "vimeo.com"},
+		VideoExtractors:      []string{"youtube", "vimeo"},
+		VideoMaxMB:           100,
+		VideoMaxSeconds:      600,
+		VideoMaxConcurrent:   2,
+		VideoDownloadSeconds: 180,
 		TVPopupSecs:          10,
 		AvatarStore:          "auto",
 		Bell:                 true,
@@ -223,6 +245,30 @@ func Load(path string) (*Config, error) {
 			cfg.AudioLinks = audioMode(val, cfg.AudioLinks)
 		case "audio_max_mb":
 			cfg.AudioMaxMB = atoiOr(val, cfg.AudioMaxMB)
+		case "video":
+			if audioMode(val, "auto") == "off" {
+				cfg.Video = "off"
+			} else {
+				cfg.Video = "auto"
+			}
+		case "video_ffmpeg":
+			cfg.VideoFFmpeg = val
+		case "video_ffprobe":
+			cfg.VideoFFprobe = val
+		case "video_ytdlp":
+			cfg.VideoYtDlp = val
+		case "video_sites":
+			cfg.VideoSites = splitCSV(val)
+		case "video_extractors":
+			cfg.VideoExtractors = splitCSV(val)
+		case "video_max_mb":
+			cfg.VideoMaxMB = atoiOr(val, cfg.VideoMaxMB)
+		case "video_max_seconds":
+			cfg.VideoMaxSeconds = atoiOr(val, cfg.VideoMaxSeconds)
+		case "video_max_concurrent":
+			cfg.VideoMaxConcurrent = atoiOr(val, cfg.VideoMaxConcurrent)
+		case "video_download_seconds":
+			cfg.VideoDownloadSeconds = atoiOr(val, cfg.VideoDownloadSeconds)
 		case "tv_popup_seconds":
 			cfg.TVPopupSecs = atoiOr(val, cfg.TVPopupSecs)
 		case "tv_avatars":

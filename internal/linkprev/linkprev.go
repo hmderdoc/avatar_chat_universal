@@ -240,16 +240,18 @@ func Parse(html []byte, baseURL string) *Meta {
 	}
 }
 
-// videoFile matches a link that names a video file.
-var videoFile = regexp.MustCompile(`(?i)\.(mp4|m4v|webm|mov|mkv)(?:[?#]|$)`)
+// videoFile matches a path that names a video file.
+var videoFile = regexp.MustCompile(`(?i)\.(mp4|m4v|webm|mov|mkv)$`)
 
 // mediaVideo is the shell's isDirectMediaCandidate for og:video: a stated
-// type decides (video/* only), otherwise the URL must name a video file.
+// type decides (video/* only), otherwise the URL's path must name a video
+// file (a query ending in .mp4 is not one).
 func mediaVideo(rawURL, typ string) bool {
 	if t := strings.ToLower(strings.TrimSpace(typ)); t != "" {
 		return strings.HasPrefix(t, "video/")
 	}
-	return videoFile.MatchString(rawURL)
+	u, err := url.Parse(strings.TrimSpace(decodeEntities(rawURL)))
+	return err == nil && videoFile.MatchString(u.Path)
 }
 
 // resolve is resolveUrl: absolute http(s) as is, other schemes refused,

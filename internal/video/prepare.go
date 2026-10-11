@@ -158,7 +158,7 @@ func ytdlp(ctx context.Context, c Config, rawURL, dir string, maxBytes int64) (s
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("video: download took too long")
 		}
-		return "", err
+		return "", siteError(err)
 	}
 	matches, _ := filepath.Glob(filepath.Join(dir, "v.*"))
 	if len(matches) != 1 {
@@ -172,6 +172,24 @@ func ytdlp(ctx context.Context, c Config, rawURL, dir string, maxBytes int64) (s
 		return "", fmt.Errorf("video: over the %d MB cap", maxBytes>>20)
 	}
 	return matches[0], nil
+}
+
+// siteError turns yt-dlp's refusals into something a caller can act on.
+// Sites that want a signed-in account (YouTube's bot check, Vimeo's login
+// wall) are common from a hosted BBS's address; the door never passes
+// cookies, so say so instead of relaying yt-dlp's advice.
+func siteError(err error) error {
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "sign in"), strings.Contains(msg, "logged-in"), strings.Contains(msg, "login"),
+		strings.Contains(msg, "cookies"):
+		return errors.New("video: the site wants a signed-in account from this BBS's address; direct video links still play")
+	case strings.Contains(msg, "file is larger than max-filesize"), strings.Contains(msg, "max-filesize"):
+		return errors.New("video: that video is over this BBS's size cap")
+	case strings.Contains(msg, "unsupported url"), strings.Contains(msg, "no suitable extractor"):
+		return errors.New("video: that link is not a video page this BBS can play")
+	}
+	return err
 }
 
 func probe(ctx context.Context, c Config, path string) (Probe, error) {

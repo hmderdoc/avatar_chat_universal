@@ -227,6 +227,8 @@ func TestParseOpenGraphVideo(t *testing.T) {
 		{`<meta property="og:video" content="https://cdn.example/s?id=1">`, ""},
 		{`<meta name="twitter:player:stream" content="https://cdn.example/t.mp4">`, "https://cdn.example/t.mp4"},
 		{`<meta property="og:video" content="javascript:x.mp4">`, ""},
+		{`<meta property="og:video" content="https://cdn.example/play?file=x.mp4">`, ""},
+		{`<meta property="og:video" content="/v/clip.webm?sig=1&amp;t=2">`, "https://v.example/v/clip.webm?sig=1&t=2"},
 	}
 	for _, c := range cases {
 		if got := Parse([]byte(c.html), "https://v.example/page").Video; got != c.want {

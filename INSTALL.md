@@ -272,6 +272,25 @@ BBS.
 
 ---
 
+## Optional: video links
+
+Video links need nothing from the door itself, only tools on the host:
+
+| Tool | Enables |
+| --- | --- |
+| `ffmpeg` + `ffprobe` | `/play` for direct video links (`.mp4 .webm .mkv .mov`, a page's `og:video`) on the TV-lounge screen, with sound on SyncTERM. |
+| `yt-dlp` (also needs ffmpeg) | `/play` for links to the sites in `video_sites` (YouTube, Vimeo). |
+
+Install them from your OS packages (`apt install ffmpeg`, `pip install
+yt-dlp` or the yt-dlp release binary), make sure the door's user can find
+them on `PATH` (or set `video_ffmpeg` / `video_ffprobe` / `video_ytdlp`),
+and restart the door. The BBS log shows `video links on (...)` at each
+launch. Playback is capped at two at a time across the host by default
+(`video_max_concurrent`); each costs roughly one CPU core while it plays.
+See [CONFIG.md](CONFIG.md#video-links) for the keys and what is enforced.
+
+---
+
 ## Self-hosting the chat server
 
 The bundled server speaks the same line-delimited JSON-RPC protocol as

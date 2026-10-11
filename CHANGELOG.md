@@ -9,6 +9,15 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Added
 
+- **Video links.** With ffmpeg/ffprobe on the host, `.mp4 .m4v .webm .mov
+  .mkv` links and pages announcing `og:video` get a `► /play` card and play
+  full screen on the TV-lounge renderer (truecolor or 16-colour shade
+  cells) with SyncTERM sound; with yt-dlp, links to `video_sites` too.
+  Downloads go through the picture guards into a private dir; ffmpeg reads
+  only that file (protocol `file`, demuxers mov/matroska); children are
+  isolated, niced, killed with their group, time capped; a host-wide slot
+  lock caps concurrent playbacks. `Esc`/`/stop` end it; a tuned TV channel
+  steps aside and returns. `video*` keys; HLS/DASH not played.
 - **`/play` for audio links.** mp3, Ogg Vorbis, FLAC and WAV links get a
   one-line card; `/play`, `/play N`, `/play list` and `/stop` play them on
   terminals with SyncTERM audio, decoded in pure Go and streamed in real

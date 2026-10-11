@@ -144,6 +144,8 @@ type App struct {
 	cards *cardManager
 	// alinks plays audio links (/play); nil when off or the terminal has no audio.
 	alinks *audioLinks
+	// videos plays video links (/play) on the lounge screen; nil without ffmpeg.
+	videos *videoState
 	// sixelSig identifies the sixel pictures on screen after the last
 	// frame (URL@x,y each); "" when none are.
 	sixelSig string
@@ -279,6 +281,9 @@ func (a *App) layout() {
 	a.transcript.Theme = th
 	a.transcript.Images = a.images
 	a.transcript.Cards = a.cards
+	if a.alinks != nil || a.videos != nil {
+		a.transcript.AudioLabel = a.mediaLabel // survive a re-layout (theme, resize)
+	}
 	a.inputLine = NewInputLine(a.inputFrame, "> ")
 	a.inputLine.PromptAttr = th.InputPrompt
 	a.inputLine.TextAttr = th.InputText
@@ -718,6 +723,7 @@ func (a *App) Run(ctx context.Context) error {
 			a.dirty = true
 		}
 		a.audioTick(time.Now())
+		a.videoTick()
 
 		// Maybe-reconnect: if the chat connection died, try to bring it
 		// back up with exponential backoff (1s, 2s, 4s, ... capped at 30s).
@@ -863,6 +869,11 @@ func (a *App) handleKey(k ansi.Key) (exit bool, err error) {
 		a.dirty = true
 		return false, nil
 	case ansi.KeyEsc:
+		if a.videoBusy() { // Esc ends a video before it ends the door
+			a.stopVideo()
+			a.Session.Notice("video stopped")
+			return false, nil
+		}
 		return true, nil
 	}
 
@@ -1080,7 +1091,8 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		a.handlePlay(parts[1:])
 		return false, true
 	case "/stop":
-		if !a.stopAudio() {
+		stoppedAudio := a.stopAudio()
+		if !a.stopVideo() && !stoppedAudio {
 			a.Session.Notice("/stop: nothing playing")
 		}
 		return false, true
@@ -1123,6 +1135,9 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		}
 		if a.alinks != nil {
 			a.Session.Notice("audio links: /play plays the newest, /play N or /play list for others, /stop stops")
+		}
+		if a.videos != nil {
+			a.Session.Notice("video links: /play takes over the screen like the TV; Esc or /stop ends it")
 		}
 		return false, true
 	}
@@ -1951,6 +1966,7 @@ func (a *App) writeConn(p []byte) (int, error) {
 // the door exits, so nothing plays on over the BBS menu. The in-flight frame
 // is finished first (blocking) so the Flush cannot splice into it.
 func (a *App) silenceOnExit() {
+	a.shutdownVideo()
 	if a.alinks != nil && a.alinks.cancel != nil {
 		a.alinks.cancel()
 	}

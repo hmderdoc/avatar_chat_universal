@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/theme"
 	"github.com/hmderdoc/avatar_chat_universal/internal/ui"
 	"github.com/hmderdoc/avatar_chat_universal/internal/upload"
+	"github.com/hmderdoc/avatar_chat_universal/internal/video"
 	"github.com/hmderdoc/termprobe"
 )
 
@@ -355,6 +357,9 @@ func run() error {
 	}
 	if audioOK && cfg.AudioLinks != "off" {
 		app.EnableAudioLinks(ui.AudioLinkConfig{Fetcher: audioFetcher(cfg, *dataDir)})
+	}
+	if vc := videoConfig(cfg, *dataDir); vc.Enabled() {
+		app.EnableVideo(ui.VideoConfig{Video: vc, Fetcher: videoFetcher(cfg)})
 	}
 
 	// Theme overlay. Main config sets the baseline; theme can override
@@ -949,6 +954,69 @@ func imageCacheDir(cfg *config.Config, dataDir string) string {
 
 // audioFetcher downloads audio links with the image fetcher's guards, its
 // own size cap and a cache beside the picture cache.
+// lookTool resolves a video tool: the configured path, else a PATH lookup
+// of name; "" when it is off or missing.
+func lookTool(configured, name string) string {
+	c := strings.TrimSpace(configured)
+	if strings.EqualFold(c, "off") {
+		return ""
+	}
+	if c == "" {
+		c = name
+	}
+	p, err := exec.LookPath(c)
+	if err != nil {
+		return ""
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	return p
+}
+
+// videoConfig resolves the sysop's video setup. Video stays off unless
+// ffmpeg and ffprobe are both found; yt-dlp only adds page links. The
+// outcome goes to stderr once (Synchronet's log) so a sysop can see why.
+func videoConfig(cfg *config.Config, dataDir string) video.Config {
+	if cfg.Video == "off" {
+		return video.Config{}
+	}
+	vc := video.Config{
+		FFmpeg:          lookTool(cfg.VideoFFmpeg, "ffmpeg"),
+		FFprobe:         lookTool(cfg.VideoFFprobe, "ffprobe"),
+		YtDlp:           lookTool(cfg.VideoYtDlp, "yt-dlp"),
+		Sites:           cfg.VideoSites,
+		Extractors:      cfg.VideoExtractors,
+		MaxBytes:        int64(cfg.VideoMaxMB) << 20,
+		MaxSeconds:      cfg.VideoMaxSeconds,
+		DownloadTimeout: time.Duration(cfg.VideoDownloadSeconds) * time.Second,
+		MaxConcurrent:   cfg.VideoMaxConcurrent,
+		Dir:             filepath.Join(dataDir, "videocache"),
+	}
+	if !vc.Enabled() {
+		fmt.Fprintln(os.Stderr, "avatar_chat_universal: video links off (ffmpeg and ffprobe not both found)")
+		return video.Config{}
+	}
+	pages := "page links off (no yt-dlp)"
+	if vc.YtDlp != "" {
+		pages = "page links via " + vc.YtDlp + " for " + strings.Join(vc.Sites, ",")
+	}
+	fmt.Fprintf(os.Stderr, "avatar_chat_universal: video links on (%s); %s\n", vc.FFmpeg, pages)
+	return vc
+}
+
+// videoFetcher downloads direct video links through the image guards.
+func videoFetcher(cfg *config.Config) *inlineimg.Fetcher {
+	f := inlineimg.NewFetcher("")
+	f.Accept = "video/*, */*;q=0.5"
+	secs := cfg.VideoDownloadSeconds
+	if secs <= 0 {
+		secs = video.DefaultDownloadSeconds
+	}
+	f.Timeout = time.Duration(secs) * time.Second
+	return f
+}
+
 func audioFetcher(cfg *config.Config, dataDir string) *inlineimg.Fetcher {
 	dir := filepath.Join(filepath.Dir(imageCacheDir(cfg, dataDir)), "audiocache")
 	if cfg.ImageCacheMB == 0 {

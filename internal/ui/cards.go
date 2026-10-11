@@ -144,6 +144,31 @@ func (m *cardManager) audio(rawURL string) (stream, ext, name string, ok bool) {
 	return e.meta.Audio, ext, name, true
 }
 
+// video returns the direct og:video stream of rawURL's card, once loaded
+// and not veiled, with the track's title.
+func (m *cardManager) video(rawURL string) (stream, name string, ok bool) {
+	e := m.entries[rawURL]
+	if e == nil || e.state != imgReady || e.meta == nil || e.meta.Video == "" {
+		return "", "", false
+	}
+	if e.nsfw && !m.revealed {
+		return "", "", false
+	}
+	name = e.meta.Title
+	if name == "" {
+		name = linkName(e.meta.Video)
+	}
+	return e.meta.Video, name, true
+}
+
+// title is rawURL's card title once loaded ("" otherwise).
+func (m *cardManager) title(rawURL string) string {
+	if e := m.entries[rawURL]; e != nil && e.state == imgReady && e.meta != nil {
+		return e.meta.Title
+	}
+	return ""
+}
+
 // cardHost is the line a card leads with: the site's name, or its host.
 func cardHost(m *linkprev.Meta) string {
 	if m == nil {

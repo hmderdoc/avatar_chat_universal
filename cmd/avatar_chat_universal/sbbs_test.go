@@ -1,12 +1,15 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
+	"github.com/hmderdoc/avatar_chat_universal/internal/config"
 	"github.com/hmderdoc/avatar_chat_universal/internal/dropfile"
+	"github.com/hmderdoc/termprobe"
 )
 
 // fakeSbbs lays out <root>/ctrl/main.ini and <root>/data/user/ and points
@@ -121,5 +124,22 @@ func TestSynchronetBBSIDLabel(t *testing.T) {
 	u := sbbsUser(1)
 	if got := synchronetBBSID(u); got != "Test BBS" {
 		t.Errorf("label = %q", got)
+	}
+}
+
+func TestAudioWantedGating(t *testing.T) {
+	cfg := config.Default()
+	var src io.Reader
+	// A terminal that is not a CTerm is never sent the probe.
+	if audioWanted(cfg, &termprobe.Result{}, nil, &src) {
+		t.Fatal("non-CTerm terminal got audio")
+	}
+	cfg.TVAudio, cfg.AudioLinks = "off", "off"
+	if audioWanted(cfg, &termprobe.Result{CTerm: "1.320"}, nil, &src) {
+		t.Fatal("audio off everywhere still enabled it")
+	}
+	cfg.TVAudio = "on"
+	if !audioWanted(cfg, nil, nil, &src) {
+		t.Fatal("tv_audio = on should trust the sysop")
 	}
 }

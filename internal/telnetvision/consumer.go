@@ -8,9 +8,12 @@
 // + payload; payload[0] is the type.
 //
 //	HELLO_CONSUMER 0x02: 0x02 | u8 chanLen | channel
+//	                     | [u8 caps]  (v2: bit0 = wants AUDIO)
 //	FRAME          0x10: 0x10 | u16 cols | u16 rows | u8 mode | u8 ramp
 //	                     | u16 capLen | caption[capLen] | pixels[2*rows*cols*3]
 //	                     RGB, row-major; 2*rows pixel rows (top+bottom per cell).
+//	AUDIO          0x11: 0x11 | u8 codec | u8 channels | u32 rate | u32 seq
+//	                     | u64 pts_ms | u32 dur_ms | payload  (v2)
 package telnetvision
 
 import (
@@ -21,11 +24,18 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/hmderdoc/avatar_chat_universal/internal/apcaudio"
 )
 
 const (
 	msgHelloConsumer = 0x02
 	msgFrame         = 0x10
+	msgAudio         = 0x11
+	capAudio         = 0x01 // hello caps bit: forward AUDIO to this consumer
+	// audioQueueMax bounds held chunks if the render loop stalls; the
+	// player's own ledger is the real backpressure.
+	audioQueueMax = 64
 	maxMsg           = 16 << 20 // RGB frames are tens of KiB; cap defensively
 	reconnectDelay   = 3 * time.Second
 )
@@ -42,9 +52,13 @@ type Frame struct {
 type Consumer struct {
 	addr    string
 	channel string
+	// WantAudio asks the relay for the channel's AUDIO messages (set before
+	// Start). Off, the relay never sends them.
+	WantAudio bool
 
 	mu     sync.Mutex
 	latest *Frame
+	audio  []apcaudio.Chunk
 	conn   net.Conn
 	closed bool
 	connErr error
@@ -85,7 +99,7 @@ func (c *Consumer) run() {
 			conn.Close()
 			return
 		}
-		if err := helloConsumer(conn, c.channel); err != nil {
+		if err := helloConsumer(conn, c.channel, c.WantAudio); err != nil {
 			c.setErr(err)
 			conn.Close()
 			if c.sleepOrDone(reconnectDelay) {
@@ -107,6 +121,17 @@ func (c *Consumer) readLoop(conn net.Conn) {
 		if err != nil {
 			c.setErr(err)
 			return
+		}
+		if m, ok := decodeAudio(payload); ok {
+			if c.WantAudio {
+				c.mu.Lock()
+				c.audio = append(c.audio, m)
+				if len(c.audio) > audioQueueMax {
+					c.audio = c.audio[len(c.audio)-audioQueueMax:]
+				}
+				c.mu.Unlock()
+			}
+			continue
 		}
 		fr, ok := decodeFrame(payload)
 		if !ok {
@@ -140,6 +165,16 @@ func (c *Consumer) Latest() *Frame {
 	return c.latest
 }
 
+// TakeAudio returns the AUDIO chunks received since the last call, oldest
+// first.
+func (c *Consumer) TakeAudio() []apcaudio.Chunk {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := c.audio
+	c.audio = nil
+	return out
+}
+
 // Err returns the last connection error (nil while connected/healthy).
 func (c *Consumer) Err() error {
 	c.mu.Lock()
@@ -158,12 +193,15 @@ func (c *Consumer) Close() {
 	}
 }
 
-func helloConsumer(conn net.Conn, channel string) error {
+func helloConsumer(conn net.Conn, channel string, wantAudio bool) error {
 	ch := []byte(channel)
 	if len(ch) > 255 {
 		return fmt.Errorf("telnetvision: channel name too long")
 	}
 	payload := append([]byte{msgHelloConsumer, byte(len(ch))}, ch...)
+	if wantAudio {
+		payload = append(payload, capAudio) // v1 relays ignore the trailing byte
+	}
 	var hdr [4]byte
 	binary.BigEndian.PutUint32(hdr[:], uint32(len(payload)))
 	_, err := conn.Write(append(hdr[:], payload...))
@@ -184,6 +222,23 @@ func readMsg(r io.Reader) ([]byte, error) {
 		return nil, err
 	}
 	return buf, nil
+}
+
+// decodeAudio parses an AUDIO payload.
+func decodeAudio(p []byte) (apcaudio.Chunk, bool) {
+	const hdr = 1 + 1 + 1 + 4 + 4 + 8 + 4
+	if len(p) < hdr || p[0] != msgAudio {
+		return apcaudio.Chunk{}, false
+	}
+	return apcaudio.Chunk{
+		Codec:      p[1],
+		Channels:   p[2],
+		SampleRate: binary.BigEndian.Uint32(p[3:7]),
+		Seq:        binary.BigEndian.Uint32(p[7:11]),
+		PtsMs:      binary.BigEndian.Uint64(p[11:19]),
+		DurMs:      binary.BigEndian.Uint32(p[19:23]),
+		Payload:    p[23:],
+	}, true
 }
 
 // decodeFrame parses a FRAME payload. Returns (nil,false) for non-frame or

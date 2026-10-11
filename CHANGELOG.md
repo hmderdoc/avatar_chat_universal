@@ -9,6 +9,12 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Added
 
+- **TV lounge sound.** On terminals that play SyncTERM Audio APCs, the
+  lounge asks the relay for the channel's audio and plays it (WAV clips,
+  decoded by the terminal). `tv_audio = auto|on|off`; `/tvmute` mutes.
+  Only terminals that identify as CTerm are probed. Audio is sent between
+  frames, never inside one.
+
 - **`/draw`: ANSI art editor.** A full-screen CP437 canvas (default 80x25,
   up to 80x40) in the 16 CGA colours with PabloDraw/Moebius F-key glyph
   sets, half-block pixel mode, brush, flood fill, colour pick and 64-step

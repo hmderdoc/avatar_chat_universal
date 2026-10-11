@@ -313,6 +313,27 @@ Nothing is sent until they press Enter. The media server is the bundled
 
 ---
 
+## Sound (SyncTERM audio)
+
+The TV lounge plays its channel's sound on terminals that support SyncTERM's
+Audio APCs: clips are sent as WAV, cached by the terminal and decoded there
+with libsndfile, so the door needs no audio library on any host.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `tv_audio` | `auto` | `auto`: ask the terminal at startup (only a terminal that identified as CTerm is asked, so nothing else is sent an APC); `on`: skip the question; `off`: never. |
+
+`/tvmute` (or `/mute`) silences and restores the lounge's sound. Leaving
+the channel, `/tvoff` and quitting all stop playback at once. The probe's
+verdict is logged to `<data>/termprobe.log`.
+
+The door runs the audio queue open-loop, like the futureland shell: it
+keeps a local ledger instead of asking the terminal for queue reports,
+which would arrive in the key stream. Gaps are covered by a short silence
+clip, and a queue that runs ahead is flushed back to the present, so sound
+can skip briefly but never drifts far behind the picture. There is no
+picture-to-sound sync in the door; video is shown as it arrives.
+
 ## Attention cues
 
 - **Mentions.** A line from someone else that says your name as a whole

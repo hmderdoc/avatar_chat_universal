@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
+	"github.com/hmderdoc/avatar_chat_universal/internal/apcaudio"
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
 	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
@@ -87,8 +88,7 @@ func (a *App) tvSync() {
 		// for the new tuner. Without this, retuning (joining a different tuned
 		// channel) would keep streaming the previous one.
 		if a.tvConsumer != nil {
-			a.tvConsumer.Close()
-			a.tvConsumer = nil
+			a.closeTVFeed()
 		}
 		a.clearLoungeResidue()
 	}
@@ -96,12 +96,70 @@ func (a *App) tvSync() {
 	want := a.tvTuner != nil && !a.tvOptedOut
 	switch {
 	case want && a.tvConsumer == nil:
-		a.tvConsumer = telnetvision.NewConsumer(a.tvTuner.Host, a.tvTuner.Port, a.tvTuner.Channel)
-		a.tvConsumer.Start()
+		a.openTVFeed()
 	case !want && a.tvConsumer != nil:
-		a.tvConsumer.Close()
-		a.tvConsumer = nil
+		a.closeTVFeed()
 		a.clearLoungeResidue()
+	}
+}
+
+// openTVFeed subscribes to the tuned channel, asking for its audio when the
+// caller's terminal plays it.
+func (a *App) openTVFeed() {
+	a.tvConsumer = telnetvision.NewConsumer(a.tvTuner.Host, a.tvTuner.Port, a.tvTuner.Channel)
+	a.tvConsumer.WantAudio = a.AudioOK && a.TVAudio
+	a.tvConsumer.Start()
+	if a.tvConsumer.WantAudio {
+		a.tvAudio = apcaudio.NewSession(apcaudio.Defaults(2, "tv"))
+		_ = a.tvAudio.Start(&a.audioOut)
+	}
+}
+
+// closeTVFeed drops the feed and silences its audio at once.
+func (a *App) closeTVFeed() {
+	a.tvConsumer.Close()
+	a.tvConsumer = nil
+	if a.tvAudio != nil {
+		_ = a.tvAudio.Stop(&a.audioOut)
+		a.tvAudio = nil
+	}
+}
+
+// audioOutMax caps unsent Audio APC bytes (about 4 s of 22 kHz mono).
+const audioOutMax = 512 << 10
+
+// pumpTVAudio moves the feed's audio chunks into the caller's queue.
+func (a *App) pumpTVAudio(now time.Time) {
+	if a.tvAudio == nil || a.tvConsumer == nil {
+		return
+	}
+	chunks := a.tvConsumer.TakeAudio()
+	if a.audioOut.Len() > audioOutMax {
+		// The link is not keeping up with video plus sound: drop the unsent
+		// clips (whole sequences, so nothing is cut mid-escape) rather than
+		// let the speaker fall further behind the picture.
+		a.audioOut.Reset()
+	}
+	for _, m := range chunks {
+		_ = a.tvAudio.Push(&a.audioOut, m, now)
+	}
+	_ = a.tvAudio.Tick(&a.audioOut, now)
+}
+
+// toggleTVMute mutes or unmutes the lounge's sound.
+func (a *App) toggleTVMute() {
+	if a.tvAudio == nil {
+		if !a.AudioOK {
+			a.Session.Notice("/tvmute: your terminal does not play audio (SyncTERM does)")
+		} else {
+			a.Session.Notice("/tvmute: no TV sound playing")
+		}
+		return
+	}
+	if a.tvAudio.ToggleMute() {
+		a.Session.Notice("TV sound muted (/tvmute again to unmute)")
+	} else {
+		a.Session.Notice("TV sound on")
 	}
 }
 
@@ -124,6 +182,7 @@ func (a *App) tvTick() {
 		a.hideLoungeHistory()
 	}
 	now := time.Now()
+	a.pumpTVAudio(now)
 	if now.Sub(a.tvLastTick) < time.Second/tvFPS {
 		return
 	}

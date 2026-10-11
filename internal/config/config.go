@@ -51,6 +51,14 @@ type Config struct {
 	TVColor      string // "auto" (default: ask the terminal), "truecolor" or "16"
 	TVPopupSecs  int    // how long a comment lingers over the video (5-15, default 10)
 	TVAvatars    bool   // show avatars in popups (default off; they compete with video)
+	// TVAudio plays the lounge's sound through SyncTERM Audio APCs:
+	// "auto" (default: only if the terminal answers the libsndfile probe),
+	// "on" (skip the probe) or "off".
+	TVAudio string
+	// AudioLinks plays audio links (/play) the same way; same values.
+	AudioLinks string
+	// AudioMaxMB caps a downloaded audio link (default 20).
+	AudioMaxMB int
 
 	// Bell sends BEL (0x07) when a PM or a mention of your name arrives,
 	// at most once every few seconds. Default on.
@@ -106,6 +114,9 @@ func Default() *Config {
 		SplashTimeoutSeconds: 5,
 		Theme:                "futurewave",
 		TVColor:              "auto",
+		TVAudio:              "auto",
+		AudioLinks:           "auto",
+		AudioMaxMB:           20,
 		TVPopupSecs:          10,
 		AvatarStore:          "auto",
 		Bell:                 true,
@@ -206,6 +217,12 @@ func Load(path string) (*Config, error) {
 			cfg.Theme = val
 		case "tv_color":
 			cfg.TVColor = val
+		case "tv_audio":
+			cfg.TVAudio = audioMode(val, cfg.TVAudio)
+		case "audio_links":
+			cfg.AudioLinks = audioMode(val, cfg.AudioLinks)
+		case "audio_max_mb":
+			cfg.AudioMaxMB = atoiOr(val, cfg.AudioMaxMB)
 		case "tv_popup_seconds":
 			cfg.TVPopupSecs = atoiOr(val, cfg.TVPopupSecs)
 		case "tv_avatars":
@@ -299,6 +316,20 @@ func parseBool(s string, def bool) bool {
 		return true
 	case "false", "no", "off", "0":
 		return false
+	}
+	return def
+}
+
+// audioMode reads auto|on|off (true/false count as on/off); anything else
+// keeps def.
+func audioMode(val, def string) string {
+	switch strings.ToLower(strings.TrimSpace(val)) {
+	case "auto":
+		return "auto"
+	case "on", "true", "yes", "1":
+		return "on"
+	case "off", "false", "no", "0":
+		return "off"
 	}
 	return def
 }

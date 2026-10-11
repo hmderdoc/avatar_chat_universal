@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
+	"github.com/hmderdoc/avatar_chat_universal/internal/apcaudio"
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/canvas"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
@@ -160,12 +161,17 @@ type App struct {
 
 	// TV lounge config (see internal/ui/tvlounge.go).
 	TVColor     string // "truecolor" (default) or "16"
+	// AudioOK says the caller's terminal plays SyncTERM Audio APCs (the
+	// startup probe answered); TVAudio lets the lounge use it.
+	AudioOK bool
+	TVAudio bool
 	TVPopupSecs int    // how long a message popup lingers (5-15, default 10)
 	TVAvatars   bool   // show avatars in popups (default off; video competes)
 
 	// TV lounge runtime state.
 	tvTuner          *chat.Tuner
 	tvConsumer       *telnetvision.Consumer
+	tvAudio          *apcaudio.Session // nil unless the feed carries audio to this caller
 	tvOptedOut       bool
 	tvShowTranscript bool
 	// tvTranscriptShownAt is when the history overlay was last shown or
@@ -183,6 +189,10 @@ type App struct {
 	renderBuf  bytes.Buffer
 	pending    []byte
 	pendingOff int
+	// audioOut collects Audio APCs between frames. paceFrame sends it as a
+	// unit of its own, never inside a half-written frame, so an APC can
+	// never land in the middle of an escape sequence.
+	audioOut bytes.Buffer
 }
 
 func NewApp(conn io.Writer, in *ansi.Input, sess *chat.Session, width, height int, charset ansi.Charset) *App {
@@ -675,6 +685,7 @@ func (a *App) Run(ctx context.Context) error {
 	}
 	defer a.Conn.Write([]byte("\x1b[?7h"))
 	defer ansi.ShowCursor(a.Conn)
+	defer a.silenceOnExit()
 	if err := ansi.ShowCursor(a.Conn); err != nil {
 		return err
 	}
@@ -1062,6 +1073,9 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		}
 		a.forceFullRedraw()
 		return false, true
+	case "/tvmute", "/mute":
+		a.toggleTVMute()
+		return false, true
 	case "/tvcolor":
 		a.toggleTVColor()
 		return false, true
@@ -1093,6 +1107,9 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		}
 		a.Session.Notice("TV: /tvtuner <host> <port> <channel> | /tvtuner off | /tvon | /tvoff")
 		a.Session.Notice("TV: PgUp=history (PgDn/Down or 30s closes) | /tvcolor or Ctrl-T = truecolor/16")
+		if a.AudioOK {
+			a.Session.Notice("audio: TV sound plays in the lounge (/tvmute)")
+		}
 		return false, true
 	}
 	a.Session.Notice(fmt.Sprintf("unknown command: %s", cmd))
@@ -1852,6 +1869,12 @@ func (a *App) paceFrame() error {
 	if err := a.flushPending(); err != nil {
 		return err
 	}
+	if !a.frameInFlight() && a.audioOut.Len() > 0 {
+		a.pending = append(a.pending[:0], a.audioOut.Bytes()...)
+		a.pendingOff = 0
+		a.audioOut.Reset()
+		return a.flushPending()
+	}
 	if a.frameInFlight() || !a.dirty {
 		return nil
 	}
@@ -1908,4 +1931,24 @@ func (a *App) writeConn(p []byte) (int, error) {
 		return nb.WriteNB(p)
 	}
 	return a.Conn.Write(p)
+}
+
+// silenceOnExit stops any audio still queued on the caller's terminal when
+// the door exits, so nothing plays on over the BBS menu. The in-flight frame
+// is finished first (blocking) so the Flush cannot splice into it.
+func (a *App) silenceOnExit() {
+	if a.tvAudio == nil && a.audioOut.Len() == 0 {
+		return
+	}
+	if a.frameInFlight() {
+		_, _ = a.Conn.Write(a.pending[a.pendingOff:])
+		a.pendingOff = len(a.pending)
+	}
+	a.audioOut.Reset() // unplayed clips: drop them, only the Flush matters
+	if a.tvAudio != nil {
+		_ = a.tvAudio.Stop(&a.audioOut)
+		a.tvAudio = nil
+	}
+	_, _ = a.Conn.Write(a.audioOut.Bytes())
+	a.audioOut.Reset()
 }

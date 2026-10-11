@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
+	"github.com/hmderdoc/avatar_chat_universal/internal/apcaudio"
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/canvas"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
@@ -136,6 +137,14 @@ func run() error {
 			inputSrc = &replayConn{Conn: conn, pending: res.Leftover}
 		}
 	}
+
+	// SyncTERM Audio APCs (TV lounge sound, /play). "auto" asks the
+	// terminal, and only one that identified as CTerm (SyncTERM, the
+	// fTelnet fork, the futureland connection shim) is asked at all, so no
+	// other terminal is sent an APC it might print. Same before-the-input-
+	// pump rule as the probes above.
+	audioOK := audioWanted(cfg, probe, conn, &inputSrc)
+	logLine(*dataDir, fmt.Sprintf("audio: %v (tv_audio=%s audio_links=%s)", audioOK, cfg.TVAudio, cfg.AudioLinks))
 
 	input := ansi.NewInput(inputSrc)
 
@@ -330,6 +339,8 @@ func run() error {
 	app.IdleInterleaveAnsi = cfg.IdleInterleaveAnsi
 	if cfg.TVColor != "" {
 		app.TVColor = cfg.TVColor
+		app.AudioOK = audioOK
+		app.TVAudio = cfg.TVAudio != "off"
 	}
 	if cfg.TVPopupSecs > 0 {
 		app.TVPopupSecs = cfg.TVPopupSecs
@@ -849,6 +860,43 @@ func standaloneUser(userOverride, bbsOverride string) *dropfile.User {
 // legacy ConHost (older Win10 builds, Server 2016, VT-disabled environments)
 // rejects with ERROR_INVALID_PARAMETER -- killing standalone mode for
 // users whose Windows can't speak VT input.
+
+// audioWanted decides whether the caller's terminal plays Audio APCs. A
+// mode of "on" anywhere trusts the sysop; all "off" never asks; otherwise
+// the libsndfile probe runs when the terminal looks like a CTerm (or when
+// no terminal probe ran to say otherwise). Bytes typed during the probe are
+// replayed through *src.
+func audioWanted(cfg *config.Config, probe *termprobe.Result, conn termio.Conn, src *io.Reader) bool {
+	tv, links := cfg.TVAudio, cfg.AudioLinks
+	if tv == "off" && links == "off" {
+		return false
+	}
+	if tv == "on" || links == "on" {
+		return true
+	}
+	if probe != nil && probe.CTerm == "" {
+		return false
+	}
+	ok, rest := apcaudio.Detect(conn, termprobe.DeadlineReader(conn), 500*time.Millisecond)
+	if len(rest) > 0 {
+		if rc, isReplay := (*src).(*replayConn); isReplay {
+			rc.pending = append(rc.pending, rest...)
+		} else {
+			*src = &replayConn{Conn: conn, pending: rest}
+		}
+	}
+	return ok
+}
+
+// logLine appends one line to termprobe.log next to the probe result.
+func logLine(dataDir, line string) {
+	f, err := os.OpenFile(filepath.Join(dataDir, "termprobe.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s   %s\n", time.Now().Format("2006-01-02 15:04:05"), line)
+}
 
 // probeLogMax caps termprobe.log; past it the file starts over.
 const probeLogMax = 256 << 10

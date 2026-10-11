@@ -322,6 +322,18 @@ with libsndfile, so the door needs no audio library on any host.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `tv_audio` | `auto` | `auto`: ask the terminal at startup (only a terminal that identified as CTerm is asked, so nothing else is sent an APC); `on`: skip the question; `off`: never. |
+| `audio_links` | `auto` | Same values, for audio links in chat (`/play`). |
+| `audio_max_mb` | `20` | Largest audio file `/play` downloads. |
+
+**Audio links.** On a terminal that plays audio, each audio link in chat
+gets a one-line card (`♫ song.mp3  /play`). Nothing plays until the caller
+asks: `/play` plays the newest audio link, `/play N` the Nth newest,
+`/play list` shows the last nine, `/stop` stops. The file is downloaded
+with the same guards as pictures (public addresses only, size cap), decoded
+in the door (mp3, Ogg Vorbis, FLAC, PCM WAV), mixed to mono at about 22 kHz
+and streamed in real time on its own channel, so it can play alongside the
+TV. Opus, AAC and m4a links are labelled as unplayable: there is no pure-Go
+decoder for them. Downloads are cached in `<data>/audiocache`.
 
 `/tvmute` (or `/mute`) silences and restores the lounge's sound. Leaving
 the channel, `/tvoff` and quitting all stop playback at once. The probe's

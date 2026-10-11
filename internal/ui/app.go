@@ -142,6 +142,8 @@ type App struct {
 	images *imageManager
 	// cards is the link-preview pipeline (nil = plain links stay text).
 	cards *cardManager
+	// alinks plays audio links (/play); nil when off or the terminal has no audio.
+	alinks *audioLinks
 	// sixelSig identifies the sixel pictures on screen after the last
 	// frame (URL@x,y each); "" when none are.
 	sixelSig string
@@ -715,6 +717,7 @@ func (a *App) Run(ctx context.Context) error {
 		if a.cards != nil && a.cards.drain() {
 			a.dirty = true
 		}
+		a.audioTick(time.Now())
 
 		// Maybe-reconnect: if the chat connection died, try to bring it
 		// back up with exponential backoff (1s, 2s, 4s, ... capped at 30s).
@@ -1073,6 +1076,14 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		}
 		a.forceFullRedraw()
 		return false, true
+	case "/play":
+		a.handlePlay(parts[1:])
+		return false, true
+	case "/stop":
+		if !a.stopAudio() {
+			a.Session.Notice("/stop: nothing playing")
+		}
+		return false, true
 	case "/tvmute", "/mute":
 		a.toggleTVMute()
 		return false, true
@@ -1109,6 +1120,9 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		a.Session.Notice("TV: PgUp=history (PgDn/Down or 30s closes) | /tvcolor or Ctrl-T = truecolor/16")
 		if a.AudioOK {
 			a.Session.Notice("audio: TV sound plays in the lounge (/tvmute)")
+		}
+		if a.alinks != nil {
+			a.Session.Notice("audio links: /play plays the newest, /play N or /play list for others, /stop stops")
 		}
 		return false, true
 	}
@@ -1937,7 +1951,11 @@ func (a *App) writeConn(p []byte) (int, error) {
 // the door exits, so nothing plays on over the BBS menu. The in-flight frame
 // is finished first (blocking) so the Flush cannot splice into it.
 func (a *App) silenceOnExit() {
-	if a.tvAudio == nil && a.audioOut.Len() == 0 {
+	if a.alinks != nil && a.alinks.cancel != nil {
+		a.alinks.cancel()
+	}
+	playing := a.alinks != nil && a.alinks.player != nil
+	if a.tvAudio == nil && !playing && a.audioOut.Len() == 0 {
 		return
 	}
 	if a.frameInFlight() {
@@ -1948,6 +1966,10 @@ func (a *App) silenceOnExit() {
 	if a.tvAudio != nil {
 		_ = a.tvAudio.Stop(&a.audioOut)
 		a.tvAudio = nil
+	}
+	if playing {
+		_ = a.alinks.player.Stop(&a.audioOut)
+		a.alinks.player = nil
 	}
 	_, _ = a.Conn.Write(a.audioOut.Bytes())
 	a.audioOut.Reset()

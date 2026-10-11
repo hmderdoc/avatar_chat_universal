@@ -114,8 +114,8 @@ func TestHistory(t *testing.T) {
 }
 
 func key(t ansi.KeyType) ansi.Key { return ansi.Key{Type: t} }
-func ch(r rune) ansi.Key         { return ansi.Key{Type: ansi.KeyChar, Rune: r} }
-func ctrl(r rune) ansi.Key       { return ansi.Key{Type: ansi.KeyChar, Rune: r, Ctrl: true} }
+func ch(r rune) ansi.Key          { return ansi.Key{Type: ansi.KeyChar, Rune: r} }
+func ctrl(r rune) ansi.Key        { return ansi.Key{Type: ansi.KeyChar, Rune: r, Ctrl: true} }
 
 func TestEditorTypingUndoAndSend(t *testing.T) {
 	e := NewEditor(nil, nil, 80, 25, 80, 25)

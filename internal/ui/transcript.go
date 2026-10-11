@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
+	"github.com/hmderdoc/avatar_chat_universal/internal/audiolink"
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
 	"github.com/hmderdoc/avatar_chat_universal/internal/inlineimg"
@@ -44,6 +45,9 @@ type Transcript struct {
 	// Cards, when set, adds a preview card under a message's first plain
 	// link (nil = no cards).
 	Cards *cardManager
+	// AudioLabel, when set, adds a one-line card under each audio link
+	// (nil = audio links stay text only).
+	AudioLabel func(url string) string
 	// SixelRegions lists, after Render, the fully visible pictures that
 	// carry a sixel version, in frame coordinates, for the App to blit
 	// over their cells.
@@ -219,6 +223,7 @@ func (t *Transcript) buildBlocks(messages []*chat.Message, bubbleW int) []*block
 			prev.addRows(wrapText(msg.Str, bubbleW), left && chat.MentionsName(msg.Str, t.SelfName))
 			t.addPictures(prev, msg)
 			t.addCard(prev, msg)
+			t.addAudio(prev, msg)
 			continue
 		}
 
@@ -234,6 +239,7 @@ func (t *Transcript) buildBlocks(messages []*chat.Message, bubbleW int) []*block
 		b.addRows(wrapText(msg.Str, bubbleW), left && chat.MentionsName(msg.Str, t.SelfName))
 		t.addPictures(b, msg)
 		t.addCard(b, msg)
+		t.addAudio(b, msg)
 		if msg.Nick.Avatar != "" {
 			if a, err := avatar.FromBase64(msg.Nick.Avatar); err == nil {
 				b.avatar = a
@@ -339,6 +345,23 @@ func (t *Transcript) paintPictures(b *block, textX, bodyY int) {
 type cardSlot struct {
 	row    int // index into block.rows of its first row
 	layout cardLayout
+}
+
+// addAudio adds a one-line card under each audio link in msg.
+func (t *Transcript) addAudio(b *block, msg *chat.Message) {
+	if t.AudioLabel == nil {
+		return
+	}
+	for _, u := range inlineimg.FindURLs(msg.Str) {
+		if audiolink.Ext(u) == "" {
+			continue
+		}
+		label := t.AudioLabel(u)
+		if len(label) > b.width {
+			label = label[:b.width]
+		}
+		b.addRows([]string{label}, false)
+	}
 }
 
 // addCard reserves bubble rows under msg's text for the preview card of

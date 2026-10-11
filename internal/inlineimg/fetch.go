@@ -35,6 +35,8 @@ import (
 // Successful downloads are kept under CacheDir (named by the URL's SHA-256)
 // and the directory is trimmed oldest-first to CacheMax bytes.
 type Fetcher struct {
+	// Accept is the request's Accept header; "" means image/*.
+	Accept       string
 	MaxBytes     int64
 	Timeout      time.Duration
 	MaxRedirects int
@@ -85,7 +87,11 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) ([]byte, error) {
 	if f.UserAgent != "" {
 		req.Header.Set("User-Agent", f.UserAgent)
 	}
-	req.Header.Set("Accept", "image/*")
+	accept := f.Accept
+	if accept == "" {
+		accept = "image/*"
+	}
+	req.Header.Set("Accept", accept)
 	resp, err := f.httpClient().Do(req)
 	if err != nil {
 		return nil, err

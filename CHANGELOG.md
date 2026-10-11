@@ -9,6 +9,11 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Added
 
+- **`/play` for audio links.** mp3, Ogg Vorbis, FLAC and WAV links get a
+  one-line card; `/play`, `/play N`, `/play list` and `/stop` play them on
+  terminals with SyncTERM audio, decoded in pure Go and streamed in real
+  time on their own channel. Never plays without `/play`. `audio_links`,
+  `audio_max_mb`.
 - **TV lounge sound.** On terminals that play SyncTERM Audio APCs, the
   lounge asks the relay for the channel's audio and plays it (WAV clips,
   decoded by the terminal). `tv_audio = auto|on|off`; `/tvmute` mutes.

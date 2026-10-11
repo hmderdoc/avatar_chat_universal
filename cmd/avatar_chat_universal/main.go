@@ -353,6 +353,9 @@ func run() error {
 	if cfg.LinkPreviews {
 		app.EnableLinkPreviews(linkPreviewConfig(cfg, *dataDir))
 	}
+	if audioOK && cfg.AudioLinks != "off" {
+		app.EnableAudioLinks(ui.AudioLinkConfig{Fetcher: audioFetcher(cfg, *dataDir)})
+	}
 
 	// Theme overlay. Main config sets the baseline; theme can override
 	// any color or screensaver field. Missing theme files are not fatal --
@@ -942,6 +945,25 @@ func imageCacheDir(cfg *config.Config, dataDir string) string {
 		return cfg.ImageCacheDir
 	}
 	return filepath.Join(dataDir, "imagecache")
+}
+
+// audioFetcher downloads audio links with the image fetcher's guards, its
+// own size cap and a cache beside the picture cache.
+func audioFetcher(cfg *config.Config, dataDir string) *inlineimg.Fetcher {
+	dir := filepath.Join(filepath.Dir(imageCacheDir(cfg, dataDir)), "audiocache")
+	if cfg.ImageCacheMB == 0 {
+		dir = ""
+	}
+	f := inlineimg.NewFetcher(dir)
+	f.Accept = "audio/*, */*;q=0.5"
+	mb := cfg.AudioMaxMB
+	if mb <= 0 {
+		mb = 20
+	}
+	f.MaxBytes = int64(mb) << 20
+	f.CacheMax = 4 * f.MaxBytes
+	f.Timeout = 60 * time.Second
+	return f
 }
 
 func nsfwKeywords(cfg *config.Config) []string {

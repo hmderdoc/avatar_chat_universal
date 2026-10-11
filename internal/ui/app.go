@@ -66,6 +66,17 @@ type App struct {
 	// so it rides on the next message.
 	OnStyleSave func(style *nickstyle.Style) error
 
+	// Mouse asks the terminal for mouse reports when Run starts (see
+	// mouse.go); OnMouseSave stores a user's /mouse choice. ResizeEvery is
+	// how often to probe the screen size (0 = never: the size is pinned or
+	// the terminal didn't answer the startup probe).
+	Mouse         bool
+	MouseAllowed  bool // the sysop's mouse = on; /mouse can't override off
+	OnMouseSave   func(on bool) error
+	ResizeEvery   time.Duration
+	mouseOn       bool
+	lastSizeProbe time.Time
+
 	// Per-user themes. ThemeDir holds the themes/<name>.ini files /theme
 	// offers; SysopTheme is the board's own (what "default" goes back to);
 	// UserThemes lets users pick; OnThemeSave stores a pick ("" = back to
@@ -706,6 +717,11 @@ func (a *App) Run(ctx context.Context) error {
 	defer a.Conn.Write([]byte("\x1b[?7h"))
 	defer ansi.ShowCursor(a.Conn)
 	defer a.silenceOnExit()
+	if a.Mouse {
+		a.setMouse(true)
+		defer a.setMouse(false)
+	}
+	a.lastSizeProbe = time.Now()
 	if err := ansi.ShowCursor(a.Conn); err != nil {
 		return err
 	}
@@ -737,6 +753,7 @@ func (a *App) Run(ctx context.Context) error {
 		}
 		a.audioTick(time.Now())
 		a.videoTick()
+		a.probeSize(time.Now())
 
 		// Maybe-reconnect: if the chat connection died, try to bring it
 		// back up with exponential backoff (1s, 2s, 4s, ... capped at 30s).
@@ -815,11 +832,16 @@ func (a *App) Relayout() {
 }
 
 func (a *App) handleKey(k ansi.Key) (exit bool, err error) {
-	// Stray Cursor Position Report from the terminal -- ignore. We probe
-	// once at startup; any other CPR response is unsolicited and not
-	// something the chat UI cares about.
+	// Cursor Position Report: the answer to probeSize (or a stray one,
+	// which Resize ignores when the size hasn't changed).
 	if k.Type == ansi.KeyResize {
+		if a.ResizeEvery > 0 {
+			a.Resize(k.Cols, k.Rows)
+		}
 		return false, nil
+	}
+	if k.Type == ansi.KeyMouse {
+		return a.handleMouse(k), nil
 	}
 
 	// If a modal is open, route input to it. The modal closes on Esc; on
@@ -882,12 +904,7 @@ func (a *App) handleKey(k ansi.Key) (exit bool, err error) {
 		a.dirty = true
 		return false, nil
 	case ansi.KeyEsc:
-		if a.videoBusy() { // Esc ends a video before it ends the door
-			a.stopVideo()
-			a.Session.Notice("video stopped")
-			return false, nil
-		}
-		return true, nil
+		return a.escape(), nil // Esc ends a video before it ends the door
 	}
 
 	// Down arrow on an empty input mirrors PgDn while the history overlay is
@@ -1044,6 +1061,9 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 	case "/avatar":
 		a.handleAvatarCmd(parts)
 		return false, true
+	case "/mouse":
+		a.handleMouseCmd(parts[1:])
+		return false, true
 	case "/theme", "/themes":
 		a.handleTheme(parts[1:])
 		return false, true
@@ -1129,6 +1149,7 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		if a.UserThemes {
 			a.Session.Notice("/theme lists the colour themes; /theme <name> switches and remembers it")
 		}
+		a.Session.Notice("/mouse on|off: wheel scrolls; click pills, names, pictures and /play lines")
 		a.Session.Notice("/join keeps the old channel joined (unread counts in /channels); /part leaves it")
 		if a.BoardWide {
 			a.Session.Notice("/avatar and /settings change your BBS avatar and handle style everywhere on this system")
@@ -1167,6 +1188,7 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 // handleDraw parses "/draw [WxH]" (or "/draw W H"), runs the art editor and
 // posts what it returns.
 func (a *App) handleDraw(args []string) {
+	defer a.pauseMouse()()
 	if a.OnDraw == nil {
 		a.Session.Notice("/draw: the art editor is not available here")
 		return
@@ -1228,6 +1250,7 @@ func parseDrawSize(args []string) (w, h int, ok bool) {
 // server and puts the returned link in the input line for the user to send,
 // the web chat's convention: nothing is posted until they press Enter.
 func (a *App) handleMediaUpload() {
+	defer a.pauseMouse()()
 	if a.OnMediaUpload == nil {
 		a.Session.Notice("/upload: file uploads are not set up on this system")
 		return
@@ -1411,6 +1434,7 @@ func (a *App) openAvatarManager() {
 // applyAvatarAction runs pick (the selector, or a fixed action from
 // /settings) and carries out what it returns.
 func (a *App) applyAvatarAction(pick func() (string, string, error)) {
+	defer a.pauseMouse()()
 	if pick == nil {
 		a.Session.Notice("/avatar: not wired")
 		return

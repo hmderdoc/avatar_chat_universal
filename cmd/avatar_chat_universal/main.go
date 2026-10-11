@@ -112,7 +112,7 @@ func run() error {
 
 	// Detect screen size BEFORE the input pump starts, otherwise the pump
 	// would consume the terminal's response packet as if it were keystrokes.
-	cols, rows := resolveScreen(*colsFlag, *rowsFlag, cfg, conn)
+	cols, rows, pinned := resolveScreen(*colsFlag, *rowsFlag, cfg, conn)
 
 	// TV lounge color depth. tv_color = auto asks the terminal in band
 	// (github.com/hmderdoc/termprobe): SyncTERM, fTelnet and the xterm family
@@ -401,6 +401,16 @@ func run() error {
 			return userPrefs.Set(user.DisplayName(), "theme", name)
 		}
 	}
+	// Mouse: on unless the sysop or the user turned it off.
+	app.MouseAllowed = cfg.Mouse
+	app.Mouse = cfg.Mouse && userPrefs.Get(user.DisplayName(), "mouse") != "off"
+	app.OnMouseSave = func(on bool) error {
+		v := ""
+		if !on {
+			v = "off"
+		}
+		return userPrefs.Set(user.DisplayName(), "mouse", v)
+	}
 	app.BoardWide = boardWide
 	app.OnStyleSave = func(st *nickstyle.Style) error {
 		return store.WriteStyle(user.DisplayName(), st)
@@ -487,13 +497,18 @@ func run() error {
 	// are sometimes wrong (BBS client reconfigured between login and door
 	// launch); the CPR response tells us what the terminal actually is.
 	// We do this here, after the splash has cleared, so any stray cursor
-	// movement isn't visible mid-UI. No periodic re-probe -- the constant
-	// flicker isn't worth catching mid-session resizes.
+	// movement isn't visible mid-UI. Later changes are caught by the App's
+	// own probe (resize_probe_seconds), which hides the cursor for it.
 	if pCols, pRows := ui.ProbeTerminalSize(conn, input, 500*time.Millisecond); pCols > 0 && pRows > 0 {
 		if pCols != app.Width || pRows != app.Height {
 			app.Width = pCols
 			app.Height = pRows
 			app.Relayout()
+		}
+		// The terminal answers size probes: keep asking, unless the
+		// sysop pinned the size.
+		if !pinned && cfg.ResizeProbeSeconds > 0 {
+			app.ResizeEvery = time.Duration(cfg.ResizeProbeSeconds) * time.Second
 		}
 	}
 
@@ -682,22 +697,24 @@ func (r *replayConn) Read(p []byte) (int, error) {
 	return r.Conn.Read(p)
 }
 
-func resolveScreen(flagCols, flagRows int, cfg *config.Config, conn termio.Conn) (cols, rows int) {
+// pinned reports that the config or a flag set the size, so the door
+// shouldn't re-measure it live.
+func resolveScreen(flagCols, flagRows int, cfg *config.Config, conn termio.Conn) (cols, rows int, pinned bool) {
 	cols, rows = 80, 24
 	if c, r, ok := ansi.ScreenSize(conn, 300*time.Millisecond); ok {
 		cols, rows = c, r
 	}
 	if cfg.ScreenCols > 0 {
-		cols = cfg.ScreenCols
+		cols, pinned = cfg.ScreenCols, true
 	}
 	if cfg.ScreenRows > 0 {
-		rows = cfg.ScreenRows
+		rows, pinned = cfg.ScreenRows, true
 	}
 	if flagCols > 0 {
-		cols = flagCols
+		cols, pinned = flagCols, true
 	}
 	if flagRows > 0 {
-		rows = flagRows
+		rows, pinned = flagRows, true
 	}
 	if cols < 40 {
 		cols = 40
@@ -705,7 +722,7 @@ func resolveScreen(flagCols, flagRows int, cfg *config.Config, conn termio.Conn)
 	if rows < 12 {
 		rows = 12
 	}
-	return cols, rows
+	return cols, rows, pinned
 }
 
 // openConn resolves the I/O mode (auto-deriving from user.CommType when

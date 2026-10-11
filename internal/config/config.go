@@ -48,6 +48,9 @@ type Config struct {
 	Theme      string // theme name (resolved to themes/<name>.ini) or full .ini path
 	UserThemes bool   // users may pick another themes/<name>.ini with /theme (default on)
 
+	Mouse              bool // ask the terminal for mouse reports (default on; /mouse per user)
+	ResizeProbeSeconds int  // re-check the screen size this often (default 5; 0 = startup only)
+
 	// TV lounge mode (telnetvision). See internal/ui/tvlounge.go.
 	TVColor      string // "auto" (default: ask the terminal), "truecolor" or "16"
 	TVPopupSecs  int    // how long a comment lingers over the video (5-15, default 10)
@@ -130,6 +133,8 @@ func Default() *Config {
 		SplashTimeoutSeconds: 5,
 		Theme:                "futurewave",
 		UserThemes:           true,
+		Mouse:                true,
+		ResizeProbeSeconds:   5,
 		TVColor:              "auto",
 		TVAudio:              "auto",
 		AudioLinks:           "auto",
@@ -241,6 +246,10 @@ func Load(path string) (*Config, error) {
 			cfg.Theme = val
 		case "user_themes":
 			cfg.UserThemes = parseBool(val, cfg.UserThemes)
+		case "mouse":
+			cfg.Mouse = parseBool(val, cfg.Mouse)
+		case "resize_probe_seconds":
+			cfg.ResizeProbeSeconds = atoiOr(val, cfg.ResizeProbeSeconds)
 		case "tv_color":
 			cfg.TVColor = val
 		case "tv_audio":

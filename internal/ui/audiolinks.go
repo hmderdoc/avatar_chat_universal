@@ -166,7 +166,14 @@ func (a *App) handlePlay(args []string) {
 		}
 		n = v
 	}
-	u := urls[n-1]
+	a.playLink(urls[n-1])
+}
+
+// playLink plays one audio or video link (a /play pick or a click).
+func (a *App) playLink(u string) {
+	if a.alinks == nil && a.videos == nil {
+		return
+	}
 	if a.alinks == nil || !a.isAudio(u) {
 		kind, vstream, vname, _ := a.videoTrack(u)
 		a.playVideo(u, kind, vstream, vname)

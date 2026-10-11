@@ -52,6 +52,51 @@ type Transcript struct {
 	// carry a sixel version, in frame coordinates, for the App to blit
 	// over their cells.
 	SixelRegions []sixelRegion
+	// Hits lists, after Render, the clickable boxes in frame coordinates:
+	// speakers, pictures, audio/video lines and link cards.
+	Hits []hit
+}
+
+// hitKind is what a click in a transcript box does.
+type hitKind int
+
+const (
+	hitSpeaker hitKind = iota // ref = nick: start a /msg
+	hitPicture                // ref = image URL: zoom it
+	hitMedia                  // ref = audio/video URL: /play it
+	hitLink                   // ref = link URL: show it whole
+)
+
+type hit struct {
+	X, Y, W, H int
+	Kind       hitKind
+	Ref        string
+}
+
+// HitAt returns the box under cell (x, y) of the frame.
+func (t *Transcript) HitAt(x, y int) (hit, bool) {
+	for i := len(t.Hits) - 1; i >= 0; i-- {
+		h := t.Hits[i]
+		if x >= h.X && x < h.X+h.W && y >= h.Y && y < h.Y+h.H {
+			return h, true
+		}
+	}
+	return hit{}, false
+}
+
+// addHit records a box, clipped to the frame; fully hidden boxes drop.
+func (t *Transcript) addHit(x, y, w, h int, kind hitKind, ref string) {
+	if y < 0 {
+		h += y
+		y = 0
+	}
+	if y+h > t.Frame.H {
+		h = t.Frame.H - y
+	}
+	if w <= 0 || h <= 0 || ref == "" {
+		return
+	}
+	t.Hits = append(t.Hits, hit{X: x, Y: y, W: w, H: h, Kind: kind, Ref: ref})
 }
 
 // sixelRegion is a picture's cell box in the transcript frame.
@@ -93,6 +138,8 @@ type block struct {
 	pics []picSlot
 	// cards are link-preview cards, laid out like pics over blank rows.
 	cards []cardSlot
+	// media are the one-line audio/video cards, by row.
+	media []mediaSlot
 	// mention[i] marks rows[i] as part of a message from someone else that
 	// says our name (chat.MentionsName); those rows get the mention colours
 	// and a bar down the left edge. nil when no row is a mention.
@@ -128,6 +175,7 @@ func (b *block) height() int {
 func (t *Transcript) Render(messages []*chat.Message) {
 	t.Frame.Clear()
 	t.SixelRegions = t.SixelRegions[:0]
+	t.Hits = t.Hits[:0]
 	if len(messages) == 0 {
 		return
 	}
@@ -345,6 +393,13 @@ func (t *Transcript) paintPictures(b *block, textX, bodyY int) {
 type cardSlot struct {
 	row    int // index into block.rows of its first row
 	layout cardLayout
+	url    string
+}
+
+// mediaSlot is one "► title  /play" line inside a bubble.
+type mediaSlot struct {
+	row int
+	url string
 }
 
 // addAudio adds a one-line card under each audio link in msg.
@@ -360,6 +415,7 @@ func (t *Transcript) addAudio(b *block, msg *chat.Message) {
 		if len(label) > b.width {
 			label = label[:b.width]
 		}
+		b.media = append(b.media, mediaSlot{row: len(b.rows), url: u})
 		b.addRows([]string{label}, false)
 	}
 }
@@ -383,7 +439,7 @@ func (t *Transcript) addCard(b *block, msg *chat.Message) {
 	if l.rows == 0 {
 		return
 	}
-	b.cards = append(b.cards, cardSlot{row: len(b.rows), layout: l})
+	b.cards = append(b.cards, cardSlot{row: len(b.rows), layout: l, url: u})
 	b.addRows(make([]string, l.rows), false)
 }
 
@@ -542,6 +598,19 @@ func (t *Transcript) renderBlock(b *block, y int) {
 	}
 	t.paintPictures(b, bubbleX+1, y+1)
 	t.paintCards(b, bubbleX+1, y+1, bubbleAttr)
+
+	if y >= 0 {
+		t.addHit(bubbleX, y, headerW, 1, hitSpeaker, b.speaker)
+	}
+	for _, s := range b.pics {
+		t.addHit(bubbleX+1, y+1+s.row, s.cols, s.rows, hitPicture, s.url)
+	}
+	for _, s := range b.media {
+		t.addHit(bubbleX+1, y+1+s.row, b.width, 1, hitMedia, s.url)
+	}
+	for _, s := range b.cards {
+		t.addHit(bubbleX+1, y+1+s.row, b.width, s.layout.rows, hitLink, s.url)
+	}
 
 	// Avatar (drawn last so it's on top of any overlap). It stays beside its
 	// own header: a bubble cut by the frame edge loses the off-screen avatar

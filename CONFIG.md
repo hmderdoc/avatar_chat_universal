@@ -61,10 +61,13 @@ The `-charset` command-line flag overrides this per-launch.
 | -------------- | ------- | ------------------------------------------------------------------------------ |
 | `screen_cols`  | `0`     | 0 = auto-detect via terminal CPR probe; falls back to drop-file value or 80.   |
 | `screen_rows`  | `0`     | Same for height; falls back to drop-file value or 24.                          |
+| `resize_probe_seconds` | `5` | Re-check the size this often and re-lay out the screen when it changes (typed text and scroll position are kept; open lists close). 0 = check at startup only. |
 
-The probe runs once at startup, after the splash clears. Mid-session
-resizes don't trigger a relayout — reconnect if your terminal size
-changes.
+The size is probed at startup, after the splash clears, and then every
+`resize_probe_seconds` while the chat screen is up, between frames, with
+the cursor hidden for the trip. Probing stays off when `screen_cols` /
+`screen_rows` or `-cols` / `-rows` pin the size, or when the terminal
+didn't answer the startup probe. Sizes under 40x12 are ignored.
 
 ---
 
@@ -189,6 +192,8 @@ also the on-screen action bars and `/help`.
 | `/avatar off`                 | Disable your avatar without losing it (re-enable by picking again).           |
 | `/avatar pick`                | Open the selector directly.                                                   |
 | `/settings` / `/prefs` / `/options` | Settings panel: avatar (pick, draw, upload, disable) and handle style (a colour per letter, presets, a tag). On Synchronet these are the user's BBS-wide records. |
+| `/theme [name\|default]`      | List the colour themes, switch (remembered per user), or go back to the sysop's. See THEMING.md. |
+| `/mouse [on\|off]`            | Turn mouse reporting on or off for yourself (remembered). See "Mouse". |
 | `/draw [WxH]` / `/art`        | ANSI art editor (default 80x25, up to 80x40). Ctrl-Y posts the art as a `[BITMAP]` message every client draws; see "Art editor". |
 
 ---
@@ -441,6 +446,30 @@ In modals (selector, image viewer, roster, editor): arrow keys navigate;
 `Enter` confirms; `Esc` cancels. The avatar selector additionally responds
 to `U` (Upload), `D` (Disable), `E` (Editor) — these are also visible as
 pills along the bottom of the selector.
+
+---
+
+## Mouse
+
+| Key     | Default | Notes |
+| ------- | ------- | ----- |
+| `mouse` | `on`    | Ask the terminal for mouse reports (xterm 1000 with SGR 1006; the older X10 form is read too). Each user can turn it off with `/mouse off`, saved under `<data>/prefs/`. `off` here disables it for everyone. |
+
+With it on:
+
+- The wheel scrolls the chat (3 rows a notch), moves the selection in
+  `/who` and `/channels`, and pages through `/img`.
+- Clicking a top or bottom pill runs it; `/join`, `/part`, `/me`, `/msg`
+  and `/r` start the command in the input line instead.
+- Clicking a speaker's name starts `/msg <name> `.
+- Clicking an inline picture opens it in `/img`; clicking a `► … /play`
+  line plays it; clicking a link card prints its full URL.
+- In `/channels`, a click selects a row and a second click joins it.
+
+Terminals that can't report the mouse ignore the request. While reports
+are on, most terminals want Shift held to select text for copying.
+Reporting is switched off while the art editor, the avatar picker or
+editor, or a Zmodem transfer runs, and when the door exits.
 
 ---
 

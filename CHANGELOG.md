@@ -9,6 +9,16 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Added
 
+- **Mouse.** The door asks for xterm mouse reports (SGR, with X10
+  fallback): the wheel scrolls the chat and lists, pills run their
+  commands, a name starts `/msg`, a picture opens in `/img`, a `/play`
+  line plays, a link card shows its URL, `/channels` rows select and
+  join. `mouse = on|off`; `/mouse` per user (door prefs). Reports pause
+  for the editors, pickers and Zmodem.
+- **Live resize.** Every `resize_probe_seconds` (default 5) the door
+  re-asks the terminal its size between frames (cursor hidden for the
+  trip) and re-lays out on a change, keeping the typed line and scroll
+  position. Off when the size is pinned or the terminal never answered.
 - **Per-user themes.** `/theme` lists the sysop's `themes/*.ini`, `/theme
   <name>` switches live and remembers it (door prefs under `<data>/prefs/`,
   kept out of the BBS's own user records), `/theme default` goes back to

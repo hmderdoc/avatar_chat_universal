@@ -13,6 +13,7 @@ import (
 // "Who's Here" roster and the /channels list.
 type modalView interface {
 	HandleKey(k ansi.Key) (closed bool)
+	HandleMouse(k ansi.Key) (closed bool)
 	Render()
 }
 
@@ -32,6 +33,8 @@ type ChannelsModal struct {
 	Leave string
 
 	Theme *theme.Theme
+
+	list listGeom
 }
 
 func NewChannelsModal(frame *ansi.Frame, rooms []chat.RoomInfo) *ChannelsModal {
@@ -129,6 +132,7 @@ func (m *ChannelsModal) Render() {
 	if m.selected >= visible {
 		top = m.selected - visible + 1
 	}
+	m.list = listGeom{top: top, y0: listStart, rows: visible, x1: f.W - 1, n: len(m.rooms)}
 	for i := 0; i < visible && top+i < len(m.rooms); i++ {
 		idx := top + i
 		r := m.rooms[idx]
@@ -207,4 +211,17 @@ func (a *App) partCurrent() (exit bool) {
 	a.transcript.Scroll = 0
 	a.Session.Notice("left " + old)
 	return false
+}
+
+// HandleMouse: the wheel moves the selection, a click picks a row and a
+// click on the picked row joins it, like Enter.
+func (m *ChannelsModal) HandleMouse(k ansi.Key) bool {
+	if idx, ok := m.list.pick(k); ok {
+		if idx == m.selected {
+			return m.HandleKey(ansi.Key{Type: ansi.KeyEnter})
+		}
+		m.selected = idx
+		return false
+	}
+	return m.HandleKey(wheelKey(k))
 }

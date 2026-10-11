@@ -3,6 +3,7 @@ package ansi
 import (
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -43,7 +44,33 @@ const (
 	// Report from the terminal in response to our `\x1b[6n` probe (the
 	// app's resize-detection ping). Cols/Rows carry the new dims.
 	KeyResize
+	// KeyMouse is a mouse report (after EnableMouse): X/Y are the 0-based
+	// cell, Button the xterm button code (see the Mouse* constants).
+	KeyMouse
 )
+
+// Mouse button codes in Key.Button. Wheel events come as presses.
+const (
+	MouseLeft      = 0
+	MouseMiddle    = 1
+	MouseRight     = 2
+	MouseWheelUp   = 64
+	MouseWheelDown = 65
+)
+
+// MouseOn asks for button press/release reports (DECSET 1000) in SGR form
+// (1006); a terminal without 1006 falls back to the X10 byte form, which
+// the decoder also reads while SetMouse(true) is in effect. MouseOff
+// undoes both.
+const (
+	MouseOn  = "\x1b[?1000h\x1b[?1006h"
+	MouseOff = "\x1b[?1006l\x1b[?1000l"
+)
+
+// SizeProbe parks the cursor at the far corner, asks where it is and puts
+// it back; the reply decodes as KeyResize. The cursor is hidden for the
+// trip so the jump doesn't flash (the chat UI always shows it).
+const SizeProbe = "\x1b[?25l\x1b7\x1b[999;999H\x1b[6n\x1b8\x1b[?25h"
 
 type Key struct {
 	Type KeyType
@@ -52,6 +79,11 @@ type Key struct {
 	// Cols / Rows are populated only when Type == KeyResize.
 	Cols int
 	Rows int
+	// Mouse fields, for KeyMouse. Release is set for a button release
+	// (SGR 'm', or X10 button 3, which doesn't say which button).
+	X, Y    int
+	Button  int
+	Release bool
 }
 
 // Input decodes a byte stream from a terminal connection into Keys. It
@@ -75,7 +107,16 @@ type Input struct {
 	// RLock is released frequently enough for Pause to acquire the WLock
 	// without long delay.
 	pumpLock sync.RWMutex
+
+	// x10 enables the legacy X10 mouse form (ESC [ M b x y). Off by
+	// default: some terminals send ESC [ M for F1, and the three bytes
+	// after it are only a mouse report once we've asked for reports.
+	x10 atomic.Bool
 }
+
+// SetMouse tells the decoder whether mouse reporting is on, so it reads
+// the X10 form; the SGR form is always decoded.
+func (in *Input) SetMouse(on bool) { in.x10.Store(on) }
 
 // NewInput starts a goroutine that reads from r and feeds bytes into the
 // decoder. The goroutine exits on read error/EOF; subsequent Next calls
@@ -206,7 +247,7 @@ func (in *Input) Next(timeout time.Duration) (Key, bool, error) {
 
 		// 3) Try to decode. When closed, force-flush so trailing bytes
 		//    (like a bare ESC) deliver instead of waiting forever.
-		if k, n, ok := tryDecode(in.pending, closed); ok {
+		if k, n, ok := tryDecodeMouse(in.pending, closed, in.x10.Load()); ok {
 			in.pending = in.pending[n:]
 			return k, true, nil
 		}
@@ -225,7 +266,7 @@ func (in *Input) Next(timeout time.Duration) (Key, bool, error) {
 			}
 			in.pending = append(in.pending, b)
 		case <-deadline.C:
-			if k, n, ok := tryDecode(in.pending, true); ok {
+			if k, n, ok := tryDecodeMouse(in.pending, true, in.x10.Load()); ok {
 				in.pending = in.pending[n:]
 				return k, true, nil
 			}
@@ -238,6 +279,28 @@ func (in *Input) Next(timeout time.Duration) (Key, bool, error) {
 // If escFlush is true, a lone ESC at buf[0] is delivered as a bare KeyEsc;
 // otherwise the decoder waits for more bytes (returns ok=false).
 func tryDecode(buf []byte, escFlush bool) (Key, int, bool) {
+	return tryDecodeMouse(buf, escFlush, false)
+}
+
+// tryDecodeMouse is tryDecode with the X10 mouse form switched on or off.
+func tryDecodeMouse(buf []byte, escFlush, x10 bool) (Key, int, bool) {
+	if x10 && len(buf) >= 3 && buf[0] == 0x1b && buf[1] == '[' && buf[2] == 'M' {
+		if len(buf) < 6 {
+			if escFlush {
+				return Key{Type: KeyChar, Rune: 0}, len(buf), true
+			}
+			return Key{}, 0, false
+		}
+		cb := int(buf[3]) - 32
+		k := Key{Type: KeyMouse, X: int(buf[4]) - 33, Y: int(buf[5]) - 33, Button: cb &^ (4 | 8 | 16 | 32)}
+		if cb&3 == 3 && cb&64 == 0 {
+			k.Release, k.Button = true, MouseLeft
+		}
+		if cb&32 != 0 { // motion; we don't ask for it
+			return Key{Type: KeyChar, Rune: 0}, 6, true
+		}
+		return k, 6, true
+	}
 	if len(buf) == 0 {
 		return Key{}, 0, false
 	}
@@ -298,6 +361,14 @@ func decodeCSI(buf []byte) (Key, int, bool) {
 	final := buf[end]
 	params := string(buf[2:end])
 	consumed := end + 1
+
+	// SGR mouse report: ESC [ < b ; x ; y M (press) or m (release).
+	if len(params) > 0 && params[0] == '<' && (final == 'M' || final == 'm') {
+		if k, ok := parseSGRMouse(params[1:], final == 'm'); ok {
+			return k, consumed, true
+		}
+		return Key{Type: KeyChar, Rune: 0}, consumed, true
+	}
 
 	switch final {
 	case 'R':
@@ -445,4 +516,38 @@ func atoiSafe(s string) int {
 		}
 	}
 	return n
+}
+
+// parseSGRMouse reads "b;x;y" (1-based cells). Motion reports (bit 32) are
+// dropped, as are modifier bits.
+func parseSGRMouse(p string, release bool) (Key, bool) {
+	var v [3]int
+	i := 0
+	for _, part := range splitSemis(p) {
+		if i == 3 {
+			return Key{}, false
+		}
+		n := atoiSafe(part)
+		if part == "" || (n == 0 && part != "0") {
+			return Key{}, false
+		}
+		v[i] = n
+		i++
+	}
+	if i != 3 || v[1] < 1 || v[2] < 1 || v[0]&32 != 0 {
+		return Key{}, false
+	}
+	return Key{Type: KeyMouse, Button: v[0] &^ (4 | 8 | 16), X: v[1] - 1, Y: v[2] - 1, Release: release}, true
+}
+
+func splitSemis(s string) []string {
+	var out []string
+	start := 0
+	for i := 0; i <= len(s); i++ {
+		if i == len(s) || s[i] == ';' {
+			out = append(out, s[start:i])
+			start = i + 1
+		}
+	}
+	return out
 }

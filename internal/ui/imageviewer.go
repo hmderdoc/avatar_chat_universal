@@ -118,6 +118,17 @@ func (v *ImageViewer) Closed() bool { return v.closed }
 // by the App to mark it viewed in the session.
 func (v *ImageViewer) CurrentIndex() int { return v.index }
 
+// ShowRaster jumps to the downloaded picture from url, if it's listed.
+func (v *ImageViewer) ShowRaster(url string) {
+	for i, e := range v.rasters {
+		if e.url == url {
+			v.index = len(v.images) + i
+			v.scrollY = 0
+			return
+		}
+	}
+}
+
 // Render writes the entire modal to w. Cells are emitted as ANSI
 // 256-color SGR sequences so the original bitmap colors come through on
 // any terminal that supports them (SyncTERM does, modern xterms do).

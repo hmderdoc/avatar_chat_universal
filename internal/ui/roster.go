@@ -35,6 +35,8 @@ type RosterModal struct {
 	Truecolor bool
 
 	Theme *theme.Theme
+
+	list listGeom // where Render put the rows, for clicks
 }
 
 // NewRosterModal builds a modal from the WHO results plus the session's
@@ -164,6 +166,7 @@ func (m *RosterModal) Render() {
 	if top < 0 {
 		top = 0
 	}
+	m.list = listGeom{top: top, y0: listStart, rows: visible, x1: listW + 1, n: len(m.entries)}
 	for i := 0; i < visible && top+i < len(m.entries); i++ {
 		row := listStart + i
 		idx := top + i
@@ -249,4 +252,13 @@ func padRight(s string, w int) string {
 		return s
 	}
 	return s + strings.Repeat(" ", w-len(s))
+}
+
+// HandleMouse: the wheel moves the selection, a click picks a row.
+func (m *RosterModal) HandleMouse(k ansi.Key) bool {
+	if idx, ok := m.list.pick(k); ok {
+		m.selected = idx
+		return false
+	}
+	return m.HandleKey(wheelKey(k))
 }

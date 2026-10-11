@@ -145,6 +145,24 @@ type ActionBar struct {
 	// Attr is the legacy single-color setter retained so existing callers
 	// keep working; setting it updates BarAttr.
 	Attr ansi.Attr
+
+	// pills is where Render drew each visible button, for mouse clicks.
+	pills []pillSpan
+}
+
+type pillSpan struct {
+	x0, x1 int // columns, x1 exclusive
+	label  string
+}
+
+// LabelAt returns the label of the pill drawn at column x, if any.
+func (a *ActionBar) LabelAt(x int) (string, bool) {
+	for _, p := range a.pills {
+		if x >= p.x0 && x < p.x1 {
+			return p.label, true
+		}
+	}
+	return "", false
 }
 
 func NewActionBar(f *ansi.Frame) *ActionBar {
@@ -163,6 +181,7 @@ func (a *ActionBar) Render() {
 		a.BarAttr = a.Attr
 	}
 	a.Frame.Clear()
+	a.pills = a.pills[:0]
 	for x := 0; x < a.Frame.W; x++ {
 		a.Frame.SetCell(x, 0, ' ', a.BarAttr)
 	}
@@ -193,6 +212,7 @@ func (a *ActionBar) Render() {
 			}
 			a.Frame.SetCell(col, 0, pill[j], attr)
 		}
+		a.pills = append(a.pills, pillSpan{x0: x, x1: x + len(pill), label: btn.Label})
 		x += len(pill)
 	}
 }

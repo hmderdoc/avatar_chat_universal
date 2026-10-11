@@ -16,6 +16,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/config"
 	"github.com/hmderdoc/avatar_chat_universal/internal/dropfile"
 	"github.com/hmderdoc/avatar_chat_universal/internal/inlineimg"
+	"github.com/hmderdoc/avatar_chat_universal/internal/linkprev"
 	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
 	"github.com/hmderdoc/avatar_chat_universal/internal/termio"
 	"github.com/hmderdoc/avatar_chat_universal/internal/theme"
@@ -335,6 +336,9 @@ func run() error {
 	app.Bell = cfg.Bell
 	if cfg.Images {
 		app.EnableImages(imageConfig(cfg, *dataDir, probe))
+	}
+	if cfg.LinkPreviews {
+		app.EnableLinkPreviews(linkPreviewConfig(cfg, *dataDir))
 	}
 
 	// Theme overlay. Main config sets the baseline; theme can override
@@ -822,24 +826,51 @@ func logProbe(dataDir string, user *dropfile.User, res termprobe.Result) {
 		time.Now().Format("2006-01-02 15:04:05"), who, res, res.SixelReason, res.Raw)
 }
 
-// imageConfig builds the inline-picture settings: fetch limits and cache
-// from the config, sixel and cell size from the terminal probe.
-func imageConfig(cfg *config.Config, dataDir string, probe *termprobe.Result) ui.ImageConfig {
-	cacheDir := cfg.ImageCacheDir
-	if cacheDir == "" {
-		cacheDir = filepath.Join(dataDir, "imagecache")
-	}
-	f := inlineimg.NewFetcher(cacheDir)
+// imageFetcher is the guarded downloader with the configured caps and the
+// picture cache, shared in shape by inline pictures and card thumbnails.
+func imageFetcher(cfg *config.Config, dataDir string) *inlineimg.Fetcher {
+	f := inlineimg.NewFetcher(imageCacheDir(cfg, dataDir))
 	if cfg.ImageMaxMB > 0 {
 		f.MaxBytes = int64(cfg.ImageMaxMB) << 20
 	}
 	if cfg.ImageCacheMB >= 0 {
 		f.CacheMax = int64(cfg.ImageCacheMB) << 20
 	}
-	ic := ui.ImageConfig{Fetcher: f, NSFWKeywords: inlineimg.DefaultNSFWKeywords}
-	if cfg.NSFWKeywordsSet {
-		ic.NSFWKeywords = cfg.NSFWKeywords
+	return f
+}
+
+func imageCacheDir(cfg *config.Config, dataDir string) string {
+	if cfg.ImageCacheDir != "" {
+		return cfg.ImageCacheDir
 	}
+	return filepath.Join(dataDir, "imagecache")
+}
+
+func nsfwKeywords(cfg *config.Config) []string {
+	if cfg.NSFWKeywordsSet {
+		return cfg.NSFWKeywords
+	}
+	return inlineimg.DefaultNSFWKeywords
+}
+
+// linkPreviewConfig builds the preview-card settings: cards are cached in
+// a linkpreviews directory beside the picture cache, thumbnails go through
+// the picture cache itself.
+func linkPreviewConfig(cfg *config.Config, dataDir string) ui.LinkPreviewConfig {
+	cache := &linkprev.Cache{
+		Dir: filepath.Join(filepath.Dir(imageCacheDir(cfg, dataDir)), "linkpreviews"),
+		TTL: time.Duration(cfg.LinkPreviewTTLHours) * time.Hour,
+	}
+	if cfg.ImageCacheMB == 0 {
+		cache.Dir = "" // the sysop asked for no disk cache
+	}
+	return ui.LinkPreviewConfig{Fetcher: imageFetcher(cfg, dataDir), Cache: cache, NSFWKeywords: nsfwKeywords(cfg)}
+}
+
+// imageConfig builds the inline-picture settings: fetch limits and cache
+// from the config, sixel and cell size from the terminal probe.
+func imageConfig(cfg *config.Config, dataDir string, probe *termprobe.Result) ui.ImageConfig {
+	ic := ui.ImageConfig{Fetcher: imageFetcher(cfg, dataDir), NSFWKeywords: nsfwKeywords(cfg)}
 	switch strings.ToLower(cfg.ImageSixel) {
 	case "on", "true", "yes":
 		ic.Sixel = true

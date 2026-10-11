@@ -9,6 +9,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
 	"github.com/hmderdoc/avatar_chat_universal/internal/inlineimg"
+	"github.com/hmderdoc/avatar_chat_universal/internal/linkprev"
 	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
 	"github.com/hmderdoc/avatar_chat_universal/internal/theme"
 )
@@ -40,6 +41,9 @@ type Transcript struct {
 	// Images, when set, turns image links into inline pictures inside the
 	// bubble (nil = links stay text only).
 	Images *imageManager
+	// Cards, when set, adds a preview card under a message's first plain
+	// link (nil = no cards).
+	Cards *cardManager
 	// SixelRegions lists, after Render, the fully visible pictures that
 	// carry a sixel version, in frame coordinates, for the App to blit
 	// over their cells.
@@ -83,6 +87,8 @@ type block struct {
 	// pics are inline pictures; each owns blank rows of the bubble starting
 	// at its row index.
 	pics []picSlot
+	// cards are link-preview cards, laid out like pics over blank rows.
+	cards []cardSlot
 	// mention[i] marks rows[i] as part of a message from someone else that
 	// says our name (chat.MentionsName); those rows get the mention colours
 	// and a bar down the left edge. nil when no row is a mention.
@@ -212,6 +218,7 @@ func (t *Transcript) buildBlocks(messages []*chat.Message, bubbleW int) []*block
 			prev.addRows([]string{""}, false)
 			prev.addRows(wrapText(msg.Str, bubbleW), left && chat.MentionsName(msg.Str, t.SelfName))
 			t.addPictures(prev, msg)
+			t.addCard(prev, msg)
 			continue
 		}
 
@@ -226,6 +233,7 @@ func (t *Transcript) buildBlocks(messages []*chat.Message, bubbleW int) []*block
 		}
 		b.addRows(wrapText(msg.Str, bubbleW), left && chat.MentionsName(msg.Str, t.SelfName))
 		t.addPictures(b, msg)
+		t.addCard(b, msg)
 		if msg.Nick.Avatar != "" {
 			if a, err := avatar.FromBase64(msg.Nick.Avatar); err == nil {
 				b.avatar = a
@@ -323,6 +331,79 @@ func (t *Transcript) paintPictures(b *block, textX, bodyY int) {
 		}
 		if s.pic.Sixel != nil && y0 >= 0 && y0+s.pic.Rows <= t.Frame.H {
 			t.SixelRegions = append(t.SixelRegions, sixelRegion{X: textX, Y: y0, Pic: s.pic, URL: s.url})
+		}
+	}
+}
+
+// cardSlot is one link-preview card inside a bubble.
+type cardSlot struct {
+	row    int // index into block.rows of its first row
+	layout cardLayout
+}
+
+// addCard reserves bubble rows under msg's text for the preview card of
+// its first plain link: a loading line, the card, a veiled card, or
+// nothing when the link has no card.
+func (t *Transcript) addCard(b *block, msg *chat.Message) {
+	if t.Cards == nil {
+		return
+	}
+	u := linkprev.PreviewURL(msg.Str)
+	if u == "" {
+		return
+	}
+	v, ok := t.Cards.lookup(u, msg.Str, t.Truecolor)
+	if !ok {
+		return
+	}
+	l := layoutCard(v, b.width)
+	if l.rows == 0 {
+		return
+	}
+	b.cards = append(b.cards, cardSlot{row: len(b.rows), layout: l})
+	b.addRows(make([]string, l.rows), false)
+}
+
+// paintCards draws a bubble's cards at the bubble's text column: an edge
+// bar, the thumbnail, then the site, title and description on the
+// bubble's own background.
+func (t *Transcript) paintCards(b *block, textX, bodyY int, bubbleAttr ansi.Attr) {
+	th := t.Theme
+	if th == nil {
+		th = theme.Default()
+	}
+	bg := bubbleAttr &^ 0x0F
+	for _, s := range b.cards {
+		l := s.layout
+		y0 := bodyY + s.row
+		for r := 0; r < l.rows; r++ {
+			t.Frame.SetCell(textX, y0+r, 0xDD, bg|(th.CardEdge&0x0F)) // ▌
+		}
+		x := textX + 1
+		if p := l.thumb; p != nil {
+			for r := 0; r < p.Rows; r++ {
+				for c := 0; c < p.Cols; c++ {
+					cell := p.Cells[r*p.Cols+c]
+					if cell.True {
+						t.Frame.SetCellTrue(x+c, y0+r, cell.Char, cell.Fg, cell.Bg)
+					} else {
+						t.Frame.SetCell(x+c, y0+r, cell.Char, cell.Attr)
+					}
+				}
+			}
+			x += p.Cols + 1
+		}
+		for i, ln := range l.lines {
+			attr := bubbleAttr
+			switch ln.role {
+			case 's':
+				attr = bg | (th.CardSite & 0x0F)
+			case 't':
+				attr = bg | (th.CardTitle & 0x0F)
+			case 'v':
+				attr = ansi.White | ansi.BgMagenta
+			}
+			t.Frame.PrintAt(x, y0+i, []byte(ln.text), attr)
 		}
 	}
 }
@@ -436,6 +517,7 @@ func (t *Transcript) renderBlock(b *block, y int) {
 		}
 	}
 	t.paintPictures(b, bubbleX+1, y+1)
+	t.paintCards(b, bubbleX+1, y+1, bubbleAttr)
 
 	// Avatar (drawn last so it's on top of any overlap). It stays beside its
 	// own header: a bubble cut by the frame edge loses the off-screen avatar

@@ -130,6 +130,8 @@ type App struct {
 	unreadPM int
 	// images is the inline picture pipeline (nil = image links stay text).
 	images *imageManager
+	// cards is the link-preview pipeline (nil = plain links stay text).
+	cards *cardManager
 	// sixelSig identifies the sixel pictures on screen after the last
 	// frame (URL@x,y each); "" when none are.
 	sixelSig string
@@ -255,6 +257,7 @@ func (a *App) layout() {
 	a.transcript = NewTranscript(a.transcriptFrame, selfName)
 	a.transcript.Theme = th
 	a.transcript.Images = a.images
+	a.transcript.Cards = a.cards
 	a.inputLine = NewInputLine(a.inputFrame, "> ")
 	a.inputLine.PromptAttr = th.InputPrompt
 	a.inputLine.TextAttr = th.InputText
@@ -689,6 +692,9 @@ func (a *App) Run(ctx context.Context) error {
 		if a.images != nil && a.images.drain() {
 			a.dirty = true
 		}
+		if a.cards != nil && a.cards.drain() {
+			a.dirty = true
+		}
 
 		// Maybe-reconnect: if the chat connection died, try to bring it
 		// back up with exponential backoff (1s, 2s, 4s, ... capped at 30s).
@@ -1027,15 +1033,23 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		}
 		return false, true
 	case "/nsfw":
-		if a.images == nil {
-			a.Session.Notice("/nsfw: inline images are off on this system")
+		if a.images == nil && a.cards == nil {
+			a.Session.Notice("/nsfw: inline images and link previews are off on this system")
 			return false, true
 		}
-		shown, n := a.images.toggleReveal()
-		if shown {
-			a.Session.Notice(fmt.Sprintf("showing pictures the NSFW rule veiled (%d so far); /nsfw hides them again", n))
+		shown, n := false, 0
+		if a.images != nil {
+			shown, n = a.images.toggleReveal()
 		} else {
-			a.Session.Notice("NSFW pictures veiled again (/nsfw to show)")
+			shown = !a.cards.revealed
+		}
+		if a.cards != nil {
+			a.cards.revealed = shown
+		}
+		if shown {
+			a.Session.Notice(fmt.Sprintf("showing pictures and links the NSFW rule veiled (%d pictures so far); /nsfw hides them again", n))
+		} else {
+			a.Session.Notice("NSFW pictures and links veiled again (/nsfw to show)")
 		}
 		a.forceFullRedraw()
 		return false, true
@@ -1052,6 +1066,9 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		}
 		if a.images != nil {
 			a.Session.Notice("image links show inline; /img zooms them; /nsfw shows or hides veiled ones")
+		}
+		if a.cards != nil {
+			a.Session.Notice("other links get a preview card (site, title, summary) under the message")
 		}
 		a.Session.Notice("TV: /tvtuner <host> <port> <channel> | /tvtuner off | /tvon | /tvoff")
 		a.Session.Notice("TV: PgUp=history (PgDn/Down or 30s closes) | /tvcolor or Ctrl-T = truecolor/16")

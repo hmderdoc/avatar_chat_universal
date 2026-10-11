@@ -50,6 +50,12 @@ type Theme struct {
 	BubbleMention ansi.Attr // others' public lines that say your name
 	MentionEdge   ansi.Attr // fg of the bar down the left edge of a mention
 
+	// Link-preview cards inside a bubble: foregrounds only, drawn on the
+	// bubble's own background.
+	CardSite  ansi.Attr // site name line
+	CardTitle ansi.Attr // page title
+	CardEdge  ansi.Attr // bar down the card's left edge
+
 	// Bubble header line (speaker, timestamp, BBS host).
 	SpeakerLeft ansi.Attr
 	SpeakerSelf ansi.Attr
@@ -100,6 +106,9 @@ func Default() *Theme {
 		BubblePrivate: ansi.White | ansi.BgRed,
 		BubbleMention: ansi.Black | ansi.BgBrown,
 		MentionEdge:   ansi.Yellow,
+		CardSite:      ansi.DarkGray,
+		CardTitle:     ansi.White,
+		CardEdge:      ansi.LightBlue,
 
 		SpeakerLeft: ansi.LightMagenta,
 		SpeakerSelf: ansi.LightCyan,
@@ -212,6 +221,12 @@ func colorSlot(t *Theme, key string) *ansi.Attr {
 		return &t.BubbleMention
 	case "mention_edge":
 		return &t.MentionEdge
+	case "card_site":
+		return &t.CardSite
+	case "card_title":
+		return &t.CardTitle
+	case "card_edge":
+		return &t.CardEdge
 	case "speaker_left":
 		return &t.SpeakerLeft
 	case "speaker_self":

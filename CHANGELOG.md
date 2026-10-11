@@ -47,6 +47,14 @@ versioning follows loose [SemVer](https://semver.org/) (see
   `image_sixel`, `image_max_mb`, `image_cache_dir`, `image_cache_mb`,
   `nsfw_keywords`.
 
+- **Link previews.** The first plain link in a message gets a card under
+  the text, as on the website: site name, title, description and a small
+  `og:image` thumbnail (24-bit or 16-colour shade cells). Fetched with the
+  inline-image guards and the website's limits, cached in
+  `<data>/linkpreviews` (24 h, failures 1 h), veiled by the NSFW keywords.
+  New keys `link_previews` and `link_preview_ttl_hours`; theme keys
+  `card_site`, `card_title`, `card_edge`.
+
 ### Changed
 
 - The terminal probe now also runs when `tv_color` is pinned but images are

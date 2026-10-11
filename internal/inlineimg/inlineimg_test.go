@@ -346,3 +346,54 @@ func TestSixelOutput(t *testing.T) {
 		t.Fatalf("sixel is %d bytes; expected well under 64 KB for 320x156", len(pic.Sixel))
 	}
 }
+
+func TestFetchPageGuards(t *testing.T) {
+	var gotRange string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/page":
+			gotRange = r.Header.Get("Range")
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusPartialContent)
+			w.Write([]byte("<title>hi</title>"))
+		case "/huge":
+			w.Header().Set("Content-Type", "text/html")
+			w.Write(bytes.Repeat([]byte("x"), 4096))
+		case "/hop":
+			http.Redirect(w, r, "/page", http.StatusFound)
+		case "/evil":
+			http.Redirect(w, r, "http://10.0.0.1/page", http.StatusFound)
+		case "/evil6":
+			http.Redirect(w, r, "http://[::1]:"+strings.Split(r.Host, ":")[1]+"/page", http.StatusFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	f := testFetcher(t, srv)
+	ctx := context.Background()
+
+	p, err := f.FetchPage(ctx, srv.URL+"/hop", 1024)
+	if err != nil {
+		t.Fatalf("page through one redirect: %v", err)
+	}
+	if string(p.Body) != "<title>hi</title>" || !strings.HasSuffix(p.FinalURL, "/page") ||
+		!strings.HasPrefix(p.ContentType, "text/html") || gotRange != pageRange {
+		t.Fatalf("page = %+v range=%q", p, gotRange)
+	}
+	if p, err := f.FetchPage(ctx, srv.URL+"/huge", 100); err != nil || len(p.Body) != 100 {
+		t.Fatalf("oversize body should be cut to the cap, got %v %v", p, err)
+	}
+	for _, path := range []string{"/evil", "/evil6"} {
+		if _, err := f.FetchPage(ctx, srv.URL+path, 1024); !errors.Is(err, ErrBlocked) {
+			t.Fatalf("redirect %s to a private address: err = %v, want ErrBlocked", path, err)
+		}
+	}
+	real := NewFetcher("")
+	for _, u := range []string{"http://127.0.0.1/", "http://192.168.1.1/", "http://169.254.169.254/latest/meta-data/",
+		"http://[fd00::1]/", "http://example.com:8080/", "ftp://example.com/", "http://user@example.com/"} {
+		if _, err := real.FetchPage(ctx, u, 1024); !errors.Is(err, ErrBlocked) {
+			t.Errorf("%s: err = %v, want ErrBlocked", u, err)
+		}
+	}
+}

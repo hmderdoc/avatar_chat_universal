@@ -65,6 +65,11 @@ type Config struct {
 	NSFWKeywords    []string // words that veil a picture until /nsfw
 	NSFWKeywordsSet bool     // nsfw_keywords was given (an empty list disables the veil)
 
+	// Link previews: a card (site, title, summary, thumbnail) under the
+	// first plain link of a message, fetched with the image guards.
+	LinkPreviews        bool // link_previews = true (default) | false
+	LinkPreviewTTLHours int  // how long a fetched card is reused, default 24
+
 	// Avatar and handle-style storage. See CONFIG.md "Avatar storage".
 	AvatarStore       string // "auto" (default), "synchronet" or "local"
 	SynchronetDataDir string // explicit Synchronet data dir; overrides detection
@@ -102,6 +107,8 @@ func Default() *Config {
 		ImageSixel:           "auto",
 		ImageMaxMB:           5,
 		ImageCacheMB:         50,
+		LinkPreviews:         true,
+		LinkPreviewTTLHours:  24,
 		Raw:                  map[string]string{},
 	}
 }
@@ -208,6 +215,10 @@ func Load(path string) (*Config, error) {
 			cfg.ImageCacheDir = val
 		case "image_cache_mb":
 			cfg.ImageCacheMB = atoiOr(val, cfg.ImageCacheMB)
+		case "link_previews":
+			cfg.LinkPreviews = parseBool(val, cfg.LinkPreviews)
+		case "link_preview_ttl_hours":
+			cfg.LinkPreviewTTLHours = atoiOr(val, cfg.LinkPreviewTTLHours)
 		case "nsfw_keywords":
 			cfg.NSFWKeywordsSet = true
 			if strings.EqualFold(val, "none") {

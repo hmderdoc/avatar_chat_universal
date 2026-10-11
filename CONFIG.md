@@ -228,6 +228,46 @@ until the user types `/nsfw`.
 
 ---
 
+## Link previews
+
+The first plain link in a message (one that is not an image, video, audio
+or ANSI file, or a chat attachment) gets a preview card under the text, as
+on the futureland website: a bar down the left edge, a small thumbnail
+(12 by 4 cells at most) from the page's `og:image`, then the site name, the
+title (2 lines at most) and the description (2 lines at most). The card
+reads OpenGraph tags first, then twitter-card tags, then `<title>` and
+`<meta name="description">`. Text is shown as plain ASCII: entities are
+decoded and accented letters and typographic punctuation become their ASCII
+look-alikes. YouTube and Vimeo links get a card too; the door has no video
+player for them.
+
+A link shows `[loading preview...]` while it is fetched; a page that cannot
+be fetched, is not HTML or says nothing about itself gets no card. The rules
+are the website's (`lib/link-preview.js`): the same guards as inline images
+(http/https, ports 80 and 443, public addresses only, re-checked on each of
+at most 3 redirects), the first 256 KB requested, the first 192 KB read, an
+8 s limit. The thumbnail is drawn like any inline picture (24-bit or
+16-colour shade cells; never sixel) and kept in the picture cache.
+
+Cards are cached in `linkpreviews/` beside the picture cache, so a link
+posted again is not refetched: for `link_preview_ttl_hours` when it worked,
+one hour when it did not. Setting `image_cache_mb = 0` turns the card cache
+off too.
+
+A card whose link, line, title, description or site name contains an NSFW
+keyword shows only the site name and "NSFW link - /nsfw to show"; `/nsfw`
+reveals cards and pictures together.
+
+| Key                      | Default | Meaning |
+| ------------------------ | ------- | ------- |
+| `link_previews`          | `true`  | Turn preview cards on or off. |
+| `link_preview_ttl_hours` | `24`    | How long a fetched card is reused. |
+
+Card colours are the theme keys `card_site`, `card_title` and `card_edge`
+(see THEMING.md).
+
+---
+
 ## Attention cues
 
 - **Mentions.** A line from someone else that says your name as a whole
@@ -273,7 +313,9 @@ pills along the bottom of the selector.
 ├── users/
 │   └── <bbs_id>/
 │       └── <username>.ini                      -- per-user [avatar] and [style]
-└── (currently nothing else; future: history caches, prefs)
+├── imagecache/                                 -- inline pictures and card thumbnails
+├── linkpreviews/                               -- link-preview cards (JSON)
+└── termprobe.log                               -- one line per session: what the terminal answered
 ```
 
 In Synchronet mode (`avatar_store`) the door writes nothing here; it uses

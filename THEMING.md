@@ -108,6 +108,9 @@ secondary commands. Each row has a background, a pill text color, and a
 | `bubble_private` | `white\|bgred`     | PMs (regardless of side)       |
 | `bubble_mention` | `black\|bgbrown`   | Others' lines that say your name (PMs keep `bubble_private`) |
 | `mention_edge`   | `yellow`           | Bar down the left edge of a mention (foreground only) |
+| `card_site`      | `darkgray`         | Site name on a link-preview card (foreground only) |
+| `card_title`     | `white`            | Page title on a link-preview card (foreground only) |
+| `card_edge`      | `lightblue`        | Bar down the left edge of a link-preview card (foreground only) |
 
 ### Bubble header line
 

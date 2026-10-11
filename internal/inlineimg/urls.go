@@ -32,20 +32,11 @@ const MaxPerMessage = 3
 // FindImageURLs returns the image links in text, in order, without
 // duplicates, at most MaxPerMessage.
 func FindImageURLs(text string) []string {
-	if !strings.Contains(text, "://") {
-		return nil
-	}
 	var out []string
-	seen := map[string]bool{}
-	for _, m := range urlPattern.FindAllString(text, -1) {
-		u := trailing.ReplaceAllString(m, "")
-		if u == "" || seen[u] || !imageExt.MatchString(u) {
+	for _, u := range FindURLs(text) {
+		if !IsImageURL(u) {
 			continue
 		}
-		if p, err := url.Parse(u); err != nil || p.Host == "" {
-			continue
-		}
-		seen[u] = true
 		out = append(out, u)
 		if len(out) == MaxPerMessage {
 			break
@@ -53,6 +44,32 @@ func FindImageURLs(text string) []string {
 	}
 	return out
 }
+
+// FindURLs returns every http(s) link in text with a host, in order,
+// without duplicates, trailing punctuation trimmed.
+func FindURLs(text string) []string {
+	if !strings.Contains(text, "://") {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range urlPattern.FindAllString(text, -1) {
+		u := trailing.ReplaceAllString(m, "")
+		if u == "" || seen[u] {
+			continue
+		}
+		if p, err := url.Parse(u); err != nil || p.Host == "" {
+			continue
+		}
+		seen[u] = true
+		out = append(out, u)
+	}
+	return out
+}
+
+// IsImageURL reports whether u's path ends in an image extension the door
+// draws inline.
+func IsImageURL(u string) bool { return imageExt.MatchString(u) }
 
 // DefaultNSFWKeywords is the shell's default list (social_lib.js
 // NSFW_DEFAULT_KEYWORDS), used when the sysop sets no nsfw_keywords.

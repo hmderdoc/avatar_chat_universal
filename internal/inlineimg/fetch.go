@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -105,6 +106,56 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) ([]byte, error) {
 	}
 	f.store(rawURL, body)
 	return body, nil
+}
+
+// Page is an HTML page fetched for a link preview.
+type Page struct {
+	Body        []byte // at most the maxBytes asked for, cut silently
+	FinalURL    string // after redirects
+	ContentType string // lower case, parameters included
+}
+
+// pageRange asks for the first 256 KB, as the web's link-preview.js does;
+// a server that ignores Range is cut off by the read cap instead.
+const pageRange = "bytes=0-262143"
+
+// FetchPage fetches an HTML page through the same guards as Fetch (scheme,
+// ports, public addresses at dial time, each redirect re-checked). Unlike
+// Fetch it accepts a partial (206) reply, keeps only the first maxBytes of
+// the body instead of failing, reports the final URL and content type, and
+// never touches the image cache.
+func (f *Fetcher) FetchPage(ctx context.Context, rawURL string, maxBytes int64) (*Page, error) {
+	if err := f.checkURL(rawURL); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, f.Timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if f.UserAgent != "" {
+		req.Header.Set("User-Agent", f.UserAgent)
+	}
+	req.Header.Set("Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5")
+	req.Header.Set("Range", pageRange)
+	resp, err := f.httpClient().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		return nil, fmt.Errorf("inlineimg: %s: HTTP %d", rawURL, resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+	if err != nil && len(body) == 0 {
+		return nil, err
+	}
+	final := rawURL
+	if resp.Request != nil && resp.Request.URL != nil {
+		final = resp.Request.URL.String()
+	}
+	return &Page{Body: body, FinalURL: final, ContentType: strings.ToLower(resp.Header.Get("Content-Type"))}, nil
 }
 
 // checkURL applies the scheme and port rules (the address rule runs at dial
@@ -259,8 +310,12 @@ func (f *Fetcher) store(rawURL string, body []byte) {
 
 // trim deletes the least recently used cache files until the directory is
 // under CacheMax.
-func (f *Fetcher) trim() {
-	ents, err := os.ReadDir(f.CacheDir)
+func (f *Fetcher) trim() { TrimDir(f.CacheDir, ".img", f.CacheMax) }
+
+// TrimDir deletes the least recently modified files ending in ext from dir
+// until those files add up to at most max bytes. Other files are left alone.
+func TrimDir(dir, ext string, max int64) {
+	ents, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
@@ -272,22 +327,22 @@ func (f *Fetcher) trim() {
 	var files []file
 	var total int64
 	for _, e := range ents {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".img" {
+		if e.IsDir() || filepath.Ext(e.Name()) != ext {
 			continue
 		}
 		info, err := e.Info()
 		if err != nil {
 			continue
 		}
-		files = append(files, file{filepath.Join(f.CacheDir, e.Name()), info.Size(), info.ModTime()})
+		files = append(files, file{filepath.Join(dir, e.Name()), info.Size(), info.ModTime()})
 		total += info.Size()
 	}
-	if total <= f.CacheMax {
+	if total <= max {
 		return
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].mod.Before(files[j].mod) })
 	for _, fl := range files {
-		if total <= f.CacheMax {
+		if total <= max {
 			break
 		}
 		if os.Remove(fl.path) == nil {

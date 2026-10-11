@@ -17,6 +17,15 @@ func (a *App) EnableImages(cfg ImageConfig) {
 	a.transcript.Images = a.images
 }
 
+// EnableLinkPreviews turns on preview cards for plain links.
+func (a *App) EnableLinkPreviews(cfg LinkPreviewConfig) {
+	if cfg.Fetcher == nil {
+		return
+	}
+	a.cards = newCardManager(cfg)
+	a.transcript.Cards = a.cards
+}
+
 // sixelRegions is the sixel pictures that may be drawn this frame: none
 // while a screensaver, the TV lounge or a modal covers the transcript (the
 // pixels would fight it; the cell version shows instead).

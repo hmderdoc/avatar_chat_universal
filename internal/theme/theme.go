@@ -82,6 +82,13 @@ type Theme struct {
 	ModalRule   ansi.Attr // divider lines and "(none)"
 	ModalOK     ansi.Attr // confirmation and info lines
 	ViewerBar   ansi.Attr // image viewer header and footer rows
+	// ModalFrame is the box around every modal and dialog: foreground
+	// only, drawn on the panel's own background, so it stands apart from
+	// the bars and bubbles behind it.
+	ModalFrame ansi.Attr
+	// CloseButton is the "[X]" at the top left of every modal and of the
+	// chat screen; a click on it is Esc.
+	CloseButton ansi.Attr
 
 	// Dialogs drawn over the chat (the avatar upload instructions).
 	DialogBg    ansi.Attr
@@ -156,6 +163,8 @@ func Default() *Theme {
 		ModalRule:   ansi.DarkGray | ansi.BgBlack,
 		ModalOK:     ansi.LightGreen | ansi.BgBlack,
 		ViewerBar:   ansi.White | ansi.BgBlue,
+		ModalFrame:  ansi.Yellow,
+		CloseButton: ansi.LightRed | ansi.BgBlack,
 
 		DialogBg:    ansi.White | ansi.BgBlue,
 		DialogTitle: ansi.LightCyan | ansi.BgMagenta,
@@ -310,6 +319,10 @@ func colorSlot(t *Theme, key string) *ansi.Attr {
 		return &t.ModalOK
 	case "viewer_bar":
 		return &t.ViewerBar
+	case "modal_frame":
+		return &t.ModalFrame
+	case "close_button":
+		return &t.CloseButton
 	case "dialog_bg":
 		return &t.DialogBg
 	case "dialog_title":
@@ -489,6 +502,7 @@ var colorKeys = []string{
 	"notice_default",
 	"modal_bg", "modal_title", "modal_close", "modal_text", "modal_label",
 	"modal_select", "modal_hint", "modal_unread", "modal_rule", "modal_ok", "viewer_bar",
+	"modal_frame", "close_button",
 	"dialog_bg", "dialog_title", "dialog_head", "dialog_hint", "dialog_ok",
 	"veil_dark", "veil_light", "veil_label",
 	"tv_caption", "tv_chat", "tv_chat_dim",

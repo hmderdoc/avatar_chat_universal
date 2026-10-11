@@ -9,6 +9,22 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Added
 
+- door: **an `[X]` dismiss button** at the top left of every panel
+  (`/who`, `/channels`, `/settings`, the colour grid, `/img`, the avatar
+  upload dialog) and at the left end of the chat screen's top bar. A
+  click is Esc: the panel closes (unsaved `/settings` edits are dropped,
+  as with Esc) and on the chat screen it does what the `Esc exit` pill
+  does. Keys are unchanged.
+- door: **a colour grid in the `/settings` handle editor.** Enter, or a
+  click on a letter, opens "Pick a colour": the 16 CGA colours in two
+  rows, and on truecolor terminals a 12 x 5 hue/lightness block and a
+  grey ramp below them. Arrows move the `[ ]` cursor, Enter or a click
+  uses the colour, Esc or `[X]` cancels; the line under the grid names
+  CGA colours and calls the rest "custom". `f`/`F` and presets 1-4 still
+  work.
+- Theme keys `modal_frame` (the box around panels, foreground only) and
+  `close_button` (the `[X]`), 47 to 49; set in every shipped theme.
+
 - **A first-logon welcome.** Someone who has never chosen an avatar is
   asked to, as the door already did: the standalone page (after the name
   is taken, before the no-rooms prompt) and the Synchronet page show their
@@ -254,6 +270,16 @@ versioning follows loose [SemVer](https://semver.org/) (see
   is consumed instead of landing in the input line as two typed O's.
 
 ### Changed
+
+- door: every panel and dialog is drawn in a single-line box in the
+  theme's `modal_frame` colour, the title on its top edge; contents moved
+  in so nothing draws over it.
+- door: the `/settings` letter line names an off-palette colour by its
+  nearest CGA colour ("~light blue") instead of a hex code, and mentions
+  Enter.
+- door: the bottom bar's first pill is `/theme` (lists the themes, as
+  typing it does) when users may pick a theme, and is dropped otherwise;
+  the "Up/PgUp history" pill is gone. PgUp and Up still scroll.
 
 - **Handle tags are gone from the door.** `/settings` no longer edits a
   tag, the door doesn't draw tags on anyone's name, and it sends only the

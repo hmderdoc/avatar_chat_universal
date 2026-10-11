@@ -138,11 +138,14 @@ func (v *ImageViewer) Render(w io.Writer) error {
 	}
 	var buf bytes.Buffer
 	buf.WriteString("\x1b[2J\x1b[H")
+	th := orDefault(v.Theme)
 	if v.count() == 0 {
-		buf.WriteString("\x1b[1;1H")
-		buf.WriteString("\x1b[1;33;44m No images yet \x1b[0m")
-		buf.WriteString("\x1b[3;1HType /img after someone shares a bitmap.")
-		buf.WriteString("\x1b[5;1HEsc to close.")
+		f := v.boxed("No images yet", "")
+		f.PrintAt(2, 2, []byte(truncate("Type /img after someone shares a bitmap.", v.width-4)), th.ModalBg)
+		f.PrintAt(2, 4, []byte("Esc to close."), th.ModalBg)
+		if err := f.Render(&buf); err != nil {
+			return err
+		}
 		_, err := w.Write(buf.Bytes())
 		return err
 	}
@@ -167,16 +170,8 @@ func (v *ImageViewer) Render(w io.Writer) error {
 		v.scrollY = 0
 	}
 
-	// Header.
-	header := fmt.Sprintf(" Image %d/%d | %s | %dx%d | row %d-%d ",
-		v.index+1, v.count(), entry.Sender, img.Width, img.Height,
-		v.scrollY+1, minInt(v.scrollY+visibleH, imgH))
-	buf.WriteString("\x1b[1;1H\x1b[1;37;44m")
-	buf.WriteString(padOrTrim(header, v.width))
-	buf.WriteString("\x1b[0m")
-
-	// Image body.
-	visibleW := v.width
+	// Image body, inside the box.
+	visibleW := v.width - 2
 	if visibleW > img.Width {
 		visibleW = img.Width
 	}
@@ -185,7 +180,7 @@ func (v *ImageViewer) Render(w io.Writer) error {
 		if srcY >= imgH {
 			break
 		}
-		fmt.Fprintf(&buf, "\x1b[%d;1H", 2+y)
+		fmt.Fprintf(&buf, "\x1b[%d;2H", 2+y)
 		var prevFg, prevBg int = -1, -1
 		row := img.Cells[srcY]
 		for x := 0; x < visibleW; x++ {
@@ -207,32 +202,70 @@ func (v *ImageViewer) Render(w io.Writer) error {
 		buf.WriteString("\x1b[0m")
 	}
 
-	// Footer.
+	// The box, its header and footer: only the edges, since the picture's
+	// 256-colour cells aren't Frame cells.
+	header := fmt.Sprintf("Image %d/%d | %s | %dx%d | row %d-%d",
+		v.index+1, v.count(), entry.Sender, img.Width, img.Height,
+		v.scrollY+1, minInt(v.scrollY+visibleH, imgH))
 	footer := " Esc close   <-/-> prev/next   Up/Down scroll   Home/End first/last "
-	fmt.Fprintf(&buf, "\x1b[%d;1H\x1b[1;37;44m", v.height)
-	buf.WriteString(padOrTrim(footer, v.width))
-	buf.WriteString("\x1b[0m")
+	if err := renderEdges(&buf, v.boxed(header, footer)); err != nil {
+		return err
+	}
 
 	_, err := w.Write(buf.Bytes())
 	return err
 }
 
-// renderRaster paints one downloaded picture full screen.
-func (v *ImageViewer) renderRaster(w io.Writer, e *imageEntry) error {
+// boxed is a full-screen frame with the box drawn, header on its top
+// edge after the [X] and footer on its bottom edge.
+func (v *ImageViewer) boxed(header, footer string) *ansi.Frame {
 	th := orDefault(v.Theme)
 	f := ansi.NewFrame(0, 0, v.width, v.height, th.ModalBg)
 	f.Charset = v.Charset
+	drawBox(f, th, th.ModalBg)
+	boxTitle(f, header, th.ViewerBar)
+	if footer != "" {
+		f.PrintAt(2, v.height-1, []byte(truncate(footer, v.width-4)), th.ViewerBar)
+	}
+	return f
+}
+
+// renderEdges writes only f's outer rows and columns to buf.
+func renderEdges(buf *bytes.Buffer, f *ansi.Frame) error {
+	strips := []*ansi.Frame{
+		ansi.NewFrame(f.X, f.Y, f.W, 1, 0),
+		ansi.NewFrame(f.X, f.Y+f.H-1, f.W, 1, 0),
+		ansi.NewFrame(f.X, f.Y+1, 1, f.H-2, 0),
+		ansi.NewFrame(f.X+f.W-1, f.Y+1, 1, f.H-2, 0),
+	}
+	for _, s := range strips {
+		s.Charset = f.Charset
+		for y := 0; y < s.H; y++ {
+			for x := 0; x < s.W; x++ {
+				c := f.CellAt(s.X-f.X+x, s.Y-f.Y+y)
+				s.SetCell(x, y, c.Char, c.Attr)
+			}
+		}
+		if err := s.Render(buf); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// renderRaster paints one downloaded picture full screen.
+func (v *ImageViewer) renderRaster(w io.Writer, e *imageEntry) error {
 	bodyH := v.height - 2
 	if bodyH < 1 {
 		bodyH = 1
 	}
-	pic := v.zoom(e, v.width, bodyH)
+	pic := v.zoom(e, v.width-2, bodyH)
 	b := e.img.Bounds()
-	header := fmt.Sprintf(" Image %d/%d | %s | %dx%d | %s ", v.index+1, v.count(), e.from, b.Dx(), b.Dy(), e.url)
-	f.PrintAt(0, 0, []byte(padOrTrim(header, v.width)), th.ViewerBar)
-	x0 := 0
+	header := fmt.Sprintf("Image %d/%d | %s | %dx%d | %s", v.index+1, v.count(), e.from, b.Dx(), b.Dy(), e.url)
+	f := v.boxed(header, " Esc close   <-/-> prev/next   Home/End first/last ")
+	x0 := 1
 	if pic != nil {
-		x0 = (v.width - pic.Cols) / 2
+		x0 = 1 + (v.width-2-pic.Cols)/2
 		for r := 0; r < pic.Rows; r++ {
 			for c := 0; c < pic.Cols; c++ {
 				cell := pic.Cells[r*pic.Cols+c]
@@ -244,8 +277,6 @@ func (v *ImageViewer) renderRaster(w io.Writer, e *imageEntry) error {
 			}
 		}
 	}
-	footer := " Esc close   <-/-> prev/next   Home/End first/last "
-	f.PrintAt(0, v.height-1, []byte(padOrTrim(footer, v.width)), th.ViewerBar)
 	var buf bytes.Buffer
 	buf.WriteString("\x1b[2J")
 	if err := f.Render(&buf); err != nil {
@@ -257,19 +288,6 @@ func (v *ImageViewer) renderRaster(w io.Writer, e *imageEntry) error {
 	}
 	_, err := w.Write(buf.Bytes())
 	return err
-}
-
-func padOrTrim(s string, w int) string {
-	if len(s) >= w {
-		return s[:w]
-	}
-	pad := w - len(s)
-	out := make([]byte, len(s)+pad)
-	copy(out, s)
-	for i := len(s); i < len(out); i++ {
-		out[i] = ' '
-	}
-	return string(out)
 }
 
 func minInt(a, b int) int {

@@ -110,6 +110,10 @@ func (a *App) handleMouseCmd(args []string) {
 // handleMouse acts on one report. Returns exit like handleKey.
 func (a *App) handleMouse(k ansi.Key) (exit bool) {
 	if a.imageViewer != nil {
+		if closeHit(k, 0, 0) {
+			a.closeImageViewer()
+			return false
+		}
 		wk := wheelKey(k)
 		if wk.Type == ansi.KeyUp {
 			wk.Type = ansi.KeyLeft
@@ -183,13 +187,9 @@ func (a *App) clickPill(label string) (exit bool) {
 		cmd = cmd[:i] // "/img [3]" -> "/img", "Esc exit" -> "Esc"
 	}
 	switch cmd {
-	case "Esc":
+	case "Esc", "[X]":
 		return a.escape()
 	case "Tab":
-		return false
-	case "Up/PgUp":
-		a.transcript.Scroll += a.transcript.PageRows()
-		a.dirty = true
 		return false
 	case "/join", "/part", "/me", "/msg", "/r":
 		a.inputLine.SetValue(cmd + " ")
@@ -263,7 +263,11 @@ func (a *App) pauseMouse() func() {
 		return func() {}
 	}
 	a.setMouse(false)
-	return func() { a.setMouse(true) }
+	a.mousePaused = true
+	return func() {
+		a.mousePaused = false
+		a.setMouse(true)
+	}
 }
 
 // finishFrame writes the rest of an in-flight frame (blocking), so a

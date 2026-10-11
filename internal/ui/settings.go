@@ -61,17 +61,18 @@ func cycleColor(hex string, dir int) string {
 	return settingsColors[((idx+dir)%n+n)%n]
 }
 
+// colorLabel names a letter's colour without showing its hex: the CGA
+// name, or "~" and the nearest one for a colour off the palette.
 func colorLabel(hex string) string {
 	h := nickstyle.Hex(hex)
 	if h == "" {
 		return "default"
 	}
-	for i, c := range nickstyle.CGA {
-		if c == h {
-			return cgaNames[i]
-		}
+	if i := cgaIndex(h); i >= 0 {
+		return cgaNames[i]
 	}
-	return h
+	r, g, b, _ := nickstyle.RGB(h)
+	return "~" + cgaNames[handleQ.Nearest16(shadecellRGB(r, g, b))]
 }
 
 // settingsPanel holds the working copy; nothing is stored until S.
@@ -167,7 +168,21 @@ func (a *App) runSettings() settingsResult {
 		if k.Type == ansi.KeyEsc {
 			return settingsClosed
 		}
+		if k.Type == ansi.KeyMouse {
+			// The [X] is Esc; a letter picks it and opens the grid.
+			if p.frame != nil && closeHit(k, p.frame.X, p.frame.Y) {
+				return settingsClosed
+			}
+			if i, ok := p.letterAt(k); ok {
+				p.cursor = i
+				a.pickColour(p)
+			}
+			continue
+		}
 		switch k.Type {
+		case ansi.KeyEnter:
+			a.pickColour(p)
+			continue
 		case ansi.KeyLeft:
 			if p.cursor > 0 {
 				p.cursor--
@@ -257,6 +272,30 @@ func (a *App) runSettings() settingsResult {
 	}
 }
 
+// Where drawSettings puts the letters: frame row, first column, step.
+const (
+	lettersY    = 9
+	lettersX0   = 3
+	lettersStep = 2
+)
+
+// letterAt maps a left press on the letters row to a letter index.
+func (p *settingsPanel) letterAt(k ansi.Key) (int, bool) {
+	f := p.frame
+	if f == nil || k.Release || k.Button != ansi.MouseLeft || k.Y != f.Y+lettersY {
+		return 0, false
+	}
+	rel := k.X - f.X - lettersX0
+	if rel < 0 || rel%lettersStep != 0 {
+		return 0, false
+	}
+	i := rel / lettersStep
+	if i >= len(p.colors) || lettersX0+i*lettersStep >= f.W-4 {
+		return 0, false
+	}
+	return i, true
+}
+
 func padColors(c []string, n int) []string {
 	for len(c) < n {
 		c = append(c, "")
@@ -289,7 +328,7 @@ func (a *App) drawSettings(p *settingsPanel, av avatar.Avatar) {
 	if w > a.Width-2 {
 		w = a.Width - 2
 	}
-	h := 20
+	h := 21
 	if h > a.Height-1 {
 		h = a.Height - 1
 	}
@@ -315,12 +354,10 @@ func (a *App) drawSettings(p *settingsPanel, av avatar.Avatar) {
 	f.Clear()
 	truecolor := a.tvColorTrue()
 
-	for i := 0; i < w; i++ {
-		f.SetCell(i, 0, ' ', th.ModalTitle)
-	}
-	f.PrintAt(1, 0, []byte(" Settings"), th.ModalTitle)
-	closeHint := "[Esc] close "
-	f.PrintAt(w-len(closeHint), 0, []byte(closeHint), th.ModalClose)
+	drawBox(f, th, bg)
+	boxTitle(f, "Settings", th.ModalTitle)
+	closeHint := " [Esc] close "
+	f.PrintAt(w-1-len(closeHint), 0, []byte(closeHint), th.ModalClose)
 
 	rule := func(row int, label string) {
 		for i := 1; i < w-1; i++ {
@@ -350,17 +387,17 @@ func (a *App) drawSettings(p *settingsPanel, av avatar.Avatar) {
 
 	rule(8, "Handle")
 	// Letters row: each letter in its colour, the selected one bracketed.
-	col := 3
+	col := lettersX0
 	for i := 0; i < len(p.name) && col < w-4; i++ {
 		ch := p.name[i]
-		paintHandle(f, col, 9, string(ch), &nickstyle.Style{Colors: []string{p.colors[i]}}, bg, 1, truecolor)
+		paintHandle(f, col, lettersY, string(ch), &nickstyle.Style{Colors: []string{p.colors[i]}}, bg, 1, truecolor)
 		if i == p.cursor {
-			f.SetCell(col, 10, '^', th.ModalHint)
+			f.SetCell(col, lettersY+1, '^', th.ModalHint)
 		}
-		col += 2
+		col += lettersStep
 	}
 	if len(p.colors) > 0 {
-		info := fmt.Sprintf("letter %d: %-13s Left/Right move  f/F colour", p.cursor+1, colorLabel(p.colors[p.cursor]))
+		info := fmt.Sprintf("letter %d: %-14s Left/Right move  Enter pick  f/F colour", p.cursor+1, colorLabel(p.colors[p.cursor]))
 		f.PrintAt(3, 11, []byte(truncate(info, w-4)), bg)
 	}
 	f.PrintAt(3, 12, []byte("Preview: "), bg)
@@ -394,6 +431,6 @@ func (a *App) drawSettings(p *settingsPanel, av avatar.Avatar) {
 	if p.changed || p.themeChanged {
 		keys = "S save   Esc cancel (unsaved changes)"
 	}
-	f.PrintAt(3, h-1, []byte(truncate(keys, w-4)), hot)
+	f.PrintAt(3, h-2, []byte(truncate(keys, w-4)), hot)
 	_ = f.Render(a.Conn)
 }

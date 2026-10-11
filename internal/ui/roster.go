@@ -129,7 +129,6 @@ func (m *RosterModal) Render() {
 	f := m.Frame
 	f.Clear()
 
-	// Outer border.
 	th := orDefault(m.Theme)
 	titleAttr := th.ModalTitle
 	bgAttr := th.ModalBg
@@ -138,11 +137,9 @@ func (m *RosterModal) Render() {
 	labelAttr := th.ModalLabel
 	textAttr := th.ModalText
 
-	// Title row.
-	for x := 0; x < f.W; x++ {
-		f.SetCell(x, 0, ' ', titleAttr)
-	}
-	f.PrintAt(2, 0, []byte(" Who's Here "), titleAttr)
+	// Outer border and title.
+	drawBox(f, th, bgAttr)
+	boxTitle(f, "Who's Here", titleAttr)
 
 	// List pane: left half. Preview pane: right half.
 	listW := f.W / 2
@@ -188,7 +185,7 @@ func (m *RosterModal) Render() {
 	}
 
 	// Vertical separator.
-	for y := listStart - 1; y < listEnd+1 && y < f.H-1; y++ {
+	for y := listStart - 1; y < listEnd; y++ {
 		f.SetCell(listW+1, y, 0xB3, bgAttr) // CP437 │
 	}
 
@@ -218,7 +215,7 @@ func (m *RosterModal) Render() {
 	if hx < 1 {
 		hx = 1
 	}
-	f.PrintAt(hx, f.H-1, []byte(help), th.ModalHint)
+	f.PrintAt(hx, f.H-2, []byte(truncate(help, f.W-2)), th.ModalHint)
 }
 
 func truncate(s string, w int) string {
@@ -254,8 +251,12 @@ func padRight(s string, w int) string {
 	return s + strings.Repeat(" ", w-len(s))
 }
 
-// HandleMouse: the wheel moves the selection, a click picks a row.
+// HandleMouse: the wheel moves the selection, a click picks a row, the
+// [X] is Esc.
 func (m *RosterModal) HandleMouse(k ansi.Key) bool {
+	if closeHit(k, m.Frame.X, m.Frame.Y) {
+		return m.HandleKey(ansi.Key{Type: ansi.KeyEsc})
+	}
 	if idx, ok := m.list.pick(k); ok {
 		m.selected = idx
 		return false

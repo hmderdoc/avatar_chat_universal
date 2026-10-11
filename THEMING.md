@@ -165,13 +165,15 @@ status lines.
 
 ### Pickers and panels
 
-`/who`, `/channels`, `/settings` and the `/img` viewer.
+`/who`, `/channels`, `/settings` (and its colour grid) and the `/img`
+viewer. Each is drawn in a box with an `[X]` at its top left that a mouse
+click treats as Esc; the upload dialog gets the same box.
 
 | Key            | Default                | Used for                                        |
 | -------------- | ---------------------- | ----------------------------------------------- |
 | `modal_bg`     | `lightgray\|bgblack`   | Fill and plain list text                        |
-| `modal_title`  | `yellow\|bgblue`       | The title bar                                   |
-| `modal_close`  | `white\|bgblue`        | "[Esc] close" on the title bar                  |
+| `modal_title`  | `yellow\|bgblue`       | The title on the box's top edge                 |
+| `modal_close`  | `white\|bgblue`        | "[Esc] close" on the `/settings` top edge       |
 | `modal_text`   | `white\|bgblack`       | Values and key letters                          |
 | `modal_label`  | `lightcyan\|bgblack`   | Section headings and field labels               |
 | `modal_select` | `black\|bgcyan`        | The highlighted row                             |
@@ -179,7 +181,9 @@ status lines.
 | `modal_unread` | `yellow\|bgblack`      | Rooms with unread lines in `/channels`          |
 | `modal_rule`   | `darkgray\|bgblack`    | Divider lines, "(none)"                         |
 | `modal_ok`     | `lightgreen\|bgblack`  | Info line in `/settings`                        |
-| `viewer_bar`   | `white\|bgblue`        | `/img` header and footer rows                   |
+| `viewer_bar`   | `white\|bgblue`        | `/img` header and footer on the box edges       |
+| `modal_frame`  | `yellow`               | The box around each panel and dialog (foreground only, drawn on the panel's background) |
+| `close_button` | `lightred\|bgblack`    | The `[X]` at the top left of each panel and of the chat screen's top bar |
 
 ### Dialogs
 

@@ -103,10 +103,8 @@ func (m *ChannelsModal) Render() {
 	selAttr := th.ModalSelect
 	unreadAttr := th.ModalUnread
 
-	for x := 0; x < f.W; x++ {
-		f.SetCell(x, 0, ' ', titleAttr)
-	}
-	f.PrintAt(2, 0, []byte(" Channels "), titleAttr)
+	drawBox(f, th, listAttr)
+	boxTitle(f, "Channels", titleAttr)
 
 	nameW := f.W - 30
 	if nameW > 30 {
@@ -168,7 +166,7 @@ func (m *ChannelsModal) Render() {
 	if hx < 1 {
 		hx = 1
 	}
-	f.PrintAt(hx, f.H-1, []byte(truncate(help, f.W-2)), th.ModalHint)
+	f.PrintAt(hx, f.H-2, []byte(truncate(help, f.W-2)), th.ModalHint)
 }
 
 // applyChannelChoice acts on what the user picked in the /channels list.
@@ -214,8 +212,11 @@ func (a *App) partCurrent() (exit bool) {
 }
 
 // HandleMouse: the wheel moves the selection, a click picks a row and a
-// click on the picked row joins it, like Enter.
+// click on the picked row joins it, like Enter; the [X] is Esc.
 func (m *ChannelsModal) HandleMouse(k ansi.Key) bool {
+	if closeHit(k, m.Frame.X, m.Frame.Y) {
+		return m.HandleKey(ansi.Key{Type: ansi.KeyEsc})
+	}
 	if idx, ok := m.list.pick(k); ok {
 		if idx == m.selected {
 			return m.HandleKey(ansi.Key{Type: ansi.KeyEnter})

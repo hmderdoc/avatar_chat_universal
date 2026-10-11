@@ -80,6 +80,7 @@ type App struct {
 	OnMouseSave   func(on bool) error
 	ResizeEvery   time.Duration
 	mouseOn       bool
+	mousePaused   bool // pauseMouse turned it off for a sub-program
 	lastSizeProbe time.Time
 
 	// Per-user themes. ThemeDir holds the themes/<name>.ini files /theme
@@ -329,6 +330,8 @@ func (a *App) layout() {
 	a.actionBar.BarAttr = th.TopActionBar
 	a.actionBar.ButtonAttr = th.TopActionPill
 	a.actionBar.HighlightAttr = th.TopActionHighlight
+	a.actionBar.Close = true
+	a.actionBar.CloseAttr = th.CloseButton
 	a.bottomActionBar.BarAttr = th.BottomActionBar
 	a.bottomActionBar.ButtonAttr = th.BottomActionPill
 	a.bottomActionBar.HighlightAttr = th.BottomActionHighlight
@@ -1549,7 +1552,8 @@ func (a *App) confirmUpload() bool {
 	th := a.theme()
 	frame := ansi.NewFrame(x, y, w, h, th.DialogBg)
 	frame.Charset = a.Charset
-	frame.PrintAt(2, 0, []byte(" Avatar Upload "), th.DialogTitle)
+	drawBox(frame, th, th.DialogBg)
+	boxTitle(frame, "Avatar Upload", th.DialogTitle)
 
 	lines := []struct {
 		text string
@@ -1577,10 +1581,15 @@ func (a *App) confirmUpload() bool {
 		if ln.text == "" {
 			continue
 		}
-		frame.PrintAt(1, 1+i, []byte(ln.text), ln.attr)
+		frame.PrintAt(2, 1+i, []byte(truncate(ln.text, w-4)), ln.attr)
 	}
 	if err := frame.Render(a.Conn); err != nil {
 		return false
+	}
+	// The avatar action paused the mouse for the transfer; the [X] needs it.
+	if a.mousePaused {
+		a.setMouse(true)
+		defer a.setMouse(false)
 	}
 
 	for {
@@ -1595,6 +1604,9 @@ func (a *App) confirmUpload() bool {
 		case ansi.KeyEnter:
 			return true
 		case ansi.KeyEsc:
+			return false
+		}
+		if closeHit(k, frame.X, frame.Y) {
 			return false
 		}
 		if k.Type == ansi.KeyChar && (k.Rune == 'q' || k.Rune == 'Q') {
@@ -1653,9 +1665,9 @@ func (a *App) openImageViewer() {
 	}
 	a.imageViewer = NewImageViewer(images, a.Width, usable)
 	a.imageViewer.Theme = a.theme()
+	a.imageViewer.Charset = a.Charset // the box, and raster cells
 	if rasters := a.rasterItems(); len(rasters) > 0 {
 		a.imageViewer.WithRasters(rasters, a.zoomPicture)
-		a.imageViewer.Charset = a.Charset
 	}
 	if len(images) > 0 {
 		a.Session.MarkBitmapViewed(a.imageViewer.CurrentIndex())
@@ -1690,6 +1702,7 @@ func (a *App) ApplyTheme(t *theme.Theme) {
 	a.actionBar.BarAttr = t.TopActionBar
 	a.actionBar.ButtonAttr = t.TopActionPill
 	a.actionBar.HighlightAttr = t.TopActionHighlight
+	a.actionBar.CloseAttr = t.CloseButton
 	a.bottomActionBar.BarAttr = t.BottomActionBar
 	a.bottomActionBar.ButtonAttr = t.BottomActionPill
 	a.bottomActionBar.HighlightAttr = t.BottomActionHighlight
@@ -1896,12 +1909,17 @@ func (a *App) refreshActionBar() {
 		ActionButton{Label: "Tab user", optional: true},
 		ActionButton{Label: "Esc exit"},
 	)
-	a.actionBar.Buttons = fitButtons(buttons, a.Width)
+	// The [X] at the left end does what Esc exit does.
+	a.actionBar.Buttons = fitButtons(buttons, a.Width-closeW)
 
 	// Bottom bar focuses on the commands that ARE NOT in the top bar so
-	// the two rows don't duplicate each other.
-	a.bottomActionBar.Buttons = []ActionButton{
-		{Label: "Up/PgUp history"},
+	// the two rows don't duplicate each other. /theme leads when users
+	// may pick one.
+	var bottom []ActionButton
+	if a.UserThemes {
+		bottom = append(bottom, ActionButton{Label: "/theme"})
+	}
+	a.bottomActionBar.Buttons = append(bottom, []ActionButton{
 		{Label: "/join"},
 		{Label: "/part"},
 		{Label: "/me"},
@@ -1909,7 +1927,7 @@ func (a *App) refreshActionBar() {
 		{Label: "/r"},
 		{Label: "/clear"},
 		{Label: "/quit"},
-	}
+	}...)
 }
 
 // composeInto writes the current UI frame to w. The render loop composes

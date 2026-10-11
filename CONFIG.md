@@ -194,7 +194,7 @@ also the on-screen action bars and `/help`.
 | `/avatar set <base64>`        | Power-user: set your avatar from a base64 120-byte payload.                   |
 | `/avatar off`                 | Disable your avatar without losing it (re-enable by picking again).           |
 | `/avatar pick`                | Open the selector directly.                                                   |
-| `/settings` / `/prefs` / `/options` | Settings panel: avatar (pick, draw, upload, disable) and handle style (a colour per letter, presets). On Synchronet these are the user's BBS-wide records. |
+| `/settings` / `/prefs` / `/options` | Settings panel: avatar (pick, draw, upload, disable) and handle style (a colour per letter, presets). Enter (or a click on a letter) opens a colour grid for the letter: the 16 CGA colours, plus a larger palette on truecolor terminals; `f`/`F` still step through the 16. On Synchronet these are the user's BBS-wide records. |
 | `/ignore [name]` / `/unignore <name>` | `/ignore` lists who you ignore; `/ignore <name>` hides their lines, art, private messages and join/leave notices, live and in history, and they never ring; `/unignore` undoes it. Kept per user in the door's prefs (`<data>/prefs/`). Names compare without case, and a bridge-relayed `<name> text` line counts. With `shared_ignore_file` set, people ignored in the shell are hidden too (change those there). |
 | `/theme [name\|default]`      | List the colour themes, switch (remembered per user), or go back to the sysop's. See THEMING.md. |
 | `/mouse [on\|off]`            | Turn mouse reporting on or off for yourself (remembered). See "Mouse". |
@@ -469,6 +469,10 @@ With it on:
 - Clicking an inline picture opens it in `/img`; clicking a `► … /play`
   line plays it; clicking a link card prints its full URL.
 - In `/channels`, a click selects a row and a second click joins it.
+- The `[X]` at the top left of every panel closes it as Esc does; the one
+  at the left end of the top bar is the `Esc exit` pill.
+- In `/settings`, clicking a letter opens the colour grid for it; in the
+  grid, clicking a swatch uses it.
 
 Terminals that can't report the mouse ignore the request. While reports
 are on, most terminals want Shift held to select text for copying.

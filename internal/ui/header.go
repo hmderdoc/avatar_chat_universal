@@ -146,9 +146,18 @@ type ActionBar struct {
 	// keep working; setting it updates BarAttr.
 	Attr ansi.Attr
 
+	// Close puts the "[X]" dismiss button at the left end, before the
+	// pills, in CloseAttr; a click on it reports the label "[X]". It takes
+	// closeW columns from the pills.
+	Close     bool
+	CloseAttr ansi.Attr
+
 	// pills is where Render drew each visible button, for mouse clicks.
 	pills []pillSpan
 }
+
+// closeW is the columns the "[X]" and its gap take on an ActionBar.
+const closeW = len("[X]") + 2
 
 type pillSpan struct {
 	x0, x1 int // columns, x1 exclusive
@@ -191,6 +200,11 @@ func (a *ActionBar) Render() {
 		return
 	}
 	x := 1
+	if a.Close {
+		a.Frame.PrintAt(x, 0, []byte("[X]"), a.CloseAttr)
+		a.pills = append(a.pills, pillSpan{x0: x, x1: x + 3, label: "[X]"})
+		x += closeW
+	}
 	for i, btn := range a.Buttons {
 		if i > 0 {
 			x += 2 // gap between pills, rendered in bar bg

@@ -13,12 +13,7 @@ require (
 
 require (
 	github.com/hmderdoc/shadecell v0.1.0
-	github.com/hmderdoc/termprobe v0.1.0
+	github.com/hmderdoc/termprobe v0.2.0
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	golang.org/x/crypto v0.0.0-20210421170649-83a5a9bb288b // indirect
 )
-
-// termprobe's sixel/cell-size detection (termprobe 08d6d81) is not tagged
-// yet. Drop this line and `go get github.com/hmderdoc/termprobe@<tag>` once
-// it is pushed and tagged.
-replace github.com/hmderdoc/termprobe => ../termprobe

@@ -7,7 +7,7 @@ github.com/gorilla/websocket
 # github.com/hmderdoc/shadecell v0.1.0
 ## explicit; go 1.25
 github.com/hmderdoc/shadecell
-# github.com/hmderdoc/termprobe v0.1.0 => ../termprobe
+# github.com/hmderdoc/termprobe v0.2.0
 ## explicit; go 1.25
 github.com/hmderdoc/termprobe
 # github.com/mattn/go-colorable v0.1.14
@@ -43,4 +43,3 @@ golang.org/x/sys/windows
 # golang.org/x/term v0.42.0
 ## explicit; go 1.25.0
 golang.org/x/term
-# github.com/hmderdoc/termprobe => ../termprobe

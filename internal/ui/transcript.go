@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
-	"github.com/hmderdoc/avatar_chat_universal/internal/audiolink"
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
 	"github.com/hmderdoc/avatar_chat_universal/internal/inlineimg"
@@ -45,8 +44,9 @@ type Transcript struct {
 	// Cards, when set, adds a preview card under a message's first plain
 	// link (nil = no cards).
 	Cards *cardManager
-	// AudioLabel, when set, adds a one-line card under each audio link
-	// (nil = audio links stay text only).
+	// AudioLabel, when set, adds a one-line card under each audio link;
+	// it returns "" for a link that is not one (nil = audio links stay
+	// text only).
 	AudioLabel func(url string) string
 	// SixelRegions lists, after Render, the fully visible pictures that
 	// carry a sixel version, in frame coordinates, for the App to blit
@@ -353,10 +353,10 @@ func (t *Transcript) addAudio(b *block, msg *chat.Message) {
 		return
 	}
 	for _, u := range inlineimg.FindURLs(msg.Str) {
-		if audiolink.Ext(u) == "" {
+		label := t.AudioLabel(u)
+		if label == "" {
 			continue
 		}
-		label := t.AudioLabel(u)
 		if len(label) > b.width {
 			label = label[:b.width]
 		}

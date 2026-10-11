@@ -59,6 +59,11 @@ type Meta struct {
 	Description string `json:"description"`
 	Image       string `json:"image"`
 	SiteName    string `json:"siteName"`
+	// Audio is the page's og:audio stream (absolute http(s)), and AudioType
+	// its og:audio:type, when the page announces one: a track page whose
+	// link does not itself end in .mp3 can still be played.
+	Audio     string `json:"audio,omitempty"`
+	AudioType string `json:"audioType,omitempty"`
 }
 
 // ErrNoCard means the link has nothing worth a card: not HTML, no
@@ -201,7 +206,13 @@ func Parse(html []byte, baseURL string) *Meta {
 		// Wikipedia og:image carries "&amp;"); link-preview.js keeps them.
 		image = resolve(decodeEntities(raw), baseURL)
 	}
+	audio := ""
+	if raw := first("og:audio:secure_url", "og:audio", "og:audio:url"); raw != "" {
+		audio = resolve(decodeEntities(raw), baseURL)
+	}
 	return &Meta{
+		Audio:       audio,
+		AudioType:   strings.ToLower(strings.TrimSpace(first("og:audio:type"))),
 		Title:       Clean(title, titleCap),
 		Description: Clean(first("og:description", "twitter:description", "description"), descriptionCap),
 		Image:       image,
@@ -344,6 +355,9 @@ func Fold(s string) string {
 	return b.String()
 }
 
+// cacheVersion is mixed into every cache file name; bump it when Meta grows.
+const cacheVersion = "v2\x00"
+
 // Cache keeps cards on disk under Dir, one JSON file per URL, trimmed
 // oldest-first to Max bytes. A nil *Cache or empty Dir caches nothing.
 type Cache struct {
@@ -359,7 +373,10 @@ type cacheFile struct {
 }
 
 func (c *Cache) path(rawURL string) string {
-	sum := sha256.Sum256([]byte(rawURL))
+	// The version prefix retires cards cached before a Meta field was
+	// added (v2: og:audio), so they are fetched again rather than served
+	// without it for a whole TTL.
+	sum := sha256.Sum256([]byte(cacheVersion + rawURL))
 	return filepath.Join(c.Dir, hex.EncodeToString(sum[:16])+".json")
 }
 

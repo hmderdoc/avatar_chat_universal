@@ -136,18 +136,32 @@ func (f *Fetcher) FetchPage(ctx context.Context, rawURL string, maxBytes int64) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, f.Timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	get := func(ranged bool) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		if f.UserAgent != "" {
+			req.Header.Set("User-Agent", f.UserAgent)
+		}
+		req.Header.Set("Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5")
+		if ranged {
+			req.Header.Set("Range", pageRange)
+		}
+		return f.httpClient().Do(req)
+	}
+	resp, err := get(true)
 	if err != nil {
 		return nil, err
 	}
-	if f.UserAgent != "" {
-		req.Header.Set("User-Agent", f.UserAgent)
-	}
-	req.Header.Set("Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5")
-	req.Header.Set("Range", pageRange)
-	resp, err := f.httpClient().Do(req)
-	if err != nil {
-		return nil, err
+	if resp.StatusCode == http.StatusRequestedRangeNotSatisfiable {
+		// Some servers refuse any Range on a generated page (Synchronet's
+		// web server answers 416 for its dynamic pages). Ask again for the
+		// whole page; the read cap below still keeps only maxBytes.
+		resp.Body.Close()
+		if resp, err = get(false); err != nil {
+			return nil, err
+		}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {

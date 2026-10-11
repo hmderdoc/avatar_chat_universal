@@ -170,3 +170,29 @@ func TestLayoutCardCaps(t *testing.T) {
 		t.Errorf("cut description not marked: %q", last)
 	}
 }
+
+// A link whose card announced og:audio is a track /play can play: the
+// stream is fetched, the type picks the decoder, the title names it. A
+// veiled card does not offer its audio until /nsfw.
+func TestCardAudioTrack(t *testing.T) {
+	page := "https://bbs.example/?page=records&track=a.mp3"
+	m := readyCards(map[string]*linkprev.Meta{
+		page:                     {Title: "A Song", Audio: "https://bbs.example/api/stream?f=a", AudioType: "audio/mpeg"},
+		"https://x.example/nude": {Title: "nude beach", Audio: "https://x.example/b.ogg"},
+		"https://x.example/none": {Title: "no audio"},
+	})
+	stream, ext, name, ok := m.audio(page)
+	if !ok || stream != "https://bbs.example/api/stream?f=a" || ext != "mp3" || name != "A Song" {
+		t.Fatalf("audio(page) = %q %q %q %v", stream, ext, name, ok)
+	}
+	if _, _, _, ok := m.audio("https://x.example/none"); ok {
+		t.Error("a card without og:audio offered a track")
+	}
+	if _, _, _, ok := m.audio("https://x.example/nude"); ok {
+		t.Error("a veiled card offered its audio")
+	}
+	m.revealed = true
+	if _, ext, _, ok := m.audio("https://x.example/nude"); !ok || ext != "ogg" {
+		t.Errorf("revealed: ext = %q ok = %v", ext, ok)
+	}
+}

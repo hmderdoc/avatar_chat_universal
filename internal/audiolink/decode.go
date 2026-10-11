@@ -47,6 +47,26 @@ func Ext(rawURL string) string {
 	return strings.ToLower(m[1])
 }
 
+// ExtForType maps an og:audio:type (a MIME type) to the extension Open
+// takes, "" when it is not one the door knows.
+func ExtForType(mime string) string {
+	switch strings.ToLower(strings.TrimSpace(strings.SplitN(mime, ";", 2)[0])) {
+	case "audio/mpeg", "audio/mp3", "audio/mpeg3", "audio/x-mpeg-3":
+		return "mp3"
+	case "audio/ogg", "audio/vorbis", "application/ogg":
+		return "ogg"
+	case "audio/flac", "audio/x-flac":
+		return "flac"
+	case "audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave":
+		return "wav"
+	case "audio/opus":
+		return "opus"
+	case "audio/aac", "audio/mp4", "audio/x-m4a":
+		return "m4a"
+	}
+	return ""
+}
+
 // Playable reports whether the door can decode ext.
 func Playable(ext string) bool {
 	switch ext {

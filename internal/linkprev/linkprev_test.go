@@ -185,3 +185,29 @@ func TestGetAndCache(t *testing.T) {
 		t.Fatal("canceled fetch was cached")
 	}
 }
+
+// A track page announces its stream with og:audio; the door plays that.
+func TestParseOpenGraphAudio(t *testing.T) {
+	html := `<head>
+<meta property="og:type" content="music.song">
+<meta property="og:title" content="Data Bleeds Your Name: Vektrax Records">
+<meta property="og:audio" content="https://bbs.example/api/files.ssjs?call=stream-file&amp;dir=mp3s&amp;file=a.mp3">
+<meta property="og:audio:type" content="Audio/MPEG">
+</head>`
+	m := Parse([]byte(html), "https://bbs.example/?page=records&track=a.mp3")
+	if m.Audio != "https://bbs.example/api/files.ssjs?call=stream-file&dir=mp3s&file=a.mp3" {
+		t.Errorf("audio = %q", m.Audio)
+	}
+	if m.AudioType != "audio/mpeg" {
+		t.Errorf("audio type = %q", m.AudioType)
+	}
+	// secure_url wins; a non-http scheme is refused.
+	m = Parse([]byte(`<meta property="og:audio" content="http://x.example/a.ogg"><meta property="og:audio:secure_url" content="https://x.example/a.ogg">`), "https://x.example/")
+	if m.Audio != "https://x.example/a.ogg" {
+		t.Errorf("secure_url: audio = %q", m.Audio)
+	}
+	m = Parse([]byte(`<meta property="og:audio" content="javascript:alert(1)">`), "https://x.example/")
+	if m.Audio != "" {
+		t.Errorf("javascript: audio = %q", m.Audio)
+	}
+}

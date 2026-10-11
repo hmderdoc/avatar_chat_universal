@@ -397,3 +397,29 @@ func TestFetchPageGuards(t *testing.T) {
 		}
 	}
 }
+
+// A server that answers 416 to any Range (Synchronet's web server on a
+// generated page) is asked again for the whole page.
+func TestFetchPageRetriesWithoutRangeAfter416(t *testing.T) {
+	var ranges []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ranges = append(ranges, r.Header.Get("Range"))
+		if r.Header.Get("Range") != "" {
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<meta property="og:audio" content="/a.mp3">`))
+	}))
+	defer srv.Close()
+	p, err := testFetcher(t, srv).FetchPage(context.Background(), srv.URL+"/?page=records&track=a.mp3", 1<<10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ranges) != 2 || ranges[0] == "" || ranges[1] != "" {
+		t.Fatalf("requests' Range headers = %q, want one ranged then one plain", ranges)
+	}
+	if !strings.Contains(string(p.Body), "og:audio") {
+		t.Fatalf("body = %q", p.Body)
+	}
+}

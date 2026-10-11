@@ -8,6 +8,7 @@ import (
 
 	"github.com/hmderdoc/shadecell"
 
+	"github.com/hmderdoc/avatar_chat_universal/internal/audiolink"
 	"github.com/hmderdoc/avatar_chat_universal/internal/inlineimg"
 	"github.com/hmderdoc/avatar_chat_universal/internal/linkprev"
 )
@@ -116,6 +117,31 @@ func (m *cardManager) lookup(rawURL, line string, truecolor bool) (cardView, boo
 		return v, true
 	}
 	return cardView{}, false
+}
+
+// audio returns the og:audio stream of rawURL's card, once its card has
+// loaded and is not veiled: the stream to fetch, the format to decode it
+// as, and the track's title.
+func (m *cardManager) audio(rawURL string) (stream, ext, name string, ok bool) {
+	e := m.entries[rawURL]
+	if e == nil || e.state != imgReady || e.meta == nil || e.meta.Audio == "" {
+		return "", "", "", false
+	}
+	if e.nsfw && !m.revealed {
+		return "", "", "", false
+	}
+	ext = audiolink.Ext(e.meta.Audio)
+	if ext == "" {
+		ext = audiolink.ExtForType(e.meta.AudioType)
+	}
+	if ext == "" {
+		ext = "mp3" // og:audio with no type: by far the common case
+	}
+	name = e.meta.Title
+	if name == "" {
+		name = audiolink.Name(e.meta.Audio)
+	}
+	return e.meta.Audio, ext, name, true
 }
 
 // cardHost is the line a card leads with: the site's name, or its host.

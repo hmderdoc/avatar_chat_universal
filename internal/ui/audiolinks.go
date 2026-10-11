@@ -45,10 +45,26 @@ func (a *App) EnableAudioLinks(cfg AudioLinkConfig) {
 	a.transcript.AudioLabel = a.audioLabel
 }
 
-// audioLabel is the card text for an audio link.
+// audioTrack resolves a link in chat to something /play can play: the link
+// itself when it names an audio file, else the og:audio stream its preview
+// card announced (a track page, such as a record label's). ok is false for
+// any other link.
+func (a *App) audioTrack(u string) (stream, ext, name string, ok bool) {
+	if ext := audiolink.Ext(u); ext != "" {
+		return u, ext, audiolink.Name(u), true
+	}
+	if a.cards != nil {
+		return a.cards.audio(u)
+	}
+	return "", "", "", false
+}
+
+// audioLabel is the card text for an audio link, "" when u is not one.
 func (a *App) audioLabel(u string) string {
-	ext := audiolink.Ext(u)
-	name := audiolink.Name(u)
+	_, ext, name, ok := a.audioTrack(u)
+	if !ok {
+		return ""
+	}
 	note := string(rune(audioNote)) + " "
 	switch {
 	case !audiolink.Playable(ext):
@@ -72,7 +88,7 @@ func (a *App) audioURLs() []string {
 			continue
 		}
 		for _, u := range inlineimg.FindURLs(m.Str) {
-			if audiolink.Ext(u) != "" && !seen[u] {
+			if _, _, _, ok := a.audioTrack(u); ok && !seen[u] {
 				seen[u] = true
 				out = append(out, u)
 			}
@@ -103,7 +119,8 @@ func (a *App) handlePlay(args []string) {
 				if i == 9 {
 					break
 				}
-				a.Session.Notice(fmt.Sprintf("  /play %d  %s", i+1, audiolink.Name(u)))
+				_, _, name, _ := a.audioTrack(u)
+				a.Session.Notice(fmt.Sprintf("  /play %d  %s", i+1, name))
 			}
 			return
 		}
@@ -115,21 +132,22 @@ func (a *App) handlePlay(args []string) {
 		n = v
 	}
 	u := urls[n-1]
-	if !audiolink.Playable(audiolink.Ext(u)) {
-		a.Session.Notice("/play: ." + audiolink.Ext(u) + " files can't be played here (mp3, ogg, flac and wav can)")
+	stream, ext, name, _ := a.audioTrack(u)
+	if !audiolink.Playable(ext) {
+		a.Session.Notice("/play: ." + ext + " files can't be played here (mp3, ogg, flac and wav can)")
 		return
 	}
 	a.stopAudio()
 	ctx, cancel := context.WithCancel(context.Background())
 	a.alinks.cancel = cancel
 	a.alinks.loading = u
-	a.Session.Notice("loading " + audiolink.Name(u) + "...")
+	a.Session.Notice("loading " + name + "...")
 	a.dirty = true
 	go func(f *inlineimg.Fetcher, results chan<- audioResult) {
-		data, err := f.Fetch(ctx, u)
+		data, err := f.Fetch(ctx, stream)
 		var src audiolink.Source
 		if err == nil {
-			src, err = audiolink.Open(data, audiolink.Ext(u))
+			src, err = audiolink.Open(data, ext)
 		}
 		select {
 		case results <- audioResult{url: u, src: src, err: err}:

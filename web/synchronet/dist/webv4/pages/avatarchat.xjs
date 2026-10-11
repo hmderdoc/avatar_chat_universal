@@ -1,0 +1,167 @@
+<!--Avatar Chat-->
+<?xjs
+    /* Avatar Chat for a stock webv4 site. Everything the page needs from
+       the BBS comes from lib/avatarchat-page.js (built from
+       avatar_chat_universal/web/synchronet/src); the browser code is
+       root/avatarchat/app.js and talks only to ./api/avatarchat.ssjs,
+       ./api/avatarchat-upload.ssjs and webv4's own event stream. */
+    load(settings.web_lib + 'avatarchat-page.js');
+    var avatarChatPage = AvatarChatPage.pageConfig();
+    var avatarChatPageJson = AvatarChatPage.pageConfigJson();
+?>
+<link rel="stylesheet" href="./avatarchat/app.css">
+
+<div class="avatar-chat-web">
+    <div class="avatar-chat-shell">
+        <div class="avatar-chat-layout">
+            <aside class="avatar-chat-sidebar">
+                <div class="avatar-chat-sidebar-section">
+                    <div class="avatar-chat-sidebar-header">
+                        <h4 class="avatar-chat-sidebar-heading">Public Rooms</h4>
+                    </div>
+<?xjs if (avatarChatPage.isLoggedIn) { ?>
+                    <button id="avatar-chat-room-open" class="avatar-chat-sidebar-button" type="button">Create Room</button>
+<?xjs } ?>
+                    <div id="avatar-chat-rooms" class="avatar-chat-nav-list"></div>
+                </div>
+
+                <div class="avatar-chat-sidebar-section">
+                    <div class="avatar-chat-sidebar-header">
+                        <h4 class="avatar-chat-sidebar-heading">Private Chats</h4>
+                    </div>
+                    <div id="avatar-chat-private" class="avatar-chat-nav-list"></div>
+                </div>
+<?xjs if (avatarChatPage.isLoggedIn) { ?>
+                <div class="avatar-chat-sidebar-section">
+                    <button id="avatar-chat-style-open" class="avatar-chat-sidebar-button" type="button">Handle Style</button>
+                </div>
+<?xjs } ?>
+            </aside>
+
+            <div class="avatar-chat-main">
+                <div class="avatar-chat-chatpanel">
+                    <div class="avatar-chat-topbar">
+                        <div class="avatar-chat-topbar-meta">
+                            <span class="avatar-chat-topbar-brand">Avatar Chat</span>
+                            <span id="avatar-chat-channel-label" class="avatar-chat-topbar-chip">#main</span>
+                            <button id="avatar-chat-count" class="avatar-chat-count" type="button">0 users</button>
+                            <span id="avatar-chat-room-count" class="avatar-chat-topbar-chip avatar-chat-topbar-chip-muted">rooms 1</span>
+                            <span id="avatar-chat-server" class="avatar-chat-topbar-chip avatar-chat-topbar-chip-muted"></span>
+                        </div>
+                        <div id="avatar-chat-motd" class="avatar-chat-motd">
+                            <span class="avatar-chat-motd-label">MOTD</span>
+                            <div id="avatar-chat-motd-window" class="avatar-chat-motd-window">
+                                <div id="avatar-chat-motd-track" class="avatar-chat-motd-track">
+                                    <span id="avatar-chat-motd-primary" class="avatar-chat-motd-item">Loading MOTD...</span>
+                                    <span id="avatar-chat-motd-clone" class="avatar-chat-motd-item avatar-chat-motd-item-clone" aria-hidden="true"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="avatar-chat-status" class="avatar-chat-status" aria-live="polite">
+                        <div id="avatar-chat-status-text" class="avatar-chat-status-text"></div>
+                        <div class="avatar-chat-status-actions">
+                            <button id="avatar-chat-status-retry" class="avatar-chat-status-button" type="button">Retry now</button>
+                        </div>
+                    </div>
+
+                    <div id="avatar-chat-messages" class="avatar-chat-messages">
+                        <div class="avatar-chat-empty">Loading chat history...</div>
+                    </div>
+
+<?xjs if (avatarChatPage.isLoggedIn) { ?>
+                    <form id="avatar-chat-form" class="avatar-chat-form" autocomplete="off">
+                        <input id="avatar-chat-ansi-file" type="file" accept=".ans,.asc,.nfo,.diz,.ice,.txt,text/plain" hidden>
+                        <input id="avatar-chat-media-file" type="file" hidden>
+                        <div class="avatar-chat-compose-tools">
+                            <button id="avatar-chat-ansi-open" class="avatar-chat-upload-button" type="button">ANSI File</button>
+                            <button id="avatar-chat-media-open" class="avatar-chat-upload-button" type="button" hidden>Attach</button>
+                            <button id="avatar-chat-ansi-clear" class="avatar-chat-upload-clear" type="button" hidden>Clear</button>
+                            <div id="avatar-chat-ansi-dropzone" class="avatar-chat-dropzone" role="button" tabindex="0" aria-label="Drop a file">
+                                Drop ANSI art here or click to choose
+                            </div>
+                        </div>
+                        <div id="avatar-chat-upload-summary" class="avatar-chat-upload-summary" aria-live="polite">
+                            Upload an ANSI file to send it as image art.
+                        </div>
+                        <div class="avatar-chat-compose-row">
+                            <input id="avatar-chat-input" class="avatar-chat-input" type="text" maxlength="1000" placeholder="Type a message...">
+                            <button class="avatar-chat-send" type="submit">Send</button>
+                        </div>
+                    </form>
+<?xjs } else { ?>
+                    <div class="avatar-chat-login">
+                        Log in from the web interface to send messages and open private chats.
+                    </div>
+<?xjs } ?>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="avatar-chat-users-modal" class="avatar-chat-modal" aria-hidden="true">
+        <div id="avatar-chat-users" class="avatar-chat-modal-card avatar-chat-users-modal-card" role="dialog" aria-modal="true" aria-labelledby="avatar-chat-users-title">
+            <div class="avatar-chat-users-header">
+                <strong id="avatar-chat-users-title">Users</strong>
+                <button id="avatar-chat-users-close" class="avatar-chat-users-close" type="button">x</button>
+            </div>
+            <div id="avatar-chat-users-list" class="avatar-chat-users-list"></div>
+        </div>
+    </div>
+
+<?xjs if (avatarChatPage.isLoggedIn) { ?>
+    <div id="avatar-chat-room-modal" class="avatar-chat-modal" aria-hidden="true">
+        <div class="avatar-chat-modal-card" role="dialog" aria-modal="true" aria-labelledby="avatar-chat-room-modal-title">
+            <div class="avatar-chat-modal-header">
+                <h4 id="avatar-chat-room-modal-title" class="avatar-chat-modal-title">Create Room</h4>
+            </div>
+            <p class="avatar-chat-modal-text">Name a new public room. Letters, numbers, dashes, and underscores are allowed.</p>
+            <form id="avatar-chat-room-form" class="avatar-chat-sidebar-form" autocomplete="off">
+                <input id="avatar-chat-room-input" class="avatar-chat-sidebar-input" type="text" maxlength="32" placeholder="new-room">
+                <button class="avatar-chat-sidebar-button" type="submit">Create</button>
+            </form>
+            <div class="avatar-chat-modal-actions">
+                <button id="avatar-chat-room-cancel" class="avatar-chat-sidebar-button" type="button">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="avatar-chat-style-modal" class="avatar-chat-modal" aria-hidden="true">
+        <div class="avatar-chat-modal-card avatar-chat-style-card" role="dialog" aria-modal="true" aria-labelledby="avatar-chat-style-title">
+            <div class="avatar-chat-modal-header">
+                <h4 id="avatar-chat-style-title" class="avatar-chat-modal-title">Handle Style</h4>
+            </div>
+            <p class="avatar-chat-modal-text">Colours for each letter of your name and an optional tag. The same style shows in the door, the terminal shell and on the web.</p>
+            <div id="avatar-chat-style-preview" class="avatar-chat-style-preview"></div>
+            <div id="avatar-chat-style-letters" class="avatar-chat-style-letters"></div>
+            <div class="avatar-chat-style-row">
+                <label>Preset
+                    <select id="avatar-chat-style-preset">
+                        <option value="">Choose...</option>
+                        <option value="solid">Solid</option>
+                        <option value="gradient">Gradient</option>
+                        <option value="rainbow">Rainbow</option>
+                        <option value="clear">Clear colours</option>
+                    </select>
+                </label>
+                <label>From <input id="avatar-chat-style-a" type="color" value="#55ffff"></label>
+                <label>To <input id="avatar-chat-style-b" type="color" value="#ff55ff"></label>
+            </div>
+            <div class="avatar-chat-style-row">
+                <label>Tag <input id="avatar-chat-style-tag" type="text" maxlength="<? write(String(avatarChatPage.maxTag)); ?>" placeholder="(none)"></label>
+                <label>Text <input id="avatar-chat-style-tag-fg" type="color" value="#ffff55"></label>
+                <label>Back <input id="avatar-chat-style-tag-bg" type="color" value="#0000aa"></label>
+            </div>
+            <div id="avatar-chat-style-status" class="avatar-chat-modal-text" aria-live="polite"></div>
+            <div class="avatar-chat-modal-actions">
+                <button id="avatar-chat-style-save" class="avatar-chat-sidebar-button" type="button">Save</button>
+                <button id="avatar-chat-style-cancel" class="avatar-chat-sidebar-button" type="button">Cancel</button>
+            </div>
+        </div>
+    </div>
+<?xjs } ?>
+</div>
+
+<script>window.AvatarChatConfig = <? write(avatarChatPageJson); ?>;</script>
+<script src="./avatarchat/app.js"></script>

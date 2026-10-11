@@ -27,7 +27,9 @@ defaults shown below.
 To self-host, run `avatar_chat_server -addr :10088` and point `host`/`port`
 at it. The protocol is the same as `futureland.today:10088`, so the JS
 `avatar_chat` door interoperates against either. See
-[INSTALL.md](INSTALL.md#self-hosting-the-chat-server).
+[INSTALL.md](INSTALL.md#self-hosting-the-chat-server). The same server can
+put a web chat page in front of your chat or someone else's: see
+[WEB.md](WEB.md).
 
 ---
 
@@ -470,6 +472,38 @@ Terminals that can't report the mouse ignore the request. While reports
 are on, most terminals want Shift held to select text for copying.
 Reporting is switched off while the art editor, the avatar picker or
 editor, or a Zmodem transfer runs, and when the door exits.
+
+---
+
+## Synchronet web page (`[web]`)
+
+The Synchronet web page in [web/synchronet](web/synchronet/README.md) reads
+this same file, so the page and the door use the same chat server and rooms.
+It reads the door's `host`, `port`, `default_channel`, `motd_channel`,
+`max_history`, `images`, `link_previews`, `link_preview_ttl_hours` and
+`nsfw_keywords` keys exactly as the door does. The keys below only matter
+to the web page. Keep them in a `[web]` section at the **end** of the
+file: Synchronet's INI reader files every key after a section header under
+that section, so door keys placed after `[web]` would be invisible to the
+web page. The door reads the file flat and ignores these keys, which is why
+each one starts with `web_`.
+
+| Key | Default | Notes |
+| --- | ------- | ----- |
+| `web_uploads` | `off` | Let logged-in users drop or attach pictures, sound and video on the web page. Files are stored on this BBS's own web server under `<web_root>/chatmedia/<date>/`. |
+| `web_upload_types` | `png, jpg, gif, mp3, wav, mp4` | Which types are taken, judged by the file's bytes, never its name. Also known: `webp`, `ogg`, `flac`, `m4a`, `webm`, which need a line in `ctrl/mime_types.ini` first (the web page's README lists them). |
+| `web_upload_max_mb` | `20` | Largest picture or sound file. |
+| `web_upload_video_max_mb` | `50` | Largest video. Video is stored as uploaded, not re-encoded. |
+| `web_upload_retention_days` | `7` | Day folders older than this are removed when someone uploads. `0` keeps everything. |
+| `web_uploads_per_hour` | `30` | Uploads one user may finish per hour. `0` means no limit. |
+| `web_upload_dir` | `<web_root>/chatmedia` | Where files go. If you move it, also set `web_upload_url_base`. |
+| `web_upload_url_base` | from the request | Public address of that folder, e.g. `https://bbs.example.org/chatmedia`. Without it, the link is built from the request's host and scheme, honouring `X-Forwarded-Host` and `X-Forwarded-Proto` from a reverse proxy. |
+| `web_motd_host_qwkid` | empty | QWK ID of the BBS whose sysop may post to the MOTD room. The old JS bundle's `motd_host_qwkid` at the top of the file still counts. |
+| `web_motd_host_system` | empty | The same by BBS name, when no QWK ID is set. With neither set, the sysop may post when `host` is `127.0.0.1`/`localhost` or equals the BBS name. |
+
+The web page finds this file at `<exec>/../xtrn/avatar_chat_universal/avatar_chat.ini`.
+To keep it elsewhere, set `avatar_chat_ini = /path/to/avatar_chat.ini` in
+the `[web]` section of `ctrl/modopts.ini`.
 
 ---
 

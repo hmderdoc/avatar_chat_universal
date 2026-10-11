@@ -26,8 +26,20 @@ versioning follows loose [SemVer](https://semver.org/) (see
   avatar actions plus a handle editor with per-letter colours, Solid /
   Gradient / Rainbow / Clear presets and a tag. On Synchronet it edits the
   shared `data/chat/nickstyle/NNNN.json` record.
+- **Attention cues.** Lines that say your name (whole word, optional `@`,
+  the website's rule) get the new `bubble_mention` / `mention_edge` theme
+  colours. A PM or mention rings the bell (`bell = true`, at most once per
+  3 s). Unread PMs show as a flashing `/r [N]` pill.
+- **Real channel list.** `/channels` (or `/list`) lists joined channels with
+  unread counts and every room in the server's `public_channels` registry
+  with live user counts; Enter joins, `L` leaves. `/join` now keeps the old
+  channel joined, counting its messages on a flashing `/channels [N]` pill,
+  and the header shows how many channels you're in.
 
 ### Changed
+
+- `/part` leaves the current channel for the previous one instead of
+  exiting; it still exits when it's the last channel.
 
 - A disabled avatar ("no avatar") is now a settled choice: the picker no
   longer opens at every launch for it. `-select` still forces it.

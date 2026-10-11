@@ -323,6 +323,7 @@ func run() error {
 		app.TVPopupSecs = cfg.TVPopupSecs
 	}
 	app.TVAvatars = cfg.TVAvatars
+	app.Bell = cfg.Bell
 
 	// Theme overlay. Main config sets the baseline; theme can override
 	// any color or screensaver field. Missing theme files are not fatal --

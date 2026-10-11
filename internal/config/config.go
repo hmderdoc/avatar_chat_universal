@@ -52,6 +52,10 @@ type Config struct {
 	TVPopupSecs  int    // how long a comment lingers over the video (5-15, default 10)
 	TVAvatars    bool   // show avatars in popups (default off; they compete with video)
 
+	// Bell sends BEL (0x07) when a PM or a mention of your name arrives,
+	// at most once every few seconds. Default on.
+	Bell bool
+
 	// Avatar and handle-style storage. See CONFIG.md "Avatar storage".
 	AvatarStore       string // "auto" (default), "synchronet" or "local"
 	SynchronetDataDir string // explicit Synchronet data dir; overrides detection
@@ -84,6 +88,7 @@ func Default() *Config {
 		TVColor:              "auto",
 		TVPopupSecs:          10,
 		AvatarStore:          "auto",
+		Bell:                 true,
 		Raw:                  map[string]string{},
 	}
 }
@@ -178,6 +183,8 @@ func Load(path string) (*Config, error) {
 			cfg.TVPopupSecs = atoiOr(val, cfg.TVPopupSecs)
 		case "tv_avatars":
 			cfg.TVAvatars = parseBool(val, cfg.TVAvatars)
+		case "bell":
+			cfg.Bell = parseBool(val, cfg.Bell)
 		case "avatar_store":
 			if val != "" {
 				cfg.AvatarStore = strings.ToLower(val)

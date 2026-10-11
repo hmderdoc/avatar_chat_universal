@@ -62,6 +62,10 @@ type block struct {
 	stamp   string
 	host    string   // BBS / system name from Nick.Host, rendered after stamp
 	rows    []string // wrapped lines of text
+	// mention[i] marks rows[i] as part of a message from someone else that
+	// says our name (chat.MentionsName); those rows get the mention colours
+	// and a bar down the left edge. nil when no row is a mention.
+	mention []bool
 	avatar  avatar.Avatar
 	width   int // bubble inner width (without spaces)
 
@@ -185,8 +189,8 @@ func (t *Transcript) buildBlocks(messages []*chat.Message, bubbleW int) []*block
 			prev := out[n-1]
 			prev.stamp = stamp
 			prev.style = msg.Nick.Style
-			prev.rows = append(prev.rows, "")
-			prev.rows = append(prev.rows, wrapText(msg.Str, bubbleW)...)
+			prev.addRows([]string{""}, false)
+			prev.addRows(wrapText(msg.Str, bubbleW), left && chat.MentionsName(msg.Str, t.SelfName))
 			continue
 		}
 
@@ -197,9 +201,9 @@ func (t *Transcript) buildBlocks(messages []*chat.Message, bubbleW int) []*block
 			style:   msg.Nick.Style,
 			stamp:   stamp,
 			host:    msg.Nick.Host,
-			rows:    wrapText(msg.Str, bubbleW),
 			width:   bubbleW,
 		}
+		b.addRows(wrapText(msg.Str, bubbleW), left && chat.MentionsName(msg.Str, t.SelfName))
 		if msg.Nick.Avatar != "" {
 			if a, err := avatar.FromBase64(msg.Nick.Avatar); err == nil {
 				b.avatar = a
@@ -215,6 +219,24 @@ func (t *Transcript) buildBlocks(messages []*chat.Message, bubbleW int) []*block
 	}
 	return out
 }
+
+// addRows appends wrapped lines to the bubble, flagging them as a mention.
+func (b *block) addRows(rows []string, mention bool) {
+	if mention && b.mention == nil {
+		b.mention = make([]bool, len(b.rows), len(b.rows)+len(rows))
+	}
+	b.rows = append(b.rows, rows...)
+	if b.mention != nil {
+		for range rows {
+			b.mention = append(b.mention, mention)
+		}
+	}
+}
+
+// mentionEdge is CP437 ▌ (left half block): painted in the theme's
+// MentionEdge colour over the bubble's own background, it draws a bar down
+// the left of a mention without changing the bubble's width.
+const mentionEdge = 0xDD
 
 // renderBlock paints a single block at row y in the transcript frame.
 func (t *Transcript) renderBlock(b *block, y int) {
@@ -286,8 +308,16 @@ func (t *Transcript) renderBlock(b *block, y int) {
 		if row >= t.Frame.H {
 			break
 		}
+		attr := bubbleAttr
+		hl := i < len(b.mention) && b.mention[i]
+		if hl && !b.private {
+			attr = th.BubbleMention
+		}
 		padded := " " + padTo(line, b.width) + " "
-		t.Frame.PrintAt(bubbleX, row, []byte(padded), bubbleAttr)
+		t.Frame.PrintAt(bubbleX, row, []byte(padded), attr)
+		if hl {
+			t.Frame.SetCell(bubbleX, row, mentionEdge, (attr&^0x0F)|(th.MentionEdge&0x0F))
+		}
 	}
 
 	// Avatar (drawn last so it's on top of any overlap).

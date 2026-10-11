@@ -47,6 +47,8 @@ type Theme struct {
 	BubbleLeft    ansi.Attr // others' messages
 	BubbleSelf    ansi.Attr // own messages
 	BubblePrivate ansi.Attr // private (PM) messages, regardless of side
+	BubbleMention ansi.Attr // others' public lines that say your name
+	MentionEdge   ansi.Attr // fg of the bar down the left edge of a mention
 
 	// Bubble header line (speaker, timestamp, BBS host).
 	SpeakerLeft ansi.Attr
@@ -96,6 +98,8 @@ func Default() *Theme {
 		BubbleLeft:    ansi.Black | ansi.BgCyan,
 		BubbleSelf:    ansi.White | ansi.BgBlue,
 		BubblePrivate: ansi.White | ansi.BgRed,
+		BubbleMention: ansi.Black | ansi.BgBrown,
+		MentionEdge:   ansi.Yellow,
 
 		SpeakerLeft: ansi.LightMagenta,
 		SpeakerSelf: ansi.LightCyan,
@@ -204,6 +208,10 @@ func colorSlot(t *Theme, key string) *ansi.Attr {
 		return &t.BubbleSelf
 	case "bubble_private":
 		return &t.BubblePrivate
+	case "bubble_mention":
+		return &t.BubbleMention
+	case "mention_edge":
+		return &t.MentionEdge
 	case "speaker_left":
 		return &t.SpeakerLeft
 	case "speaker_self":

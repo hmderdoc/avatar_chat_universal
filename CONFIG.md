@@ -177,9 +177,9 @@ also the on-screen action bars and `/help`.
 | `/msg <user> <text>` / `/m`   | Send a private message.                                                       |
 | `/r <text>` / `/reply`        | Reply to the last private sender.                                             |
 | `/who`                        | Open the roster modal listing everyone in the channel.                        |
-| `/channels`                   | List active channels.                                                         |
-| `/join <channel>` / `/j`      | Switch to another channel.                                                    |
-| `/part` / `/p`                | Leave the current channel and rejoin the default.                             |
+| `/channels` / `/list`         | Room list: your joined channels with unread counts, then every public room the server registers, with user counts. Enter joins or switches, `L` leaves. |
+| `/join <channel>` / `/j`      | Switch to another channel. The one you leave stays joined: its new messages count as unread (top-bar `/channels [N]`). |
+| `/part` / `/p`                | Leave the current channel and go back to the one you were in before; parting the last one exits the door. |
 | `/clear`                      | Clear the local transcript view.                                              |
 | `/img`                        | Open the image (BITMAP) viewer modal for any inline images received.          |
 | `/avatar`                     | Open the avatar manager (selector with Upload/Disable/Editor pills).          |
@@ -187,6 +187,28 @@ also the on-screen action bars and `/help`.
 | `/avatar off`                 | Disable your avatar without losing it (re-enable by picking again).           |
 | `/avatar pick`                | Open the selector directly.                                                   |
 | `/settings` / `/prefs` / `/options` | Settings panel: avatar (pick, draw, upload, disable) and handle style (a colour per letter, presets, a tag). On Synchronet these are the user's BBS-wide records. |
+
+---
+
+## Attention cues
+
+- **Mentions.** A line from someone else that says your name as a whole
+  word (an optional `@`, any case; the same rule as the website) is drawn in
+  the theme's `bubble_mention` colours with a `mention_edge` bar down its
+  left side.
+- **PMs.** Each PM received since you last sent a line counts on a flashing
+  `/r [N]` pill in the top bar.
+- **Other channels.** Messages on joined channels you aren't viewing count on
+  a flashing `/channels [N]` pill. A mention there rings the bell too.
+- **Bell.** A PM or a mention sends the terminal bell, at most once every 3
+  seconds.
+
+| Key    | Default | Meaning                                       |
+| ------ | ------- | --------------------------------------------- |
+| `bell` | `true`  | Ring BEL on an incoming PM or mention of you. |
+
+On a narrow bar the badges push out `/help` and `Tab user` first, never
+`Esc exit`.
 
 ---
 

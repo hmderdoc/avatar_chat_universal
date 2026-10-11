@@ -90,6 +90,42 @@ type ActionButton struct {
 	Label     string
 	Highlight bool // true for new-image / new-PM / etc. attention indicators
 	Hidden    bool // suppress this frame; the App toggles this each tick to flash
+	// optional buttons are the first to go when the bar is too narrow for
+	// everything (see fitButtons); attention pills are never optional.
+	optional bool
+}
+
+// buttonsWidth is the columns ActionBar.Render uses for btns: one leading
+// space, each pill padded by a space either side, two-space gaps.
+func buttonsWidth(btns []ActionButton) int {
+	if len(btns) == 0 {
+		return 0
+	}
+	w := 1 + 2*(len(btns)-1)
+	for _, b := range btns {
+		w += len(b.Label) + 2
+	}
+	return w
+}
+
+// fitButtons drops optional buttons, last first, until the bar fits in
+// width columns, so a flashing badge never pushes "Esc exit" off an
+// 80-column screen.
+func fitButtons(btns []ActionButton, width int) []ActionButton {
+	for buttonsWidth(btns) > width {
+		drop := -1
+		for i := len(btns) - 1; i >= 0; i-- {
+			if btns[i].optional {
+				drop = i
+				break
+			}
+		}
+		if drop < 0 {
+			break
+		}
+		btns = append(btns[:drop:drop], btns[drop+1:]...)
+	}
+	return btns
 }
 
 // ActionBar is a horizontal toolbar of ActionButtons. The bar is filled

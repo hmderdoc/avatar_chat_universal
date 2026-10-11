@@ -36,6 +36,10 @@ type Session struct {
 
 	OnMessage func(*Message) // called from Cycle for each incoming/local msg
 	OnNotice  func(string)   // called for join/leave/ping notices
+	// OnBackground is called for a message that arrives on a joined channel
+	// other than the one being viewed. The message is counted as unread for
+	// that channel and is NOT added to the transcript.
+	OnBackground func(channel string, m *Message)
 
 	mu          sync.Mutex
 	messages    []*Message
@@ -52,6 +56,13 @@ type Session struct {
 	userCount     int       // last-known size of current channel
 	lastReply     string    // sender of the most recent received PM (for /r)
 	tuner         *Tuner    // active TV-lounge tuner for the channel (nil = off)
+
+	// joined lists every channel we stay subscribed to, in join order; the
+	// viewed one (Channel) is always among them. unread counts messages
+	// that arrived on the others since they were last viewed (lowercase
+	// channel name -> count).
+	joined []string
+	unread map[string]int
 }
 
 func NewSession(client *Client, self *Nick, channel string) *Session {
@@ -66,6 +77,8 @@ func NewSession(client *Client, self *Nick, channel string) *Session {
 		styleCache:     map[string]*nickstyle.Style{},
 		nickNames:      map[string]string{},
 		bitmapMaxQueue: 20,
+		joined:         []string{channel},
+		unread:         map[string]int{},
 	}
 }
 
@@ -454,8 +467,10 @@ func (s *Session) Reconnect(ctx context.Context) error {
 	if err := s.Client.Reconnect(ctx); err != nil {
 		return err
 	}
-	if err := s.Client.Subscribe("chat", s.locMessages(s.Channel)); err != nil {
-		return fmt.Errorf("resubscribe %s: %v", s.Channel, err)
+	for _, ch := range s.Joined() {
+		if err := s.Client.Subscribe("chat", s.locMessages(ch)); err != nil {
+			return fmt.Errorf("resubscribe %s: %v", ch, err)
+		}
 	}
 	if s.Self != nil && s.Self.Name != "" {
 		_ = s.Client.Subscribe("chat", s.locMessages(s.Self.Name))
@@ -468,7 +483,9 @@ func (s *Session) Close() error {
 	if s.Client == nil {
 		return nil
 	}
-	_ = s.Client.Unsubscribe("chat", s.locMessages(s.Channel))
+	for _, ch := range s.Joined() {
+		_ = s.Client.Unsubscribe("chat", s.locMessages(ch))
+	}
 	return s.Client.Close()
 }
 
@@ -587,6 +604,12 @@ func (s *Session) handleUpdate(pkt *Packet) {
 	}
 	channel := parts[1]
 	leaf := parts[2]
+
+	// A joined channel we're not looking at: count it, don't show it.
+	if !strings.EqualFold(channel, s.Channel) && !s.isSelfName(channel) {
+		s.handleBackground(channel, leaf, pkt)
+		return
+	}
 
 	switch strings.ToUpper(pkt.Oper) {
 	case "WRITE":
@@ -744,25 +767,38 @@ func (s *Session) Who() ([]string, error) {
 	return out, nil
 }
 
-// JoinChannel switches the active channel: unsubscribes from the current,
-// subscribes to the new one, clears local history, and reloads from the
-// server. Subsequent Send calls go to the new channel.
+// JoinChannel switches the viewed channel. The channel we leave stays
+// joined (still subscribed, its new messages counted as unread) until
+// Leave; a channel already joined is just switched to. Local history is
+// cleared and reloaded from the server, and Send goes to the new channel.
 func (s *Session) JoinChannel(channel string, historyCount int) error {
 	if channel == "" {
 		return fmt.Errorf("session: empty channel name")
 	}
-	old := s.Channel
-	if old != "" {
-		_ = s.Client.Unsubscribe("chat", s.locMessages(old))
+	if strings.EqualFold(channel, s.Channel) {
+		return fmt.Errorf("already in %s", s.Channel)
+	}
+	if s.isSelfName(channel) {
+		return fmt.Errorf("%s is your private mailbox, not a channel", channel)
+	}
+	if known := s.joinedName(channel); known != "" {
+		channel = known
+	} else {
+		if err := s.Client.Subscribe("chat", s.locMessages(channel)); err != nil {
+			return err
+		}
+		s.mu.Lock()
+		s.joined = append(s.joined, channel)
+		s.mu.Unlock()
 	}
 	s.mu.Lock()
 	s.Channel = channel
 	s.messages = nil
 	s.tuner = nil // each channel has its own TV state; history below re-sets it
+	delete(s.unread, strings.ToLower(channel))
+	// Most recently viewed last, so /part falls back to the previous one.
+	s.joined = moveToEnd(s.joined, channel)
 	s.mu.Unlock()
-	if err := s.Client.Subscribe("chat", s.locMessages(channel)); err != nil {
-		return err
-	}
 	if historyCount > 0 {
 		var hist []*Message
 		var lastTime int64
@@ -792,6 +828,207 @@ func (s *Session) JoinChannel(channel string, historyCount int) error {
 		s.OnNotice(fmt.Sprintf("joined %s", channel))
 	}
 	return nil
+}
+
+// Leave unsubscribes from a joined channel that is not the one being
+// viewed. Use PartCurrent for the viewed channel.
+func (s *Session) Leave(channel string) error {
+	name := s.joinedName(channel)
+	if name == "" {
+		return fmt.Errorf("not in %s", channel)
+	}
+	if strings.EqualFold(name, s.Channel) {
+		return fmt.Errorf("%s is the channel you're in; use /part", name)
+	}
+	_ = s.Client.Unsubscribe("chat", s.locMessages(name))
+	s.mu.Lock()
+	s.joined = removeName(s.joined, name)
+	delete(s.unread, strings.ToLower(name))
+	s.mu.Unlock()
+	return nil
+}
+
+// PartCurrent leaves the viewed channel and switches to the most recently
+// viewed other joined channel, returning its name. It returns "" and
+// changes nothing when the viewed channel is the only one joined: the
+// caller decides what parting the last channel means (the door exits).
+func (s *Session) PartCurrent(historyCount int) (string, error) {
+	s.mu.Lock()
+	next := ""
+	for i := len(s.joined) - 1; i >= 0; i-- {
+		if !strings.EqualFold(s.joined[i], s.Channel) {
+			next = s.joined[i]
+			break
+		}
+	}
+	s.mu.Unlock()
+	if next == "" {
+		return "", nil
+	}
+	old := s.Channel
+	if err := s.JoinChannel(next, historyCount); err != nil {
+		return "", err
+	}
+	_ = s.Client.Unsubscribe("chat", s.locMessages(old))
+	s.mu.Lock()
+	s.joined = removeName(s.joined, old)
+	s.mu.Unlock()
+	return next, nil
+}
+
+// Joined returns the joined channels in join order (most recently viewed
+// last).
+func (s *Session) Joined() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, len(s.joined))
+	copy(out, s.joined)
+	return out
+}
+
+// Unread returns how many messages arrived on a joined channel since it
+// was last viewed.
+func (s *Session) Unread(channel string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.unread[strings.ToLower(channel)]
+}
+
+// UnreadTotal sums Unread over every joined channel.
+func (s *Session) UnreadTotal() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, c := range s.unread {
+		n += c
+	}
+	return n
+}
+
+// RoomInfo is one row of the /channels list.
+type RoomInfo struct {
+	Name    string
+	Users   int // -1 when the server didn't say
+	Unread  int
+	Joined  bool
+	Current bool
+}
+
+// roomListCap bounds the WHO round trips a /channels listing makes.
+const roomListCap = 40
+
+// Rooms lists the joined channels plus every public room the server
+// registers under public_channels (the registry the web chat writes when a
+// room is created), with live user counts. The MOTD channel is hidden.
+// Blocking: one KEYS plus one WHO per room, bounded by roomListCap.
+func (s *Session) Rooms() []RoomInfo {
+	seen := map[string]bool{}
+	var names []string
+	add := func(n string) {
+		n = strings.TrimSpace(n)
+		key := strings.ToLower(n)
+		if n == "" || seen[key] || strings.EqualFold(n, s.MotdChannel) || s.isSelfName(n) {
+			return
+		}
+		seen[key] = true
+		names = append(names, n)
+	}
+	for _, n := range s.Joined() {
+		add(n)
+	}
+	if s.Client != nil {
+		if keys, err := s.Client.Keys("chat", "public_channels"); err == nil {
+			sort.Slice(keys, func(i, j int) bool { return strings.ToLower(keys[i]) < strings.ToLower(keys[j]) })
+			for _, k := range keys {
+				add(k)
+			}
+		}
+	}
+	out := make([]RoomInfo, 0, len(names))
+	for i, n := range names {
+		r := RoomInfo{Name: n, Users: -1, Unread: s.Unread(n), Joined: s.joinedName(n) != "", Current: strings.EqualFold(n, s.Channel)}
+		if i < roomListCap && s.Client != nil {
+			if entries, err := s.Client.Who("chat", s.locMessages(n)); err == nil {
+				r.Users = countDistinctNicks(entries)
+			}
+		}
+		out = append(out, r)
+	}
+	// Joined rooms first (current at the top), then the rest alphabetically.
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Current != out[j].Current {
+			return out[i].Current
+		}
+		if out[i].Joined != out[j].Joined {
+			return out[i].Joined
+		}
+		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+	})
+	return out
+}
+
+// handleBackground deals with traffic on a joined channel that isn't being
+// viewed: messages are counted (and handed to OnBackground), presence and
+// TV markers are ignored until the user switches there.
+func (s *Session) handleBackground(channel, leaf string, pkt *Packet) {
+	if leaf != "messages" || !strings.EqualFold(strings.ToUpper(pkt.Oper), "WRITE") {
+		return
+	}
+	name := s.joinedName(channel)
+	if name == "" {
+		return
+	}
+	var msg Message
+	if err := json.Unmarshal(pkt.Data, &msg); err != nil {
+		return
+	}
+	if msg.Nick == nil || msg.Nick.Name == "" || s.isSelfName(msg.Nick.Name) || IsTunerMarker(msg.Str) {
+		return
+	}
+	s.rememberNick(msg.Nick)
+	s.mu.Lock()
+	s.unread[strings.ToLower(name)]++
+	s.mu.Unlock()
+	if s.OnBackground != nil {
+		s.OnBackground(name, &msg)
+	}
+}
+
+// joinedName returns the joined channel matching name case-insensitively,
+// in its joined spelling, or "".
+func (s *Session) joinedName(name string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, j := range s.joined {
+		if strings.EqualFold(j, name) {
+			return j
+		}
+	}
+	return ""
+}
+
+func countDistinctNicks(entries []WhoEntry) int {
+	seen := map[string]bool{}
+	for _, e := range entries {
+		if e.Nick != "" {
+			seen[strings.ToLower(e.Nick)] = true
+		}
+	}
+	return len(seen)
+}
+
+func removeName(list []string, name string) []string {
+	out := list[:0]
+	for _, n := range list {
+		if !strings.EqualFold(n, name) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func moveToEnd(list []string, name string) []string {
+	return append(removeName(list, name), name)
 }
 
 // Messages returns a snapshot of the buffered messages (oldest first).

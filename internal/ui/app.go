@@ -117,8 +117,20 @@ type App struct {
 	lastMotdRefresh time.Time
 
 	modalFrame  *ansi.Frame
-	modal       *RosterModal
+	modal       modalView // roster or /channels list; nil when closed
 	imageViewer *ImageViewer
+
+	// Bell rings the terminal (BEL) when a PM or a mention of our name
+	// arrives, at most once per bellGap. Set from config `bell`.
+	Bell        bool
+	bellPending bool // a BEL rides at the front of the next composed frame
+	lastBell    time.Time
+	// unreadPM counts PMs received since the user last sent a line; shown
+	// as a flashing /r pill.
+	unreadPM int
+	// flashPhase is the last 500 ms on/off phase drawn for flashing pills;
+	// a phase change re-dirties the screen so the flash actually animates.
+	flashPhase int64
 
 	idleAnim        idle.Animation
 	idleAnimStarted time.Time
@@ -265,6 +277,22 @@ func (a *App) layout() {
 		if a.loungeActive() {
 			a.addPopup(m)
 		}
+		if a.fromOther(m) {
+			if m.Private {
+				a.unreadPM++
+				a.ring()
+			} else if chat.MentionsName(m.Str, a.selfName()) {
+				a.ring()
+			}
+		}
+	}
+	// A joined channel we aren't viewing: the Session counts it for the
+	// /channels badge; a mention there still rings.
+	a.Session.OnBackground = func(_ string, m *chat.Message) {
+		a.dirty = true
+		if chat.MentionsName(m.Str, a.selfName()) {
+			a.ring()
+		}
 	}
 	// Notices route into the transcript itself now that there's no status
 	// bar; nothing extra to do here, but keep a callback so per-event
@@ -273,6 +301,48 @@ func (a *App) layout() {
 		a.dirty = true
 	}
 	a.dirty = true
+}
+
+// bellGap is the minimum time between two BELs, so a burst of PMs or a
+// channel that keeps saying your name beeps once, not once per line.
+const bellGap = 3 * time.Second
+
+// ring queues a BEL for the next frame, rate-limited by bellGap.
+func (a *App) ring() {
+	if !a.Bell || time.Since(a.lastBell) < bellGap {
+		return
+	}
+	a.lastBell = time.Now()
+	a.bellPending = true
+	a.dirty = true
+}
+
+// hasFlashing reports whether any top-bar pill is flashing for attention.
+func (a *App) hasFlashing() bool {
+	if a.unreadPM > 0 || a.unreadChannels() > 0 {
+		return true
+	}
+	return a.Session != nil && a.Session.UnviewedBitmaps() > 0
+}
+
+func (a *App) unreadChannels() int {
+	if a.Session == nil {
+		return 0
+	}
+	return a.Session.UnreadTotal()
+}
+
+func (a *App) selfName() string {
+	if a.Session != nil && a.Session.Self != nil {
+		return a.Session.Self.Name
+	}
+	return ""
+}
+
+// fromOther reports whether m is a real message from someone else (not a
+// notice, not our own line echoed locally).
+func (a *App) fromOther(m *chat.Message) bool {
+	return m != nil && m.Nick != nil && m.Nick.Name != "" && !strings.EqualFold(m.Nick.Name, a.selfName())
 }
 
 // markActive records that something happened (input or new message), exits
@@ -657,6 +727,13 @@ func (a *App) Run(ctx context.Context) error {
 			}
 		}
 
+		if a.hasFlashing() {
+			if phase := time.Now().UnixNano() / 1000000 / 500; phase != a.flashPhase {
+				a.flashPhase = phase
+				a.dirty = true
+			}
+		}
+
 		// Pace output: drain any frame still in flight, and compose a new one
 		// only when the previous has fully flushed. This is the backpressure
 		// point — on a slow/stalled link the door stops producing instead of
@@ -700,10 +777,14 @@ func (a *App) handleKey(k ansi.Key) (exit bool, err error) {
 		return false, nil
 	}
 	if a.modal != nil {
-		closed := a.modal.HandleKey(k)
+		m := a.modal
+		closed := m.HandleKey(k)
 		a.dirty = true
 		if closed {
-			a.closeRoster()
+			a.closeModal()
+			if cm, ok := m.(*ChannelsModal); ok {
+				return a.applyChannelChoice(cm), nil
+			}
 		}
 		return false, nil
 	}
@@ -776,6 +857,8 @@ func (a *App) handleKey(k ansi.Key) (exit bool, err error) {
 		text := a.inputLine.Value()
 		a.inputLine.Reset()
 		a.inputLine.PushHistory(text)
+		// Typing a line is the user engaging with chat: PMs are now seen.
+		a.unreadPM = 0
 		if exit, handled := a.handleSlashCommand(text); handled {
 			a.dirty = true
 			return exit, nil
@@ -851,8 +934,8 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 			a.Session.Notice(fmt.Sprintf("/r failed: %v", err))
 		}
 		return false, true
-	case "/channels":
-		a.Session.Notice("channels: #" + a.Session.Channel + " (multi-channel UI: use /join <name> to switch)")
+	case "/channels", "/list":
+		a.openChannels()
 		return false, true
 	case "/clear":
 		a.Session.Clear()
@@ -893,8 +976,8 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		// further plumbing needed.
 		return false, true
 	case "/part", "/p":
-		// In this build there's only one active channel; treat /part as quit.
-		return true, true
+		// Leave this channel for the previous one; the last one exits.
+		return a.partCurrent(), true
 	case "/avatar":
 		a.handleAvatarCmd(parts)
 		return false, true
@@ -938,6 +1021,7 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		return false, true
 	case "/help", "/?":
 		a.Session.Notice("/me /msg /r /join /part /who /img /channels /clear /avatar /settings /quit")
+		a.Session.Notice("/join keeps the old channel joined (unread counts in /channels); /part leaves it")
 		if a.BoardWide {
 			a.Session.Notice("/avatar and /settings change your BBS avatar and handle style everywhere on this system")
 		} else {
@@ -1267,14 +1351,30 @@ func (a *App) openRoster(users []string) {
 	}
 	a.modalFrame = ansi.NewFrame(0, 0, a.Width, usable, ansi.LightGray|ansi.BgBlack)
 	a.modalFrame.Charset = a.Charset
-	a.modal = NewRosterModal(a.modalFrame, users, a.Session)
-	a.modal.Truecolor = a.tvColorTrue()
+	roster := NewRosterModal(a.modalFrame, users, a.Session)
+	roster.Truecolor = a.tvColorTrue()
+	a.modal = roster
 	_ = ansi.ClearScreen(a.Conn)
 	a.dirty = true
 }
 
-// closeRoster tears down the roster and forces a full redraw of the chat UI.
-func (a *App) closeRoster() {
+// openChannels shows the /channels list (joined rooms + the server's public
+// room registry, with user and unread counts).
+func (a *App) openChannels() {
+	usable := a.Height - 1
+	if usable < 12 {
+		usable = a.Height
+	}
+	a.modalFrame = ansi.NewFrame(0, 0, a.Width, usable, ansi.LightGray|ansi.BgBlack)
+	a.modalFrame.Charset = a.Charset
+	a.modal = NewChannelsModal(a.modalFrame, a.Session.Rooms())
+	_ = ansi.ClearScreen(a.Conn)
+	a.dirty = true
+}
+
+// closeModal tears down the roster or channel list and forces a full
+// redraw of the chat UI.
+func (a *App) closeModal() {
 	a.modal = nil
 	a.modalFrame = nil
 	a.forceFullRedraw()
@@ -1438,8 +1538,12 @@ func (a *App) refreshHeader() {
 	if addr == "" {
 		addr = "(local)"
 	}
-	a.header.StatsText = fmt.Sprintf("Avatar Chat | %s | users %d | joined 1 | %s",
-		channel, users, addr)
+	joined := 1
+	if a.Session != nil {
+		joined = len(a.Session.Joined())
+	}
+	a.header.StatsText = fmt.Sprintf("Avatar Chat | %s | users %d | joined %d | %s",
+		channel, users, joined, addr)
 	if a.Session != nil {
 		a.header.MotdText = a.Session.MotdText()
 	}
@@ -1472,16 +1576,28 @@ func (a *App) refreshActionBar() {
 		}
 	}
 
-	a.actionBar.Buttons = []ActionButton{
+	flashOff := (time.Now().UnixNano()/1000000/500)%2 == 1
+	buttons := []ActionButton{
 		{Label: "/who"},
 		imgBtn,
-		{Label: "/channels"},
-		// /settings covers the avatar too; /avatar still works typed.
-		{Label: "/settings"},
-		{Label: "/help"},
-		{Label: "Tab user"},
-		{Label: "Esc exit"},
 	}
+	// Unread PMs: a flashing /r pill (replying is the natural next step).
+	if a.unreadPM > 0 {
+		buttons = append(buttons, ActionButton{Label: fmt.Sprintf("/r [%d]", a.unreadPM), Highlight: true, Hidden: flashOff})
+	}
+	chanBtn := ActionButton{Label: "/channels"}
+	if n := a.unreadChannels(); n > 0 {
+		chanBtn = ActionButton{Label: fmt.Sprintf("/channels [%d]", n), Highlight: true, Hidden: flashOff}
+	}
+	buttons = append(buttons,
+		chanBtn,
+		// /settings covers the avatar too; /avatar still works typed.
+		ActionButton{Label: "/settings"},
+		ActionButton{Label: "/help", optional: true},
+		ActionButton{Label: "Tab user", optional: true},
+		ActionButton{Label: "Esc exit"},
+	)
+	a.actionBar.Buttons = fitButtons(buttons, a.Width)
 
 	// Bottom bar focuses on the commands that ARE NOT in the top bar so
 	// the two rows don't duplicate each other.
@@ -1502,6 +1618,13 @@ func (a *App) refreshActionBar() {
 // without blocking); the one-shot paint paths write straight to the conn via
 // renderBlocking.
 func (a *App) composeInto(w io.Writer) error {
+	if a.bellPending {
+		// First in the frame, so it can't split an escape sequence.
+		if _, err := w.Write([]byte{0x07}); err != nil {
+			return err
+		}
+		a.bellPending = false
+	}
 	if a.imageViewer != nil {
 		return a.imageViewer.Render(w)
 	}

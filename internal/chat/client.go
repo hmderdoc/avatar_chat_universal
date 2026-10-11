@@ -174,6 +174,39 @@ func (c *Client) Who(scope, location string) ([]WhoEntry, error) {
 	return nil, fmt.Errorf("chat: unrecognized WHO response shape: %s", pkt.Data)
 }
 
+// Keys lists the immediate child keys of scope.location (the KEYS verb of
+// json-client.js). Synchronet answers with an array of names; some servers
+// answer with an object whose keys are the names, so both are accepted.
+func (c *Client) Keys(scope, location string) ([]string, error) {
+	pkt, err := c.query(&Packet{
+		Scope:    scope,
+		Func:     "QUERY",
+		Oper:     "KEYS",
+		Location: location,
+		Lock:     LockRead,
+		Timeout:  -1,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(pkt.Data) == 0 || string(pkt.Data) == "null" {
+		return nil, nil
+	}
+	var asList []string
+	if err := json.Unmarshal(pkt.Data, &asList); err == nil {
+		return asList, nil
+	}
+	var asObject map[string]json.RawMessage
+	if err := json.Unmarshal(pkt.Data, &asObject); err == nil {
+		out := make([]string, 0, len(asObject))
+		for k := range asObject {
+			out = append(out, k)
+		}
+		return out, nil
+	}
+	return nil, fmt.Errorf("chat: unrecognized KEYS response shape: %s", pkt.Data)
+}
+
 // query serializes the request, sends, and awaits a RESPONSE whose oper
 // matches the request. Fire-and-forget acks for other operations don't
 // satisfy AwaitResponse — they get filtered out.

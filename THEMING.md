@@ -106,6 +106,8 @@ secondary commands. Each row has a background, a pill text color, and a
 | `bubble_left`    | `black\|bgcyan`    | Other people's messages        |
 | `bubble_self`    | `white\|bgblue`    | Your own messages              |
 | `bubble_private` | `white\|bgred`     | PMs (regardless of side)       |
+| `bubble_mention` | `black\|bgbrown`   | Others' lines that say your name (PMs keep `bubble_private`) |
+| `mention_edge`   | `yellow`           | Bar down the left edge of a mention (foreground only) |
 
 ### Bubble header line
 

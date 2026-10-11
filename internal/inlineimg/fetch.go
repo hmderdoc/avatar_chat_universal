@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/netip"
@@ -171,6 +172,9 @@ type Page struct {
 	Body        []byte // at most the maxBytes asked for, cut silently
 	FinalURL    string // after redirects
 	ContentType string // lower case, parameters included
+	// FileName is the Content-Disposition filename, when the server sent
+	// one (a download link that names its file only there).
+	FileName string
 }
 
 // pageRange asks for the first 256 KB, as the web's link-preview.js does;
@@ -227,7 +231,13 @@ func (f *Fetcher) FetchPage(ctx context.Context, rawURL string, maxBytes int64) 
 	if resp.Request != nil && resp.Request.URL != nil {
 		final = resp.Request.URL.String()
 	}
-	return &Page{Body: body, FinalURL: final, ContentType: strings.ToLower(resp.Header.Get("Content-Type"))}, nil
+	page := &Page{Body: body, FinalURL: final, ContentType: strings.ToLower(resp.Header.Get("Content-Type"))}
+	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
+		if _, params, err := mime.ParseMediaType(cd); err == nil {
+			page.FileName = filepath.Base(params["filename"])
+		}
+	}
+	return page, nil
 }
 
 // checkURL applies the scheme and port rules (the address rule runs at dial

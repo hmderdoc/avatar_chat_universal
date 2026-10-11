@@ -141,7 +141,7 @@ func fetch(ctx context.Context, f PageFetcher, rawURL string) (*Meta, error) {
 		return &Meta{URL: rawURL, FinalURL: p.FinalURL, Kind: "image", Title: Clean(baseName(p.FinalURL), titleCap), Image: p.FinalURL}, nil
 	case strings.HasPrefix(p.ContentType, "text/html"), strings.HasPrefix(p.ContentType, "application/xhtml"):
 	default:
-		return nil, nil
+		return mediaFile(rawURL, p), nil
 	}
 	m := Parse(p.Body, p.FinalURL)
 	if m.Title == "" && m.Description == "" && m.Image == "" {
@@ -238,6 +238,93 @@ func Parse(html []byte, baseURL string) *Meta {
 		Image:       image,
 		SiteName:    Clean(first("og:site_name"), siteNameCap),
 	}
+}
+
+// mediaFile is the card for a link that served an audio or video file
+// itself rather than a page: a download link such as
+// /api/files.ssjs?call=download-file&file=Song.mp3 names the file only in
+// its query and Content-Disposition, and often serves it as
+// application/octet-stream. The type decides when it says audio/* or
+// video/*; otherwise the attachment's file name, then the first bytes.
+// Nil when it is neither.
+func mediaFile(rawURL string, p *inlineimg.Page) *Meta {
+	ct := strings.TrimSpace(strings.SplitN(p.ContentType, ";", 2)[0])
+	name := p.FileName
+	if name == "" || name == "." || name == "/" {
+		name = baseName(p.FinalURL)
+	}
+	kind, typ := "", ""
+	switch {
+	case strings.HasPrefix(ct, "audio/"):
+		kind, typ = "audio", ct
+	case strings.HasPrefix(ct, "video/"):
+		kind, typ = "video", ct
+	case ct == "" || ct == "application/octet-stream" || ct == "binary/octet-stream" ||
+		ct == "application/x-download" || ct == "application/download" || ct == "application/force-download":
+		if t := typeForName(p.FileName); t != "" {
+			typ = t
+		} else {
+			typ = sniffMedia(p.Body)
+		}
+		if strings.HasPrefix(typ, "audio/") {
+			kind = "audio"
+		} else if strings.HasPrefix(typ, "video/") {
+			kind = "video"
+		}
+	}
+	m := &Meta{URL: rawURL, FinalURL: p.FinalURL, Kind: "site", Title: Clean(name, titleCap), SiteName: Clean(hostOf(p.FinalURL), siteNameCap)}
+	switch kind {
+	case "audio":
+		m.Audio, m.AudioType = p.FinalURL, typ
+	case "video":
+		m.Video = p.FinalURL
+	default:
+		return nil
+	}
+	return m
+}
+
+var mediaNameTypes = map[string]string{
+	".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".oga": "audio/ogg", ".opus": "audio/opus",
+	".flac": "audio/flac", ".wav": "audio/wav", ".m4a": "audio/mp4", ".aac": "audio/aac",
+	".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska",
+}
+
+// typeForName maps an attachment's file name to a media type, "" if none.
+func typeForName(name string) string {
+	return mediaNameTypes[strings.ToLower(filepath.Ext(name))]
+}
+
+// sniffMedia recognises the common audio and video containers by their
+// first bytes, "" when it is none of them.
+func sniffMedia(b []byte) string {
+	switch {
+	case len(b) >= 3 && string(b[:3]) == "ID3":
+		return "audio/mpeg"
+	case len(b) >= 2 && b[0] == 0xff && b[1]&0xe0 == 0xe0 && b[1]&0x06 != 0:
+		return "audio/mpeg" // MPEG audio frame sync, layer set
+	case len(b) >= 4 && string(b[:4]) == "OggS":
+		return "audio/ogg"
+	case len(b) >= 4 && string(b[:4]) == "fLaC":
+		return "audio/flac"
+	case len(b) >= 12 && string(b[:4]) == "RIFF" && string(b[8:12]) == "WAVE":
+		return "audio/wav"
+	case len(b) >= 12 && string(b[4:8]) == "ftyp":
+		if brand := string(b[8:11]); brand == "M4A" {
+			return "audio/mp4"
+		}
+		return "video/mp4"
+	case len(b) >= 4 && b[0] == 0x1a && b[1] == 0x45 && b[2] == 0xdf && b[3] == 0xa3:
+		return "video/webm"
+	}
+	return ""
+}
+
+func hostOf(u string) string {
+	if p, err := url.Parse(u); err == nil {
+		return p.Hostname()
+	}
+	return ""
 }
 
 // videoFile matches a path that names a video file.

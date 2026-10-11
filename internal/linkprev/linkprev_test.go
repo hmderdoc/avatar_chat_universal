@@ -236,3 +236,52 @@ func TestParseOpenGraphVideo(t *testing.T) {
 		}
 	}
 }
+
+// A download link that names its file only in the query and
+// Content-Disposition, served as octet-stream (futureland's files.ssjs),
+// becomes a playable card; the shape of the URL doesn't matter.
+func TestMediaFileCards(t *testing.T) {
+	dl := "https://futureland.today/api/files.ssjs?call=download-file&dir=mp3s&file=Song.mp3"
+	f := &fakeFetcher{pages: map[string]*inlineimg.Page{
+		dl:                             {Body: []byte("ID3\x03\x00"), FinalURL: dl, ContentType: "application/octet-stream", FileName: "Song.mp3"},
+		"https://a.example/get?id=7":   {Body: []byte("ID3\x04"), FinalURL: "https://a.example/get?id=7", ContentType: "application/octet-stream"},
+		"https://b.example/stream":     {Body: []byte("\xff\xfb\x90"), FinalURL: "https://b.example/stream", ContentType: "audio/mpeg"},
+		"https://c.example/clip?x=1":   {Body: []byte("\x00\x00\x00\x18ftypisom"), FinalURL: "https://c.example/clip?x=1", ContentType: "application/octet-stream"},
+		"https://d.example/blob":       {Body: []byte("PK\x03\x04"), FinalURL: "https://d.example/blob", ContentType: "application/octet-stream", FileName: "notes.zip"},
+		"https://e.example/v.webm?t=1": {FinalURL: "https://e.example/v.webm?t=1", ContentType: "video/webm"},
+	}}
+	c := &Cache{Dir: t.TempDir()}
+	get := func(u string) *Meta {
+		m, err := Get(context.Background(), f, c, u)
+		if err != nil {
+			return nil
+		}
+		return m
+	}
+	if m := get(dl); m == nil || m.Audio != dl || m.AudioType != "audio/mpeg" || m.Title != "Song.mp3" || m.SiteName != "futureland.today" {
+		t.Fatalf("download link card = %+v", m)
+	}
+	if m := get("https://a.example/get?id=7"); m == nil || m.Audio == "" {
+		t.Fatalf("sniffed ID3 = %+v", m)
+	}
+	if m := get("https://b.example/stream"); m == nil || m.AudioType != "audio/mpeg" {
+		t.Fatalf("audio/mpeg = %+v", m)
+	}
+	if m := get("https://c.example/clip?x=1"); m == nil || m.Video == "" {
+		t.Fatalf("sniffed mp4 = %+v", m)
+	}
+	if m := get("https://e.example/v.webm?t=1"); m == nil || m.Video == "" {
+		t.Fatalf("video/webm = %+v", m)
+	}
+	if m := get("https://d.example/blob"); m != nil {
+		t.Fatalf("a zip got a card: %+v", m)
+	}
+	// A track page whose query ends in .mp3 is still read as a page.
+	if got := PreviewURL("listen https://futureland.today/?page=records&track=Song.mp3"); got == "" {
+		t.Fatal("track page skipped")
+	}
+	// The download link itself is offered for a card too.
+	if got := PreviewURL("grab " + dl); got != dl {
+		t.Fatalf("PreviewURL(download) = %q", got)
+	}
+}

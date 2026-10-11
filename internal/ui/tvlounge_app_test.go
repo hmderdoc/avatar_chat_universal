@@ -136,8 +136,8 @@ func TestApp_LoungeHistoryShowThenPageThenDismiss(t *testing.T) {
 	if _, err := app.handleKey(ansi.Key{Type: ansi.KeyPgUp}); err != nil {
 		t.Fatal(err)
 	}
-	if app.transcript.Scroll != 5 {
-		t.Fatalf("second PgUp should page back, want Scroll=5 got %d", app.transcript.Scroll)
+	if want := app.transcript.PageRows(); app.transcript.Scroll != want {
+		t.Fatalf("second PgUp should page back one page, want Scroll=%d got %d", want, app.transcript.Scroll)
 	}
 
 	if _, err := app.handleKey(ansi.Key{Type: ansi.KeyPgDn}); err != nil {

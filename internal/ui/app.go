@@ -809,11 +809,11 @@ func (a *App) handleKey(k ansi.Key) (exit bool, err error) {
 			if !a.tvShowTranscript {
 				a.showLoungeHistory()
 			} else {
-				a.pageLoungeHistory(5)
+				a.pageLoungeHistory(a.transcript.PageRows())
 			}
 			return false, nil
 		}
-		a.transcript.Scroll += 5
+		a.transcript.Scroll += a.transcript.PageRows()
 		a.dirty = true
 		return false, nil
 	case ansi.KeyPgDn:
@@ -823,11 +823,11 @@ func (a *App) handleKey(k ansi.Key) (exit bool, err error) {
 			if a.transcript.Scroll == 0 {
 				a.hideLoungeHistory()
 			} else {
-				a.pageLoungeHistory(-5)
+				a.pageLoungeHistory(-a.transcript.PageRows())
 			}
 			return false, nil
 		}
-		a.transcript.Scroll -= 5
+		a.transcript.Scroll -= a.transcript.PageRows()
 		if a.transcript.Scroll < 0 {
 			a.transcript.Scroll = 0
 		}
@@ -844,7 +844,7 @@ func (a *App) handleKey(k ansi.Key) (exit bool, err error) {
 		if a.transcript.Scroll == 0 {
 			a.hideLoungeHistory()
 		} else {
-			a.pageLoungeHistory(-5)
+			a.pageLoungeHistory(-a.transcript.PageRows())
 		}
 		return false, nil
 	}

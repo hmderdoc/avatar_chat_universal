@@ -149,3 +149,38 @@ func TestApp_SixelBlitOnlyWhenNeeded(t *testing.T) {
 		t.Fatal("picture not restored after the modal closed")
 	}
 }
+
+// Paging from the newest line to the oldest shows every bubble, including
+// one holding a picture that is taller than the free space above the others.
+// Paging by whole bubbles used to drop such a bubble and then jump past it.
+func TestTranscript_PagingNeverSkipsTallPictureBubble(t *testing.T) {
+	f := ansi.NewTransparentFrame(0, 0, 80, 16)
+	tr := NewTranscript(f, "alice")
+	tr.Images = readyManager(ImageConfig{}, "https://x.org/cat.png")
+	now := time.Now().UnixNano() / 1000000
+	msgs := []*chat.Message{
+		{Nick: &chat.Nick{Name: "ann"}, Str: "oldest", Time: now},
+		{Nick: &chat.Nick{Name: "bob"}, Str: "cat https://x.org/cat.png", Time: now},
+	}
+	for _, n := range []string{"cy", "di", "ed", "fay", "gus"} {
+		msgs = append(msgs, &chat.Message{Nick: &chat.Nick{Name: n}, Str: "line from " + n, Time: now})
+	}
+	seen := map[string]bool{}
+	for page := 0; page < 20; page++ {
+		tr.Scroll = page * tr.PageRows()
+		tr.Render(msgs)
+		for _, m := range msgs {
+			if _, _, ok := findText(f, m.Str); ok {
+				seen[m.Nick.Name] = true
+			}
+		}
+		if tr.Scroll < page*tr.PageRows() {
+			break // clamped at the oldest row
+		}
+	}
+	for _, m := range msgs {
+		if !seen[m.Nick.Name] {
+			t.Errorf("paging never showed %s's bubble", m.Nick.Name)
+		}
+	}
+}

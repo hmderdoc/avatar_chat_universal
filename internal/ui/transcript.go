@@ -21,8 +21,10 @@ import (
 type Transcript struct {
 	Frame *ansi.Frame
 
-	// Scroll is the number of bubbles (groups) to scroll back from the
-	// most recent. 0 sticks to the latest.
+	// Scroll is how many rows the view sits above the newest line. 0 sticks
+	// to the latest. Rows, not bubbles: a bubble holding a picture is taller
+	// than a page, and paging by bubbles skipped it. Render clamps it to the
+	// oldest row.
 	Scroll int
 
 	SelfName string
@@ -123,45 +125,43 @@ func (t *Transcript) Render(messages []*chat.Message) {
 	bubbleW := t.bubbleWidth()
 	blocks := t.buildBlocks(messages, bubbleW)
 
-	// Pick the visible window starting from the bottom, scrolled up by Scroll.
-	end := len(blocks) - 1 - t.Scroll
-	if end < 0 {
-		end = 0
-	}
-	if end > len(blocks)-1 {
-		end = len(blocks) - 1
-	}
-
-	visible := []*block{}
-	used := 0
-	for i := end; i >= 0; i-- {
-		gap := 0
-		if len(visible) > 0 {
-			gap = groupGap
-		}
-		next := used + gap + blocks[i].height()
-		if next > t.Frame.H && len(visible) > 0 {
-			break
-		}
-		visible = append([]*block{blocks[i]}, visible...)
-		used = next
-		if used >= t.Frame.H {
-			break
-		}
-	}
-
-	// Bottom-align the visible blocks within the frame.
-	row := t.Frame.H - used
-	if row < 0 {
-		row = 0
-	}
-	for i, b := range visible {
+	// Lay every block out on one tall strip, then show the Frame.H rows that
+	// end Scroll rows above its bottom. Blocks cut by the top or bottom edge
+	// are drawn clipped (the frame drops off-screen cells).
+	tops := make([]int, len(blocks))
+	total := 0
+	for i, b := range blocks {
 		if i > 0 {
-			row += groupGap
+			total += groupGap
 		}
-		t.renderBlock(b, row)
-		row += b.height()
+		tops[i] = total
+		total += b.height()
 	}
+	if oldest := total - t.Frame.H; t.Scroll > oldest {
+		t.Scroll = oldest
+	}
+	if t.Scroll < 0 {
+		t.Scroll = 0
+	}
+	// Strip row shown at frame row 0. A short transcript stays
+	// bottom-aligned, so this goes negative.
+	top := total - t.Scroll - t.Frame.H
+	for i, b := range blocks {
+		y := tops[i] - top
+		if y >= t.Frame.H || y+b.height() <= 0 {
+			continue
+		}
+		t.renderBlock(b, y)
+	}
+}
+
+// PageRows is how far one PgUp/PgDn moves: a page less two rows of overlap,
+// so the eye keeps its place.
+func (t *Transcript) PageRows() int {
+	if n := t.Frame.H - 2; n > 0 {
+		return n
+	}
+	return 1
 }
 
 // bubbleWidth returns the body width of a bubble (the space the wrapped
@@ -437,17 +437,11 @@ func (t *Transcript) renderBlock(b *block, y int) {
 	}
 	t.paintPictures(b, bubbleX+1, y+1)
 
-	// Avatar (drawn last so it's on top of any overlap).
+	// Avatar (drawn last so it's on top of any overlap). It stays beside its
+	// own header: a bubble cut by the frame edge loses the off-screen avatar
+	// rows rather than pushing the avatar over its neighbour.
 	if b.avatar != nil {
-		// Clamp Y so the avatar stays within the frame.
-		ay := y
-		if ay+avatarH > t.Frame.H {
-			ay = t.Frame.H - avatarH
-			if ay < 0 {
-				ay = 0
-			}
-		}
-		b.avatar.RenderTo(t.Frame, avatarX, ay)
+		b.avatar.RenderTo(t.Frame, avatarX, y)
 	}
 }
 

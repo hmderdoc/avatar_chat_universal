@@ -176,7 +176,11 @@ func (f *Frame) PrintAttr(b []byte, attr Attr) {
 				return
 			}
 		}
-		f.cur[f.cursorY][f.cursorX] = Cell{Char: ch, Attr: attr}
+		// Rows above the frame and columns left of it are clipped, so a
+		// caller may draw something that starts partly off screen.
+		if f.cursorY >= 0 && f.cursorX >= 0 {
+			f.cur[f.cursorY][f.cursorX] = Cell{Char: ch, Attr: attr}
+		}
 		f.cursorX++
 	}
 }

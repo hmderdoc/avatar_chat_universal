@@ -47,6 +47,20 @@ versioning follows loose [SemVer](https://semver.org/) (see
   - Upload links keep the port the browser used (`:4080`). New
     `web_media_base_url` pins them for a proxy that rewrites `Host`
     (`web_upload_url_base` still read).
+  - Rooms work like Futureland's page: the sidebar lists the rooms you
+    joined (click to view, x to leave, unread badges), **Join a room** /
+    **Leave** sit beside the MOTD, and the picker lists every room with
+    its user count and state. Its button reads **Join #x** or **Create
+    #x**, so creating a room is never a hidden side effect of joining.
+    Leaving the last room offers the default one; sending in a room joins
+    it. Joined rooms are kept per account in `data/chat/webprefs/NNNN.json`.
+    The "Public Rooms" heading, the Create Room button and the "Avatar
+    Chat" title in the header are gone.
+  - Page styles: one **Page style** pick in the Handle Style modal, each a
+    complete look (colours and shape): Classic, CGA, Modern dark, Modern
+    light, Amber phosphor, Green phosphor, Windows 95, Flat compact. Saved
+    per account with the rooms and applied in the served HTML. Sysop keys
+    `web_styles` and `web_default_style`.
 - **Mouse.** The door asks for xterm mouse reports (SGR, with X10
   fallback): the wheel scrolls the chat and lists, pills run their
   commands, a name starts `/msg`, a picture opens in `/img`, a `/play`
@@ -172,6 +186,12 @@ versioning follows loose [SemVer](https://semver.org/) (see
   is consumed instead of landing in the input line as two typed O's.
 
 ### Changed
+
+- **Handle tags are gone from the door.** `/settings` no longer edits a
+  tag, the door doesn't draw tags on anyone's name, and it sends only the
+  colours on its messages. A tag after a name made handles read differently
+  and broke lookups by name. Tags already stored by the shell or a website
+  stay in the record; a save from the door keeps them.
 
 - The terminal probe now also runs when `tv_color` is pinned but images are
   on, to learn about sixel; it uses termprobe's new sixel and cell-size

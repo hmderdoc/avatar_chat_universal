@@ -24,7 +24,18 @@ const state = {
   avatar: null,
   sse: [],
   messages: [],
+  // rooms on the chat service, the sidebar's joined list, the page style
+  rooms: [{ name: "main", userCount: 3 }, { name: "retro", userCount: 2 }, { name: "lobby", userCount: 0 }],
+  joined: ["main"],
+  pageStyle: "classic",
 };
+const PAGE_STYLES = [
+  { id: "classic", label: "Classic" }, { id: "cga", label: "CGA" }, { id: "modern-dark", label: "Modern dark" },
+  { id: "modern-light", label: "Modern light" }, { id: "amber", label: "Amber phosphor" }, { id: "green", label: "Green phosphor" },
+  { id: "win95", label: "Windows 95" }, { id: "compact", label: "Flat compact" },
+];
+const summaries = () => state.rooms.map((r) => ({ name: r.name, userCount: r.userCount, lastTimestamp: Date.now(), newCount: 0 }));
+const findRoom = (n) => state.rooms.find((r) => r.name.toUpperCase() === String(n || "").toUpperCase());
 
 function msg(sender, text, extra) {
   return Object.assign({ sender: sender, system: "Test BBS", text: text, timestamp: Date.now() - 60000, userNumber: 0, isSelf: false, private: false }, extra || {});
@@ -65,12 +76,14 @@ function renderXjs(file, ctx) {
   return out;
 }
 
-const pageConfig = {
+const basePageConfig = {
   server: "127.0.0.1:10088", configFound: true, defaultChannel: "main", motdChannel: "motd", canManageMotd: false,
   userAlias: "Tester", userNumber: 77, systemName: "Test BBS", isLoggedIn: true, canUseRealtime: true, token: TOKEN,
   maxText: 1000, images: true, linkPreviews: true, nsfwKeywords: ["nude", "nsfw"],
   uploads: { enabled: true, maxMb: 20, videoMaxMb: 50, types: ["png", "jpg", "gif", "webp", "mp3", "mp4"], retentionDays: 7 },
 };
+// as page.ts: the stored style and the sidebar rooms, read per request
+const currentPageConfig = () => Object.assign({}, basePageConfig, { pageStyle: state.pageStyle, pageStyles: PAGE_STYLES, joinedRooms: state.joined.slice() });
 
 function json(res, obj, status) {
   res.writeHead(status || 200, { "Content-Type": "application/json; charset=utf-8" });
@@ -103,9 +116,10 @@ const server = http.createServer(async (req, res) => {
   const p = url.pathname;
 
   if (p === "/" && url.searchParams.get("page") === "avatarchat.xjs") {
+    const cfg = currentPageConfig();
     const html = renderXjs(path.join(DIST, "pages", "avatarchat.xjs"), {
-      pageConfig: () => pageConfig,
-      pageConfigJson: () => JSON.stringify(pageConfig).replace(/<\//g, "<\\/"),
+      pageConfig: () => cfg,
+      pageConfigJson: () => JSON.stringify(cfg).replace(/<\//g, "<\\/"),
     });
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     // Stock webv4's own stylesheets: bootstrap's input[type=file] rule is
@@ -136,7 +150,7 @@ const server = http.createServer(async (req, res) => {
       case "sync":
         return json(res, {
           channel: "main", serverTime: Date.now(),
-          channels: [{ name: "main", userCount: 3, lastTimestamp: Date.now(), newCount: 0 }],
+          channels: summaries(),
           who: { channel: "main", users: [{ nick: "Carol", system: "Test BBS", userNumber: 0, avatar: AVATAR, style: state.messages[0].style },
             { nick: "Tester", system: "Test BBS", userNumber: 77, avatar: avatarOf(0x41, 0x07) }] },
           history: q.history === "1" ? { channel: "main", messages: state.messages } : undefined,
@@ -150,7 +164,25 @@ const server = http.createServer(async (req, res) => {
         return json(res, { channel: "main", users: [{ nick: "Carol", system: "Test BBS", userNumber: 0, avatar: AVATAR, style: state.messages[0].style },
           { nick: "Tester", system: "Test BBS", userNumber: 77, avatar: avatarOf(0x41, 0x07) }], serverTime: Date.now() });
       case "channels":
-        return json(res, { channels: [{ name: "main", userCount: 3, lastTimestamp: Date.now(), newCount: 0 }], serverTime: Date.now() });
+        return json(res, { channels: summaries(), serverTime: Date.now() });
+      case "joinRoom": {
+        // as api.ts: an existing room joins; a new one needs create=1
+        let room = findRoom(q.channel);
+        if (!room) {
+          if (q.create !== "1") return json(res, { error: "no room #" + q.channel + " yet" });
+          room = { name: q.channel, userCount: 0 };
+          state.rooms.push(room);
+        }
+        if (!state.joined.some((n) => n.toUpperCase() === room.name.toUpperCase())) state.joined.push(room.name);
+        return json(res, { ok: true, channel: room.name, created: q.create === "1" && state.rooms[state.rooms.length - 1] === room, rooms: state.joined });
+      }
+      case "leaveRoom":
+        state.joined = state.joined.filter((n) => n.toUpperCase() !== String(q.channel).toUpperCase());
+        return json(res, { ok: true, rooms: state.joined });
+      case "savePageStyle":
+        if (!PAGE_STYLES.some((x) => x.id === q.style)) return json(res, { error: "no such page style" });
+        state.pageStyle = q.style;
+        return json(res, { ok: true, style: q.style });
       case "motd":
         return json(res, { channel: "motd", previewText: "mock motd", timestamp: Date.now() });
       case "private":
@@ -224,7 +256,7 @@ const server = http.createServer(async (req, res) => {
     return json(res, { ok: true });
   }
 
-  if (p === "/__state") return json(res, { posts: state.posts, stored: Object.keys(state.stored).map((k) => [k, state.stored[k].length]), style: state.style, lastStyleBody: state.lastStyleBody, avatar: state.avatar });
+  if (p === "/__state") return json(res, { joined: state.joined, rooms: state.rooms, pageStyle: state.pageStyle, posts: state.posts, stored: Object.keys(state.stored).map((k) => [k, state.stored[k].length]), style: state.style, lastStyleBody: state.lastStyleBody, avatar: state.avatar });
 
   if (state.stored[p]) { res.writeHead(200, { "Content-Type": "image/png" }); res.end(state.stored[p]); return; }
 

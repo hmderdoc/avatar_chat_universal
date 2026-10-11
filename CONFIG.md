@@ -499,6 +499,8 @@ each one starts with `web_`.
 | `web_upload_dir` | `<web_root>/chatmedia` | Where files go. If you move it, also set `web_media_base_url`. |
 | `web_media_base_url` | from the request | Public address of that folder, e.g. `https://bbs.example.org/chatmedia`, for a reverse proxy that rewrites `Host`. Without it, the link is built from the browser's `Host` header, port included (a site on `:4080` links `:4080`), with `https` when the proxy sends `X-Forwarded-Proto: https`. `web_upload_url_base` is the older name and still works. |
 | `web_motd_host_qwkid` | empty | QWK ID of the BBS whose sysop may post to the MOTD room. The old JS bundle's `motd_host_qwkid` at the top of the file still counts. |
+| `web_styles` | all | Which page styles users may pick, by id, in the order shown: `classic`, `cga`, `modern-dark`, `modern-light`, `amber`, `green`, `win95`, `compact`. Unknown ids are skipped; a list with none left offers them all. A user whose saved style is no longer listed gets the default. |
+| `web_default_style` | `classic` | The style guests and new users see. If it isn't in `web_styles`, the first listed style is used. |
 | `web_motd_host_system` | empty | The same by BBS name, when no QWK ID is set. With neither set, the sysop may post when `host` is `127.0.0.1`/`localhost` or equals the BBS name. |
 
 The web page finds this file at `<exec>/../xtrn/avatar_chat_universal/avatar_chat.ini`.

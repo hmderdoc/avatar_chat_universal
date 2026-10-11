@@ -8,6 +8,7 @@
  * section header into that section. */
 
 import { parseBool, parseIntOr, sanitizeChannel, splitList, trimText } from './util';
+import { defaultStyle, offeredStyles, PageStyle } from './webprefs';
 
 export interface WebConfig {
     iniPath: string;
@@ -31,6 +32,8 @@ export interface WebConfig {
     uploadDir: string;
     uploadUrlBase: string;
     uploadsPerHour: number;
+    styles: PageStyle[];
+    defaultStyle: string;
 }
 
 /* The door's DefaultNSFWKeywords (internal/inlineimg/urls.go). */
@@ -77,6 +80,8 @@ export function buildConfig(get: IniGetter, iniPath: string, iniFound: boolean):
         if (list.indexOf(t) >= 0 || (t === 'jpg' && list.indexOf('jpeg') >= 0)) allowed.push(t);
     }
 
+    const styles = offeredStyles(splitList(web('web_styles', '')));
+
     return {
         iniPath: iniPath,
         iniFound: iniFound,
@@ -99,7 +104,9 @@ export function buildConfig(get: IniGetter, iniPath: string, iniFound: boolean):
         uploadDir: web('web_upload_dir', ''),
         /* web_upload_url_base is the older name for the same key. */
         uploadUrlBase: web('web_media_base_url', web('web_upload_url_base', '')).replace(/\/+$/, ''),
-        uploadsPerHour: Math.max(0, parseIntOr(web('web_uploads_per_hour', '30'), 30))
+        uploadsPerHour: Math.max(0, parseIntOr(web('web_uploads_per_hour', '30'), 30)),
+        styles: styles,
+        defaultStyle: defaultStyle(web('web_default_style', '').toLowerCase(), styles)
     };
 }
 

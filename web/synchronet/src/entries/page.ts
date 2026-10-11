@@ -6,11 +6,13 @@
 import { loadConfig } from '../lib/config';
 import { pageToken } from '../lib/csrf';
 import * as chat from '../lib/chat';
+import * as webprefs from '../lib/webprefs';
 
 export function pageConfig(): { [k: string]: unknown } {
     const cfg = loadConfig();
     const viewer = chat.currentViewer();
     const motd = chat.canManageMotd(cfg, viewer);
+    const prefs = webprefs.readPrefs(viewer.number);
     return {
         server: cfg.host + ':' + cfg.port,
         configFound: cfg.iniFound,
@@ -27,6 +29,11 @@ export function pageConfig(): { [k: string]: unknown } {
         images: cfg.images,
         linkPreviews: cfg.linkPreviews && viewer.authed,
         nsfwKeywords: cfg.nsfwKeywords,
+        /* the page style is applied in the served HTML (no flash of the
+           default); guests get the sysop's default */
+        pageStyle: viewer.authed ? webprefs.resolveStyle(prefs.style, cfg.styles, cfg.defaultStyle) : cfg.defaultStyle,
+        pageStyles: cfg.styles,
+        joinedRooms: viewer.authed ? webprefs.joinedRooms(prefs, chat.defaultChannel(cfg, viewer)) : [chat.defaultChannel(cfg, viewer)],
         uploads: {
             enabled: cfg.uploads && viewer.authed,
             maxMb: cfg.uploadMaxMb,

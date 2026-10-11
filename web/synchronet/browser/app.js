@@ -7,7 +7,11 @@
     var uploadConfig = pageConfig.uploads || { enabled: false, types: [] };
     var params = new URLSearchParams(window.location.search);
     var apiBase = './api/avatarchat.ssjs';
-    var initialChannel = sanitizeChannelName(params.get('channel') || pageConfig.defaultChannel || 'main');
+    /* A ?channel= link opens that room; otherwise the first room in your
+       sidebar (the default room when you have none). */
+    var initialChannel = sanitizeChannelName(params.get('channel') ||
+        (Array.isArray(pageConfig.joinedRooms) && pageConfig.joinedRooms.length ? pageConfig.joinedRooms[0] : '') ||
+        pageConfig.defaultChannel || 'main');
     var initialPrivate = trimText(params.get('private') || '');
     var initialPrivateSystem = trimText(params.get('system') || '');
     if (isMotdChannelName(initialChannel) && !pageConfig.canManageMotd) {
@@ -171,11 +175,20 @@
     var usersClose = document.getElementById('avatar-chat-users-close');
     var roomsList = document.getElementById('avatar-chat-rooms');
     var privateList = document.getElementById('avatar-chat-private');
-    var roomOpen = document.getElementById('avatar-chat-room-open');
     var roomModal = document.getElementById('avatar-chat-room-modal');
-    var roomCancel = document.getElementById('avatar-chat-room-cancel');
+    var roomClose = document.getElementById('avatar-chat-room-close');
     var roomForm = document.getElementById('avatar-chat-room-form');
     var roomInput = document.getElementById('avatar-chat-room-input');
+    var roomSubmit = document.getElementById('avatar-chat-room-submit');
+    var roomPickerList = document.getElementById('avatar-chat-room-list');
+    var roomActions = document.getElementById('avatar-chat-room-actions');
+    var noRoomsModal = document.getElementById('avatar-chat-norooms-modal');
+    var noRoomsMain = document.getElementById('avatar-chat-norooms-main');
+    var noRoomsPick = document.getElementById('avatar-chat-norooms-pick');
+    var noRoomsCancel = document.getElementById('avatar-chat-norooms-cancel');
+    /* The sidebar's rooms: the ones this user joined, kept by the BBS
+       (webprefs record), as the page was served. */
+    var joinedRooms = Array.isArray(pageConfig.joinedRooms) ? pageConfig.joinedRooms.slice() : [];
     var messageContainer = document.getElementById('avatar-chat-messages');
     var form = document.getElementById('avatar-chat-form');
     var fileInput = document.getElementById('avatar-chat-file');
@@ -2226,7 +2239,43 @@
             serverLabel.textContent = String(pageConfig.server || '');
         }
 
+        renderRoomActions();
         renderMotdBar();
+    }
+
+    function isJoined(name) {
+        var key = normalizeUpper(name);
+        var i;
+        for (i = 0; i < joinedRooms.length; i += 1) {
+            if (normalizeUpper(joinedRooms[i]) === key) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /* Beside the MOTD, where it is clear what they act on: Join a room /
+       Leave for a joined room; Join #name / Other rooms for one you are
+       only looking at. Nothing in a private thread or for guests. */
+    function renderRoomActions() {
+        var html = '';
+        var name = activeView.name;
+
+        if (!roomActions) {
+            return;
+        }
+        if (pageConfig.isLoggedIn && activeView.type === 'channel') {
+            if (isJoined(name)) {
+                html = '<button type="button" class="avatar-chat-room-action" data-picker-open>Join a room</button>' +
+                    '<button type="button" class="avatar-chat-room-action is-leave" data-room-leave="' + escapeAttr(name) + '" title="Leave #' + escapeAttr(name) + '">Leave</button>';
+            } else {
+                html = '<button type="button" class="avatar-chat-room-action is-primary" data-room-join-this="' + escapeAttr(name) + '">Join #' + escapeHtml(name) + '</button>' +
+                    '<button type="button" class="avatar-chat-room-action" data-picker-open>Other rooms</button>';
+            }
+        }
+        if (roomActions.innerHTML !== html) {
+            roomActions.innerHTML = html;
+        }
     }
 
     function updateChannelLabel() {
@@ -2303,16 +2352,89 @@
         usersModal.setAttribute('aria-hidden', 'true');
     }
 
+    /* The room picker: every public room with its user count and whether
+       you are in it; click one to join it. The name box below it says what
+       it will do: Join #x for a room that exists, Create #x for a new one. */
+    function pickerRooms() {
+        var list = rooms.filter(function (room) {
+            return room && room.name && !(isMotdChannelName(room.name) && !pageConfig.canManageMotd);
+        }).slice();
+        list.sort(function (a, b) {
+            if ((a.userCount || 0) !== (b.userCount || 0)) {
+                return (b.userCount || 0) - (a.userCount || 0);
+            }
+            return String(a.name).localeCompare(String(b.name));
+        });
+        return list;
+    }
+
+    function renderRoomPicker() {
+        var list = pickerRooms();
+        var html = '';
+
+        if (!roomPickerList) {
+            return;
+        }
+        if (!list.length) {
+            html = '<div class="avatar-chat-nav-empty">No public rooms yet. Type a name below to create one.</div>';
+        }
+        list.forEach(function (room) {
+            var isCurrent = activeView.type === 'channel' && normalizeUpper(room.name) === normalizeUpper(activeView.name);
+            var state = isCurrent ? 'Current' : (isJoined(room.name) ? 'Joined' : '');
+            html += '<button type="button" class="avatar-chat-picker-room' + (isCurrent ? ' is-current' : '') + '" data-picker-room="' + escapeAttr(room.name) + '">' +
+                '<span class="avatar-chat-picker-room-name">#' + escapeHtml(room.name) + '</span>' +
+                '<span class="avatar-chat-picker-room-count">' + escapeHtml(String(room.userCount || 0)) + ' user' + ((room.userCount || 0) === 1 ? '' : 's') + '</span>' +
+                (state ? '<span class="avatar-chat-nav-state">' + state + '</span>' : '') +
+                '</button>';
+        });
+        roomPickerList.innerHTML = html;
+        updateRoomSubmit();
+    }
+
+    /* Join #x when x is a room, Create #x when it would be a new one. */
+    function updateRoomSubmit() {
+        var name = roomInput ? sanitizeChannelName(trimText(roomInput.value).replace(/^#/, '')) : '';
+        var typed = roomInput ? trimText(roomInput.value).replace(/^#/, '') : '';
+
+        if (!roomSubmit) {
+            return;
+        }
+        if (!typed.length || !name.length) {
+            roomSubmit.textContent = 'Join';
+            roomSubmit.disabled = true;
+            roomSubmit.removeAttribute('data-create');
+            return;
+        }
+        var existing = findRoomSummary(name);
+        roomSubmit.disabled = false;
+        if (existing) {
+            roomSubmit.textContent = 'Join #' + existing.name;
+            roomSubmit.removeAttribute('data-create');
+        } else {
+            roomSubmit.textContent = 'Create #' + name;
+            roomSubmit.setAttribute('data-create', '1');
+        }
+    }
+
     function openRoomModal() {
         if (!roomModal) {
             return;
         }
+        closeNoRoomsModal();
+        if (roomInput) {
+            roomInput.value = '';
+        }
+        renderRoomPicker();
         roomModal.classList.add('is-open');
         roomModal.setAttribute('aria-hidden', 'false');
         if (roomInput) {
             roomInput.focus();
-            roomInput.select();
         }
+        loadRoomSummaries(true).then(function () {
+            if (roomModal.classList.contains('is-open')) {
+                renderRoomPicker();
+            }
+        });
     }
 
     function closeRoomModal() {
@@ -2324,6 +2446,94 @@
         if (roomInput) {
             roomInput.value = '';
         }
+    }
+
+    function openNoRoomsModal() {
+        if (!noRoomsModal) {
+            return;
+        }
+        noRoomsModal.classList.add('is-open');
+        noRoomsModal.setAttribute('aria-hidden', 'false');
+        if (noRoomsMain) {
+            noRoomsMain.focus();
+        }
+    }
+
+    function closeNoRoomsModal() {
+        if (!noRoomsModal) {
+            return;
+        }
+        noRoomsModal.classList.remove('is-open');
+        noRoomsModal.setAttribute('aria-hidden', 'true');
+    }
+
+    function postRoom(action, name, create) {
+        var body = new URLSearchParams();
+        body.set('action', action);
+        body.set('channel', name);
+        if (create) {
+            body.set('create', '1');
+        }
+        return fetchJSON(apiBase, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString()
+        }).then(function (reply) {
+            if (!reply || reply.error) {
+                throw new Error(reply && reply.error ? String(reply.error) : 'could not ' + (action === 'leaveRoom' ? 'leave' : 'join'));
+            }
+            if (Array.isArray(reply.rooms)) {
+                joinedRooms = reply.rooms.slice();
+            }
+            return reply;
+        });
+    }
+
+    /* Join (create=true: create first) and open the room. */
+    function joinRoom(name, create) {
+        var next = sanitizeChannelName(String(name || '').replace(/^#/, ''));
+        if (!next.length) {
+            return Promise.resolve(false);
+        }
+        return postRoom('joinRoom', next, create).then(function (reply) {
+            closeRoomModal();
+            closeNoRoomsModal();
+            ensureRoomSummary(reply.channel);
+            setActiveChannel(reply.channel, true);
+            if (reply.created) {
+                setStatus('info', 'Created #' + reply.channel + ' and joined it.', false);
+                loadRoomSummaries(true);
+            }
+            return true;
+        }).catch(function (error) {
+            setStatus('error', error && error.message ? String(error.message) : explainServiceError(), false);
+            return false;
+        });
+    }
+
+    /* Leave a room: it drops out of the sidebar. Leaving the one you are
+       looking at moves you to your most recent other room; leaving the last
+       one offers the default room. */
+    function leaveRoom(name) {
+        return postRoom('leaveRoom', name, false).then(function () {
+            var leavingCurrent = activeView.type === 'channel' && normalizeUpper(activeView.name) === normalizeUpper(name);
+            if (!joinedRooms.length) {
+                renderRoomList();
+                renderHeaderBar();
+                openNoRoomsModal();
+                return;
+            }
+            if (leavingCurrent) {
+                var remaining = joinedRooms.map(function (n) { return findRoomSummary(n) || { name: n, lastTimestamp: 0 }; });
+                remaining.sort(function (a, b) { return (b.lastTimestamp || 0) - (a.lastTimestamp || 0); });
+                setActiveChannel(remaining[0].name, true);
+                return;
+            }
+            renderRoomList();
+            renderHeaderBar();
+        }).catch(function (error) {
+            setStatus('error', error && error.message ? String(error.message) : explainServiceError(), false);
+        });
     }
 
     function openPrivateThread(targetName, targetSystem, targetAvatar) {
@@ -2502,27 +2712,32 @@
         }).catch(function () {});
     }
 
+    /* The sidebar is the switcher: the rooms you joined, unread first, then
+       most recent; the open one highlighted. Click a row to view it, x to
+       leave it. */
     function renderRoomsMarkup() {
-        var items = rooms.filter(shouldShowRoom).slice();
+        var items = joinedRooms.filter(function (name) {
+            return !(isMotdChannelName(name) && !pageConfig.canManageMotd);
+        }).map(function (name) {
+            return findRoomSummary(name) || { name: name, userCount: 0, lastTimestamp: 0 };
+        });
         var html = '';
 
         items.sort(function (a, b) {
-            var aActive = activeView.type === 'channel' && normalizeUpper(a.name) === normalizeUpper(activeView.name) ? 1 : 0;
-            var bActive = activeView.type === 'channel' && normalizeUpper(b.name) === normalizeUpper(activeView.name) ? 1 : 0;
-            var aUnread = unreadChannels[normalizeUpper(a.name)] || 0;
-            var bUnread = unreadChannels[normalizeUpper(b.name)] || 0;
+            var aUnread = (unreadChannels[normalizeUpper(a.name)] || 0) > 0 ? 1 : 0;
+            var bUnread = (unreadChannels[normalizeUpper(b.name)] || 0) > 0 ? 1 : 0;
 
-            if (aActive !== bActive) {
-                return bActive - aActive;
-            }
             if (aUnread !== bUnread) {
                 return bUnread - aUnread;
             }
-            return (b.lastTimestamp || 0) - (a.lastTimestamp || 0);
+            if ((a.lastTimestamp || 0) !== (b.lastTimestamp || 0)) {
+                return (b.lastTimestamp || 0) - (a.lastTimestamp || 0);
+            }
+            return String(a.name).localeCompare(String(b.name));
         });
 
         if (!items.length) {
-            roomsList.innerHTML = '<div class="avatar-chat-nav-empty">No public rooms yet.</div>';
+            roomsList.innerHTML = '<div class="avatar-chat-nav-empty">No rooms joined.</div>';
             return;
         }
 
@@ -2532,22 +2747,20 @@
                 activeView.type === 'channel' &&
                 normalizeUpper(currentPublicChannel) === normalizeUpper(room.name);
 
-            html += '<div class="avatar-chat-nav-item' + (isActive ? ' is-active' : '') + '">';
+            html += '<div class="avatar-chat-nav-item avatar-chat-room' + (isActive ? ' is-active' : '') +
+                '" role="button" tabindex="0" data-room-open="' + escapeAttr(room.name) + '">';
             html += '<div class="avatar-chat-nav-top">';
             html += '<span class="avatar-chat-nav-title">#' + escapeHtml(room.name) + '</span>';
             if (unread > 0) {
                 html += '<span class="avatar-chat-badge is-unread">' + escapeHtml(String(unread)) + '</span>';
             }
-            html += '</div>';
-            html += '<div class="avatar-chat-nav-secondary">' + escapeHtml(String(room.userCount || 0)) + ' user' + ((room.userCount || 0) === 1 ? '' : 's') + '</div>';
-            html += '<div class="avatar-chat-nav-actions">';
-            if (isActive) {
-                html += '<span class="avatar-chat-nav-state">Current</span>';
-            } else {
-                html += '<button type="button" class="avatar-chat-nav-action is-primary" data-room-join="' + escapeAttr(room.name) + '">Join</button>';
+            if (pageConfig.isLoggedIn) {
+                html += '<button type="button" class="avatar-chat-nav-icon is-leave" data-room-leave="' + escapeAttr(room.name) +
+                    '" title="Leave #' + escapeAttr(room.name) + '" aria-label="Leave #' + escapeAttr(room.name) + '">&times;</button>';
             }
-            html += '<button type="button" class="avatar-chat-nav-action" data-room-users="' + escapeAttr(room.name) + '">Users</button>';
             html += '</div>';
+            html += '<div class="avatar-chat-nav-secondary">' + escapeHtml(String(room.userCount || 0)) + ' user' + ((room.userCount || 0) === 1 ? '' : 's') +
+                (isActive ? ' \u00b7 Current' : '') + '</div>';
             html += '</div>';
         });
 
@@ -3113,14 +3326,23 @@
 
     function sendPublicMessage(text) {
         var body = new URLSearchParams();
+        var channel = currentPublicChannel;
         body.set('action', 'send');
-        body.set('channel', currentPublicChannel);
+        body.set('channel', channel);
         body.set('message', text);
 
         return fetchJSON(apiBase, {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: body.toString()
+        }).then(function (reply) {
+            /* speaking in a room joins it (the BBS records it too) */
+            if (reply && reply.success && !isJoined(channel)) {
+                joinedRooms.push(channel);
+                renderRoomList();
+                renderHeaderBar();
+            }
+            return reply;
         });
     }
 
@@ -3145,18 +3367,6 @@
             return sendPrivateMessage(text);
         }
         return sendPublicMessage(text);
-    }
-
-    function createRoom(name) {
-        var body = new URLSearchParams();
-        body.set('action', 'createChannel');
-        body.set('channel', sanitizeChannelName(name));
-
-        return fetchJSON(apiBase, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body.toString()
-        });
     }
 
     function reconcileState(forceUsers) {
@@ -3387,22 +3597,62 @@
         });
     }
 
-    if (roomOpen) {
-        roomOpen.addEventListener('click', function () {
-            openRoomModal();
-        });
-    }
-
-    if (roomCancel) {
-        roomCancel.addEventListener('click', function () {
+    if (roomClose) {
+        roomClose.addEventListener('click', function () {
             closeRoomModal();
         });
     }
 
     if (roomModal) {
         roomModal.addEventListener('click', function (event) {
+            var pick = event.target.closest('[data-picker-room]');
             if (event.target === roomModal) {
                 closeRoomModal();
+                return;
+            }
+            if (pick) {
+                joinRoom(pick.getAttribute('data-picker-room'), false);
+            }
+        });
+    }
+
+    if (roomInput) {
+        roomInput.addEventListener('input', updateRoomSubmit);
+    }
+
+    if (roomActions) {
+        roomActions.addEventListener('click', function (event) {
+            var target = event.target.closest('button');
+            if (!target) {
+                return;
+            }
+            if (target.hasAttribute('data-picker-open')) {
+                openRoomModal();
+            } else if (target.hasAttribute('data-room-join-this')) {
+                joinRoom(target.getAttribute('data-room-join-this'), false);
+            } else if (target.hasAttribute('data-room-leave')) {
+                leaveRoom(target.getAttribute('data-room-leave'));
+            }
+        });
+    }
+
+    if (noRoomsModal) {
+        if (noRoomsMain) {
+            noRoomsMain.addEventListener('click', function () {
+                joinRoom(getDefaultPublicChannel(), false);
+            });
+        }
+        if (noRoomsPick) {
+            noRoomsPick.addEventListener('click', function () {
+                openRoomModal();
+            });
+        }
+        if (noRoomsCancel) {
+            noRoomsCancel.addEventListener('click', closeNoRoomsModal);
+        }
+        noRoomsModal.addEventListener('click', function (event) {
+            if (event.target === noRoomsModal) {
+                closeNoRoomsModal();
             }
         });
     }
@@ -3417,18 +3667,24 @@
 
     if (roomsList) {
         roomsList.addEventListener('click', function (event) {
-            var joinButton = event.target.closest('[data-room-join]');
-            var usersButton = event.target.closest('[data-room-users]');
+            var leave = event.target.closest('[data-room-leave]');
+            var row = event.target.closest('[data-room-open]');
 
-            if (joinButton) {
-                setActiveChannel(joinButton.getAttribute('data-room-join'), true);
+            if (leave) {
+                event.stopPropagation();
+                leaveRoom(leave.getAttribute('data-room-leave'));
                 return;
             }
-
-            if (!usersButton) {
-                return;
+            if (row) {
+                setActiveChannel(row.getAttribute('data-room-open'), true);
             }
-            openUsersPanelForRoom(usersButton.getAttribute('data-room-users'));
+        });
+        roomsList.addEventListener('keydown', function (event) {
+            var row = event.target.closest('[data-room-open]');
+            if (row && event.target === row && (event.key === 'Enter' || event.key === ' ')) {
+                event.preventDefault();
+                setActiveChannel(row.getAttribute('data-room-open'), true);
+            }
         });
     }
 
@@ -3484,18 +3740,8 @@
                 return;
             }
 
-            createRoom(nextRoom).then(function (response) {
-                if (response && response.error) {
-                    setStatus('error', String(response.error), true);
-                    return;
-                }
-                closeRoomModal();
-                ensureRoomSummary(nextRoom);
-                loadRoomSummaries(true);
-                setActiveChannel(nextRoom, true);
-            }).catch(function () {
-                setStatus('error', explainServiceError(), true);
-            });
+            updateRoomSubmit();
+            joinRoom(nextRoom, !!(roomSubmit && roomSubmit.getAttribute('data-create')));
         });
     }
 
@@ -3752,6 +3998,45 @@
     var styleSave = document.getElementById('avatar-chat-style-save');
     var styleCancel = document.getElementById('avatar-chat-style-cancel');
     var styleState = { colors: [] };
+    /* Page style: one pick from the sysop's list, a whole look for this
+       page (colours and shape). Picking previews it at once; Save keeps it,
+       closing without saving puts the saved one back. */
+    var pageStyleSelect = document.getElementById('avatar-chat-page-style');
+    var appRoot = document.querySelector('.avatar-chat-web');
+    var savedPageStyle = String(pageConfig.pageStyle || '');
+
+    function applyPageStyle(id) {
+        if (!appRoot || !id) {
+            return;
+        }
+        Array.prototype.slice.call(appRoot.classList).forEach(function (c) {
+            if (c.indexOf('ac-style-') === 0) {
+                appRoot.classList.remove(c);
+            }
+        });
+        appRoot.classList.add('ac-style-' + id);
+        window.requestAnimationFrame(syncMotdTicker);
+    }
+
+    function savePageStyle(id) {
+        var body = new URLSearchParams();
+        if (!id || id === savedPageStyle) {
+            return Promise.resolve(true);
+        }
+        body.set('action', 'savePageStyle');
+        body.set('style', id);
+        return fetchJSON(apiBase, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString()
+        }).then(function (reply) {
+            if (!reply || reply.error) {
+                throw new Error(reply && reply.error ? reply.error : 'could not save the page style');
+            }
+            savedPageStyle = id;
+            return true;
+        });
+    }
 
     function hexChannel(v) {
         var s = Math.max(0, Math.min(255, Math.round(v))).toString(16);
@@ -3808,11 +4093,15 @@
     function closeStyleModal() {
         styleModal.classList.remove('is-open');
         styleModal.setAttribute('aria-hidden', 'true');
+        applyPageStyle(savedPageStyle);
     }
 
     if (styleOpen && styleModal) {
         styleOpen.addEventListener('click', function () {
             styleStatus.textContent = 'Loading...';
+            if (pageStyleSelect) {
+                pageStyleSelect.value = savedPageStyle;
+            }
             styleModal.classList.add('is-open');
             styleModal.setAttribute('aria-hidden', 'false');
             fetchJSON(apiBase + '?action=style').then(function (reply) {
@@ -3853,6 +4142,11 @@
                 renderStyleEditor();
             }
         });
+        if (pageStyleSelect) {
+            pageStyleSelect.addEventListener('change', function () {
+                applyPageStyle(pageStyleSelect.value);
+            });
+        }
         styleSave.addEventListener('click', function () {
             styleStatus.textContent = 'Saving...';
             fetchJSON(apiBase + '?action=saveStyle', {
@@ -3863,6 +4157,8 @@
                 if (!reply || reply.error) {
                     throw new Error(reply && reply.error ? reply.error : 'could not save');
                 }
+                return savePageStyle(pageStyleSelect ? pageStyleSelect.value : '');
+            }).then(function () {
                 styleStatus.textContent = 'Saved. Your next message carries it.';
                 setTimeout(closeStyleModal, 900);
             }).catch(function (error) {
@@ -4409,6 +4705,10 @@
         }
         if (event.key === 'Escape' && roomModal && roomModal.classList.contains('is-open')) {
             closeRoomModal();
+            return;
+        }
+        if (event.key === 'Escape' && noRoomsModal && noRoomsModal.classList.contains('is-open')) {
+            closeNoRoomsModal();
         }
     });
 })();

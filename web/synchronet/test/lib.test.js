@@ -192,3 +192,36 @@ test("web_media_base_url, or the older web_upload_url_base, sets the link base",
   assert.strictEqual(cfg({ "web.web_media_base_url": "https://new.example", "web.web_upload_url_base": "https://old.example" }).uploadUrlBase, "https://new.example");
   assert.strictEqual(cfg({}).uploadUrlBase, "");
 });
+
+test("page styles: one list, sysop allow-list and default, a user's pick", () => {
+  const ids = L.PAGE_STYLES.map((s) => s.id);
+  assert.ok(ids.length >= 6 && ids[0] === "classic");
+  assert.deepStrictEqual(L.offeredStyles([]).map((s) => s.id), ids);
+  assert.deepStrictEqual(L.offeredStyles(["amber", "cga", "nope"]).map((s) => s.id), ["cga", "amber"]);
+  assert.deepStrictEqual(L.offeredStyles(["nope"]).map((s) => s.id), ids, "an allow-list with nothing real offers everything");
+  const two = L.offeredStyles(["amber", "cga"]);
+  assert.strictEqual(L.defaultStyle("amber", two), "amber");
+  assert.strictEqual(L.defaultStyle("win95", two), "cga", "a default the sysop doesn't offer falls to the first offered");
+  assert.strictEqual(L.defaultStyle("", L.offeredStyles([])), "classic");
+  assert.strictEqual(L.resolveStyle("amber", two, "cga"), "amber");
+  assert.strictEqual(L.resolveStyle("win95", two, "cga"), "cga", "a pick the sysop later removed falls back");
+  const cfg = (map) => L.buildConfig((sec, key) => (map[(sec || "") + "." + key] === undefined ? null : map[(sec || "") + "." + key]), "x", true);
+  const c = cfg({ "web.web_styles": "green, win95", "web.web_default_style": "WIN95" });
+  assert.deepStrictEqual(c.styles.map((s) => s.id), ["green", "win95"]);
+  assert.strictEqual(c.defaultStyle, "win95");
+  assert.strictEqual(cfg({}).defaultStyle, "classic");
+});
+
+test("web prefs record: style and sidebar rooms, cleaned", () => {
+  assert.deepStrictEqual(L.normalizePrefs(null), { version: 1, style: "", rooms: null });
+  const p = L.normalizePrefs({ style: "AMBER", rooms: ["main", "Retro", "retro", "bad name", "x".repeat(40), "", 7], extra: 1 });
+  assert.strictEqual(p.style, "amber");
+  assert.deepStrictEqual(p.rooms, ["main", "Retro"]);
+  assert.strictEqual(L.normalizePrefs({ style: "<script>" }).style, "");
+  assert.deepStrictEqual(L.joinedRooms(L.normalizePrefs({}), "main"), ["main"], "never set: the default room");
+  assert.deepStrictEqual(L.joinedRooms(L.normalizePrefs({ rooms: [] }), "main"), [], "left everything: nothing");
+  assert.deepStrictEqual(L.addRoom(["main"], "MAIN"), ["main"]);
+  assert.deepStrictEqual(L.addRoom(["main"], "lobby"), ["main", "lobby"]);
+  assert.deepStrictEqual(L.removeRoom(["main", "Lobby"], "lobby"), ["main"]);
+  assert.strictEqual(L.cleanRooms(Array.from({ length: 80 }, (_, i) => "r" + i)).length, 50);
+});

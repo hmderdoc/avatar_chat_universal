@@ -70,6 +70,107 @@ var AvatarChatPage = (function() {
     }
     return out;
   }
+  function isArray(value) {
+    return Object.prototype.toString.call(value) === "[object Array]";
+  }
+
+  // build/lib/webprefs.js
+  var PAGE_STYLES = [
+    { id: "classic", label: "Classic" },
+    { id: "cga", label: "CGA" },
+    { id: "modern-dark", label: "Modern dark" },
+    { id: "modern-light", label: "Modern light" },
+    { id: "amber", label: "Amber phosphor" },
+    { id: "green", label: "Green phosphor" },
+    { id: "win95", label: "Windows 95" },
+    { id: "compact", label: "Flat compact" }
+  ];
+  var DEFAULT_PAGE_STYLE = "classic";
+  var PREFS_VERSION = 1;
+  var MAX_ROOMS = 50;
+  function emptyPrefs() {
+    return { version: PREFS_VERSION, style: "", rooms: null };
+  }
+  function knownStyle(id) {
+    for (var i = 0; i < PAGE_STYLES.length; i++)
+      if (PAGE_STYLES[i].id === id)
+        return true;
+    return false;
+  }
+  function offeredStyles(allow) {
+    var out = [];
+    for (var i = 0; i < PAGE_STYLES.length; i++) {
+      if (!allow.length || allow.indexOf(PAGE_STYLES[i].id) >= 0)
+        out.push(PAGE_STYLES[i]);
+    }
+    return out.length ? out : PAGE_STYLES.slice();
+  }
+  function defaultStyle(wanted, offered) {
+    for (var i = 0; i < offered.length; i++)
+      if (offered[i].id === wanted)
+        return wanted;
+    for (var i = 0; i < offered.length; i++)
+      if (offered[i].id === DEFAULT_PAGE_STYLE)
+        return DEFAULT_PAGE_STYLE;
+    return offered[0].id;
+  }
+  function resolveStyle(picked, offered, fallback) {
+    for (var i = 0; i < offered.length; i++)
+      if (offered[i].id === picked)
+        return picked;
+    return fallback;
+  }
+  function cleanRooms(list) {
+    var out = [];
+    var seen = {};
+    var src = isArray(list) ? list : [];
+    for (var i = 0; i < src.length && out.length < MAX_ROOMS; i++) {
+      if (typeof src[i] !== "string")
+        continue;
+      var name = sanitizeChannel(src[i], "");
+      var key = channelKey(name);
+      if (!name.length || seen[key] || src[i] !== name)
+        continue;
+      seen[key] = true;
+      out.push(name);
+    }
+    return out;
+  }
+  function normalizePrefs(raw) {
+    var out = emptyPrefs();
+    var src = raw && typeof raw === "object" ? raw : {};
+    var style = trimText(src.style).toLowerCase();
+    out.style = knownStyle(style) ? style : "";
+    out.rooms = isArray(src.rooms) ? cleanRooms(src.rooms) : null;
+    return out;
+  }
+  function joinedRooms(prefs, defaultRoom) {
+    return prefs.rooms === null ? [defaultRoom] : prefs.rooms.slice();
+  }
+  function prefsPath(number) {
+    return system.data_dir + "chat/webprefs/" + format("%04u", number) + ".json";
+  }
+  function readPrefs(number) {
+    if (!(number > 0))
+      return emptyPrefs();
+    var path = prefsPath(number);
+    if (!file_exists(path))
+      return emptyPrefs();
+    var f = new File(path);
+    if (!f.open("r"))
+      return emptyPrefs();
+    var raw = "";
+    try {
+      raw = f.read() || "";
+    } finally {
+      f.close();
+    }
+    try {
+      return normalizePrefs(JSON.parse(raw));
+    } catch (_e) {
+      return emptyPrefs();
+    }
+  }
 
   // build/lib/config.js
   var DEFAULT_NSFW_KEYWORDS = [
@@ -133,6 +234,7 @@ var AvatarChatPage = (function() {
       if (list.indexOf(t) >= 0 || t === "jpg" && list.indexOf("jpeg") >= 0)
         allowed.push(t);
     }
+    var styles = offeredStyles(splitList(web("web_styles", "")));
     return {
       iniPath: iniPath,
       iniFound: iniFound,
@@ -155,7 +257,9 @@ var AvatarChatPage = (function() {
       uploadDir: web("web_upload_dir", ""),
       /* web_upload_url_base is the older name for the same key. */
       uploadUrlBase: web("web_media_base_url", web("web_upload_url_base", "")).replace(/\/+$/, ""),
-      uploadsPerHour: Math.max(0, parseIntOr(web("web_uploads_per_hour", "30"), 30))
+      uploadsPerHour: Math.max(0, parseIntOr(web("web_uploads_per_hour", "30"), 30)),
+      styles: styles,
+      defaultStyle: defaultStyle(web("web_default_style", "").toLowerCase(), styles)
     };
   }
   function iniPathFor(webSettings, execDir) {
@@ -265,6 +369,7 @@ var AvatarChatPage = (function() {
     var cfg = loadConfig();
     var viewer = currentViewer();
     var motd = canManageMotd(cfg, viewer);
+    var prefs = readPrefs(viewer.number);
     return {
       server: cfg.host + ":" + cfg.port,
       configFound: cfg.iniFound,
@@ -281,6 +386,11 @@ var AvatarChatPage = (function() {
       images: cfg.images,
       linkPreviews: cfg.linkPreviews && viewer.authed,
       nsfwKeywords: cfg.nsfwKeywords,
+      /* the page style is applied in the served HTML (no flash of the
+         default); guests get the sysop's default */
+      pageStyle: viewer.authed ? resolveStyle(prefs.style, cfg.styles, cfg.defaultStyle) : cfg.defaultStyle,
+      pageStyles: cfg.styles,
+      joinedRooms: viewer.authed ? joinedRooms(prefs, defaultChannel(cfg, viewer)) : [defaultChannel(cfg, viewer)],
       uploads: {
         enabled: cfg.uploads && viewer.authed,
         maxMb: cfg.uploadMaxMb,

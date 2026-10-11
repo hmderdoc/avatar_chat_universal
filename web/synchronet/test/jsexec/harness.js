@@ -195,6 +195,69 @@ r = api(bob, 'GET', { action: 'channels' });
 names = (r.channels || []).map(function (c) { return c.name; });
 check(names.indexOf('motd') < 0, 'motd room hidden from non-sysops', names.join(','));
 
+/* ---- sidebar rooms: join, create, leave (this BBS's webprefs record) ---- */
+r = api(bob, 'GET', { action: 'prefs' });
+check(r.ok && r.rooms.length === 1 && r.rooms[0] === 'main' && r.style === 'classic', 'a new user has main in the sidebar and the default style', JSON.stringify(r));
+r = api(bob, 'POST', { action: 'joinRoom', channel: 'LOBBY' });
+check(r.ok && r.channel === 'lobby' && r.created === false && r.rooms.join(',') === 'main,lobby', 'joining an existing room uses its spelling', JSON.stringify(r));
+r = api(bob, 'POST', { action: 'joinRoom', channel: 'brandnew' });
+check(r.error === 'no room #brandnew yet', 'a room that does not exist is not made without create=1', JSON.stringify(r));
+r = api(bob, 'GET', { action: 'channels' });
+check((r.channels || []).map(function (c) { return c.name; }).indexOf('brandnew') < 0, '... and nothing was created');
+r = api(bob, 'POST', { action: 'joinRoom', channel: 'brandnew', create: '1' });
+check(r.ok && r.created === true && r.rooms.join(',') === 'main,lobby,brandnew', 'create=1 makes it and joins it', JSON.stringify(r));
+r = api(alice, 'GET', { action: 'channels' });
+check((r.channels || []).map(function (c) { return c.name; }).indexOf('brandnew') >= 0, 'the new room is public');
+r = api(bob, 'POST', { action: 'joinRoom', channel: 'Alice', create: '1' });
+check(r.error === 'that room is reserved', "a member's mailbox can't be joined or created as a room", JSON.stringify(r));
+r = invoke(apiFn, bob, 'POST', { action: 'joinRoom', channel: 'lobby' }, {});
+check(r.error === 'stale page: reload it', 'joinRoom needs the token');
+r = invoke(apiFn, guest, 'POST', { action: 'joinRoom', channel: 'lobby' }, {});
+check(r.error === 'authentication required', 'guests have no sidebar to change');
+r = api(bob, 'POST', { action: 'leaveRoom', channel: 'LOBBY' });
+check(r.ok && r.rooms.join(',') === 'main,brandnew', 'leaveRoom drops it', JSON.stringify(r));
+r = api(bob, 'POST', { action: 'leaveRoom', channel: 'main' });
+r = api(bob, 'POST', { action: 'leaveRoom', channel: 'brandnew' });
+check(r.ok && r.rooms.length === 0, 'leaving every room leaves an empty sidebar (not main again)', JSON.stringify(r));
+check(page(bob).joinedRooms.length === 0, 'the page config carries the empty list');
+r = api(bob, 'POST', { action: 'send', channel: 'lobby', message: 'speaking joins' });
+check(r.success === true && api(bob, 'GET', { action: 'prefs' }).rooms.join(',') === 'lobby', 'sending in a room adds it to the sidebar');
+var prefsFile = SANDBOX + 'data/chat/webprefs/9002.json';
+check(file_exists(prefsFile), 'kept in the sandbox data/chat/webprefs/9002.json');
+
+/* ---- page style: one pick, saved per user, served in the page ---- */
+var bp = page(bob);
+check(bp.pageStyle === 'classic' && bp.pageStyles.length >= 6 && bp.pageStyles[0].id === 'classic', 'page config: the default style and the list', JSON.stringify(bp.pageStyles.map(function (x) { return x.id; })));
+r = api(bob, 'POST', { action: 'savePageStyle', style: 'amber' });
+check(r.ok && r.style === 'amber', 'savePageStyle stores a listed style', JSON.stringify(r));
+check(page(bob).pageStyle === 'amber' && api(bob, 'GET', { action: 'prefs' }).style === 'amber', 'the next page load wears it');
+check(api(bob, 'GET', { action: 'prefs' }).rooms.join(',') === 'lobby', 'saving the style keeps the sidebar');
+r = api(bob, 'POST', { action: 'savePageStyle', style: 'neon"><script>' });
+check(r.error === 'no such page style', 'an unlisted style is refused', JSON.stringify(r));
+r = invoke(apiFn, bob, 'POST', { action: 'savePageStyle', style: 'cga' }, {});
+check(r.error === 'stale page: reload it', 'savePageStyle needs the token');
+check(page(guest).pageStyle === 'classic', 'guests get the default');
+check(page(alice).pageStyle === 'classic', "one user's pick doesn't touch another's");
+var nickstyleFile = SANDBOX + 'data/chat/nickstyle/9002.json';
+check(!file_exists(nickstyleFile) || readText(nickstyleFile).indexOf('amber') < 0, 'the shared nickstyle record is not touched');
+/* the sysop's list and default (web_styles, web_default_style) */
+var iniPath0 = SANDBOX + 'xtrn/avatar_chat_universal/avatar_chat.ini';
+var iniBefore0 = readText(iniPath0);
+var iniFile0 = new File(iniPath0);
+iniFile0.open('w');
+iniFile0.write(iniBefore0.replace(/\s*$/, '') + '\nweb_styles = cga, win95\nweb_default_style = win95\n');
+iniFile0.close();
+bp = page(bob);
+check(bp.pageStyle === 'win95' && bp.pageStyles.map(function (x) { return x.id; }).join(',') === 'cga,win95', 'web_styles narrows the list; a pick no longer offered falls to web_default_style', bp.pageStyle);
+check(page(guest).pageStyle === 'win95', 'guests get web_default_style');
+r = api(bob, 'POST', { action: 'savePageStyle', style: 'amber' });
+check(r.error === 'no such page style', 'a style the sysop took off the list is refused');
+iniFile0 = new File(iniPath0);
+iniFile0.open('w');
+iniFile0.write(iniBefore0);
+iniFile0.close();
+check(page(bob).pageStyle === 'amber', 'with the full list back, the saved pick returns');
+
 /* ---- handle styles ---- */
 /* The page edits colours only. A tag the shell or another site stored in
    the shared record survives a save from here, whatever the request says. */

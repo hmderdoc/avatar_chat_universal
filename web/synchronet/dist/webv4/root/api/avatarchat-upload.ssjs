@@ -48,6 +48,36 @@ load(settings.web_lib + 'auth.js');
     return proto + "://" + host;
   }
 
+  // build/lib/webprefs.js
+  var PAGE_STYLES = [
+    { id: "classic", label: "Classic" },
+    { id: "cga", label: "CGA" },
+    { id: "modern-dark", label: "Modern dark" },
+    { id: "modern-light", label: "Modern light" },
+    { id: "amber", label: "Amber phosphor" },
+    { id: "green", label: "Green phosphor" },
+    { id: "win95", label: "Windows 95" },
+    { id: "compact", label: "Flat compact" }
+  ];
+  var DEFAULT_PAGE_STYLE = "classic";
+  function offeredStyles(allow) {
+    var out = [];
+    for (var i = 0; i < PAGE_STYLES.length; i++) {
+      if (!allow.length || allow.indexOf(PAGE_STYLES[i].id) >= 0)
+        out.push(PAGE_STYLES[i]);
+    }
+    return out.length ? out : PAGE_STYLES.slice();
+  }
+  function defaultStyle(wanted, offered) {
+    for (var i = 0; i < offered.length; i++)
+      if (offered[i].id === wanted)
+        return wanted;
+    for (var i = 0; i < offered.length; i++)
+      if (offered[i].id === DEFAULT_PAGE_STYLE)
+        return DEFAULT_PAGE_STYLE;
+    return offered[0].id;
+  }
+
   // build/lib/config.js
   var DEFAULT_NSFW_KEYWORDS = [
     "nude",
@@ -110,6 +140,7 @@ load(settings.web_lib + 'auth.js');
       if (list.indexOf(t) >= 0 || t === "jpg" && list.indexOf("jpeg") >= 0)
         allowed.push(t);
     }
+    var styles = offeredStyles(splitList(web("web_styles", "")));
     return {
       iniPath: iniPath,
       iniFound: iniFound,
@@ -132,7 +163,9 @@ load(settings.web_lib + 'auth.js');
       uploadDir: web("web_upload_dir", ""),
       /* web_upload_url_base is the older name for the same key. */
       uploadUrlBase: web("web_media_base_url", web("web_upload_url_base", "")).replace(/\/+$/, ""),
-      uploadsPerHour: Math.max(0, parseIntOr(web("web_uploads_per_hour", "30"), 30))
+      uploadsPerHour: Math.max(0, parseIntOr(web("web_uploads_per_hour", "30"), 30)),
+      styles: styles,
+      defaultStyle: defaultStyle(web("web_default_style", "").toLowerCase(), styles)
     };
   }
   function iniPathFor(webSettings, execDir) {

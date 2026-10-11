@@ -11,17 +11,11 @@
 ?>
 <link rel="stylesheet" href="./avatarchat/app.css">
 
-<div class="avatar-chat-web">
+<div class="avatar-chat-web ac-style-<? write(avatarChatPage.pageStyle); ?>">
     <div class="avatar-chat-shell">
         <div class="avatar-chat-layout">
             <aside class="avatar-chat-sidebar">
                 <div class="avatar-chat-sidebar-section">
-                    <div class="avatar-chat-sidebar-header">
-                        <h4 class="avatar-chat-sidebar-heading">Public Rooms</h4>
-                    </div>
-<?xjs if (avatarChatPage.isLoggedIn) { ?>
-                    <button id="avatar-chat-room-open" class="avatar-chat-sidebar-button" type="button">Create Room</button>
-<?xjs } ?>
                     <div id="avatar-chat-rooms" class="avatar-chat-nav-list"></div>
                 </div>
 
@@ -43,7 +37,6 @@
                 <div class="avatar-chat-chatpanel">
                     <div class="avatar-chat-topbar">
                         <div class="avatar-chat-topbar-meta">
-                            <span class="avatar-chat-topbar-brand">Avatar Chat</span>
                             <span id="avatar-chat-channel-label" class="avatar-chat-topbar-chip">#main</span>
                             <button id="avatar-chat-count" class="avatar-chat-count" type="button">0 users</button>
                             <span id="avatar-chat-room-count" class="avatar-chat-topbar-chip avatar-chat-topbar-chip-muted">rooms 1</span>
@@ -57,6 +50,7 @@
                                     <span id="avatar-chat-motd-clone" class="avatar-chat-motd-item avatar-chat-motd-item-clone" aria-hidden="true"></span>
                                 </div>
                             </div>
+                            <div id="avatar-chat-room-actions" class="avatar-chat-room-actions"></div>
                         </div>
                     </div>
 
@@ -109,15 +103,28 @@
     <div id="avatar-chat-room-modal" class="avatar-chat-modal" aria-hidden="true">
         <div class="avatar-chat-modal-card" role="dialog" aria-modal="true" aria-labelledby="avatar-chat-room-modal-title">
             <div class="avatar-chat-modal-header">
-                <h4 id="avatar-chat-room-modal-title" class="avatar-chat-modal-title">Create Room</h4>
+                <h4 id="avatar-chat-room-modal-title" class="avatar-chat-modal-title">Join a Room</h4>
+                <button id="avatar-chat-room-close" class="avatar-chat-users-close" type="button" aria-label="Close">&times;</button>
             </div>
-            <p class="avatar-chat-modal-text">Name a new public room. Letters, numbers, dashes, and underscores are allowed.</p>
+            <p class="avatar-chat-modal-text">Pick a room, or type a name (letters, numbers, _ or -). A new name creates the room.</p>
+            <div id="avatar-chat-room-list" class="avatar-chat-picker-list"></div>
             <form id="avatar-chat-room-form" class="avatar-chat-sidebar-form" autocomplete="off">
-                <input id="avatar-chat-room-input" class="avatar-chat-sidebar-input" type="text" maxlength="32" placeholder="new-room">
-                <button class="avatar-chat-sidebar-button" type="submit">Create</button>
+                <input id="avatar-chat-room-input" class="avatar-chat-sidebar-input" type="text" maxlength="32" placeholder="room-name">
+                <button id="avatar-chat-room-submit" class="avatar-chat-sidebar-button" type="submit" disabled>Join</button>
             </form>
+        </div>
+    </div>
+
+    <div id="avatar-chat-norooms-modal" class="avatar-chat-modal" aria-hidden="true">
+        <div class="avatar-chat-modal-card" role="dialog" aria-modal="true" aria-labelledby="avatar-chat-norooms-title">
+            <div class="avatar-chat-modal-header">
+                <h4 id="avatar-chat-norooms-title" class="avatar-chat-modal-title">No rooms joined</h4>
+            </div>
+            <p class="avatar-chat-modal-text">You are not in any chat rooms. Would you like to join #<? write(avatarChatPage.defaultChannel); ?>?</p>
             <div class="avatar-chat-modal-actions">
-                <button id="avatar-chat-room-cancel" class="avatar-chat-sidebar-button" type="button">Cancel</button>
+                <button id="avatar-chat-norooms-main" class="avatar-chat-sidebar-button is-primary" type="button">Join #<? write(avatarChatPage.defaultChannel); ?></button>
+                <button id="avatar-chat-norooms-pick" class="avatar-chat-sidebar-button" type="button">Pick a room</button>
+                <button id="avatar-chat-norooms-cancel" class="avatar-chat-sidebar-button" type="button">Not now</button>
             </div>
         </div>
     </div>
@@ -142,6 +149,15 @@
                 </label>
                 <label>From <input id="avatar-chat-style-a" type="color" value="#55ffff"></label>
                 <label>To <input id="avatar-chat-style-b" type="color" value="#ff55ff"></label>
+            </div>
+            <div class="avatar-chat-style-row">
+                <label>Page style
+                    <select id="avatar-chat-page-style">
+<?xjs for (var acStyleIndex = 0; acStyleIndex < avatarChatPage.pageStyles.length; acStyleIndex++) { var acStyle = avatarChatPage.pageStyles[acStyleIndex]; ?>
+                        <option value="<? write(acStyle.id); ?>"<? write(acStyle.id === avatarChatPage.pageStyle ? ' selected' : ''); ?>><? write(acStyle.label); ?></option>
+<?xjs } ?>
+                    </select>
+                </label>
             </div>
             <div id="avatar-chat-style-status" class="avatar-chat-modal-text" aria-live="polite"></div>
             <div class="avatar-chat-modal-actions">

@@ -2,7 +2,8 @@
 // browser code does: handle styles, mentions, inline pictures, the NSFW
 // veil, link cards, escaping, the write token, live events, the style
 // editor, the one-button composer (attach, drop, paste), the ANSI editor,
-// the avatar chooser and editor, and a chunked upload.
+// the avatar chooser and editor, a chunked upload, rooms (sidebar, picker,
+// join / create / leave) and the page styles.
 //
 //   PLAYWRIGHT=/path/to/node_modules/playwright node test/browser/check.js <port> [screenshot dir]
 const { chromium } = require(process.env.PLAYWRIGHT || "playwright");
@@ -220,6 +221,138 @@ function check(cond, name, detail) {
     els.filter((e) => getComputedStyle(e).display !== "none").map((e) => Math.round(e.getBoundingClientRect().top)));
   check(tops.length === 4 && tops.every((t) => t === tops[0]), "phone width: attach, draw, input, send on one row", JSON.stringify(tops));
   await shot(await page.$("#avatar-chat-form"), "composer-phone.png");
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.waitForTimeout(300);
+
+  // ---- rooms, the way Futureland's page does them ----
+  check(!/Public Rooms/i.test(await page.$eval(".avatar-chat-sidebar", (e) => e.innerText)), "no Public Rooms heading in the sidebar");
+  check(await page.$eval("#avatar-chat-rooms", (e) => !e.parentNode.querySelector(".avatar-chat-sidebar-heading")), "the rooms list has no heading at all");
+  check(!/Avatar Chat/.test(await page.$eval(".avatar-chat-topbar", (e) => e.innerText)), "no Avatar Chat branding in the header");
+  check(await page.$("#avatar-chat-room-open") === null, "no separate create button");
+  const rowsOf = () => page.$$eval("#avatar-chat-rooms [data-room-open]", (els) => els.map((e) => e.getAttribute("data-room-open") + (e.classList.contains("is-active") ? "*" : "")));
+  check(JSON.stringify(await rowsOf()) === JSON.stringify(["main*"]), "sidebar starts with the joined room, highlighted", JSON.stringify(await rowsOf()));
+  check(await page.$('#avatar-chat-rooms [data-room-leave="main"]') !== null, "each row has a leave x");
+  let bar = await page.$eval("#avatar-chat-room-actions", (e) => e.innerText.replace(/\s+/g, " ").trim());
+  check(bar === "Join a room Leave", "room bar for a joined room: Join a room, Leave", bar);
+  await page.click('#avatar-chat-room-actions [data-picker-open]');
+  await page.waitForSelector("#avatar-chat-room-modal.is-open #avatar-chat-room-list [data-picker-room]");
+  await page.waitForTimeout(300);
+  const picker = await page.$$eval("#avatar-chat-room-list [data-picker-room]", (els) => els.map((e) => e.innerText.replace(/\s+/g, " ").trim()));
+  check(JSON.stringify(picker) === JSON.stringify(["#main 3 users Current", "#retro 2 users", "#lobby 0 users"]), "picker lists every room with its count and state", JSON.stringify(picker));
+  const submitText = () => page.$eval("#avatar-chat-room-submit", (e) => (e.disabled ? "(disabled) " : "") + e.textContent);
+  check(await submitText() === "(disabled) Join", "the submit button waits for a name", await submitText());
+  await page.fill("#avatar-chat-room-input", "Retro");
+  check(await submitText() === "Join #retro", "an existing name says Join #retro", await submitText());
+  await page.fill("#avatar-chat-room-input", "newroom");
+  check(await submitText() === "Create #newroom", "a new name says Create #newroom", await submitText());
+  await shot(await page.$("#avatar-chat-room-modal .avatar-chat-modal-card"), "picker.png");
+  await page.click("#avatar-chat-room-submit");
+  await page.waitForFunction(() => !document.querySelector("#avatar-chat-room-modal").classList.contains("is-open"), null, { timeout: 5000 }).catch(() => {});
+  st = await (await fetch(BASE + "/__state")).json();
+  const created = st.posts.filter((x) => x.action === "joinRoom").pop();
+  check(created && created.q.channel === "newroom" && created.q.create === "1", "Create sends joinRoom with create=1", JSON.stringify(created && created.q));
+  await page.waitForTimeout(300);
+  check(JSON.stringify(await rowsOf()).indexOf('"newroom*"') >= 0, "the new room is in the sidebar and open", JSON.stringify(await rowsOf()));
+  check(/Created #newroom/.test(await page.$eval("#avatar-chat-status", (e) => e.innerText)), "it says the room was created", await page.$eval("#avatar-chat-status", (e) => e.innerText));
+  check(await page.$eval("#avatar-chat-channel-label", (e) => e.textContent) === "#newroom", "the header shows #newroom");
+  await page.click('#avatar-chat-room-actions [data-picker-open]');
+  await page.waitForSelector('#avatar-chat-room-list [data-picker-room="retro"]');
+  await page.click('#avatar-chat-room-list [data-picker-room="retro"]');
+  await page.waitForTimeout(500);
+  st = await (await fetch(BASE + "/__state")).json();
+  const picked = st.posts.filter((x) => x.action === "joinRoom").pop();
+  check(picked && picked.q.channel === "retro" && !picked.q.create, "clicking a room joins it (no create)", JSON.stringify(picked && picked.q));
+  const rows3 = await rowsOf();
+  check(rows3.length === 3 && rows3.indexOf("retro*") >= 0, "sidebar: the three joined rooms, retro open", JSON.stringify(rows3));
+  await shot(await page.$(".avatar-chat-sidebar"), "sidebar.png");
+  await page.click('#avatar-chat-rooms [data-room-leave="newroom"]');
+  await page.waitForTimeout(400);
+  check(JSON.stringify(await rowsOf()).indexOf("newroom") < 0, "x leaves a room (gone from the sidebar)", JSON.stringify(await rowsOf()));
+  st = await (await fetch(BASE + "/__state")).json();
+  check(st.joined.indexOf("newroom") < 0 && st.posts.some((x) => x.action === "leaveRoom" && x.q.channel === "newroom"), "leaveRoom reaches the BBS");
+  await page.click('#avatar-chat-rooms [data-room-leave="retro"]');
+  await page.waitForTimeout(400);
+  check(await page.$eval("#avatar-chat-channel-label", (e) => e.textContent) === "#main", "leaving the open room moves to the next one", await page.$eval("#avatar-chat-channel-label", (e) => e.textContent));
+  await page.click('#avatar-chat-room-actions [data-room-leave="main"]');
+  await page.waitForTimeout(400);
+  check(await page.$eval("#avatar-chat-norooms-modal", (e) => e.classList.contains("is-open")), "leaving the last room offers #main");
+  await page.click("#avatar-chat-norooms-cancel");
+  bar = await page.$eval("#avatar-chat-room-actions", (e) => e.innerText.replace(/\s+/g, " ").trim());
+  check(bar === "Join #main Other rooms", "room bar for a room you are not in: Join #main, Other rooms", bar);
+  await page.click("#avatar-chat-room-actions [data-room-join-this]");
+  await page.waitForTimeout(400);
+  check(JSON.stringify(await rowsOf()) === JSON.stringify(["main*"]), "Join #main puts it back", JSON.stringify(await rowsOf()));
+
+  // ---- page styles: one pick in the Handle Style modal, a whole look ----
+  const styleIds = await page.$$eval("#avatar-chat-page-style option", (els) => els.map((e) => e.value));
+  check(styleIds.length >= 6, "the Handle Style modal offers " + styleIds.length + " page styles", JSON.stringify(styleIds));
+  check((await page.$$("#avatar-chat-style-modal select")).length === 2, "one page style picker (plus the colour presets), nothing to tweak");
+  await page.click("#avatar-chat-style-open");
+  await page.waitForSelector("#avatar-chat-style-modal.is-open");
+  await page.waitForTimeout(300);
+  const looks = {};
+  for (const id of styleIds) {
+    await page.selectOption("#avatar-chat-page-style", id);
+    await page.waitForTimeout(80);
+    looks[id] = await page.evaluate(() => {
+      const root = document.querySelector(".avatar-chat-web");
+      const probe = document.createElement("span");
+      root.appendChild(probe);
+      const rgb = (v) => { probe.style.color = ""; probe.style.color = v.trim(); const m = getComputedStyle(probe).color.match(/[\d.]+/g).map(Number); return m; };
+      const lum = (c) => { const f = (x) => { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); }; return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
+      const ratio = (a, b) => { const la = lum(rgb(a)), lb = lum(rgb(b)); return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05); };
+      const t = (n) => getComputedStyle(root).getPropertyValue("--ac-" + n);
+      const pairs = { "text": ["fg", "surface"], "muted text": ["muted", "surface"], "own bubble": ["self-fg", "self-bg"], "others' bubble": ["other-fg", "other-bg"],
+        "button on accent": ["on-accent", "accent"], "header": ["topbar-fg", "topbar-solid"], "links": ["link", "other-bg"], "mention": ["other-fg", "mention-bg"],
+        "unread badge": ["unread-fg", "unread-bg"], "input": ["fg", "input-bg"] };
+      const worst = {};
+      for (const k in pairs) worst[k] = Math.round(ratio(t(pairs[k][0]), t(pairs[k][1])) * 100) / 100;
+      probe.remove();
+      const bubble = document.querySelector(".avatar-chat-group:not(.is-self) .avatar-chat-bubble:not(.avatar-chat-bitmap-bubble)");
+      const art = document.querySelector(".avatar-chat-bitmap-bubble");
+      const avatarBox = document.querySelector(".avatar-chat-avatar");
+      const shell = getComputedStyle(document.querySelector(".avatar-chat-shell"));
+      return {
+        contrast: worst,
+        shellBg: shell.backgroundColor + " " + shell.backgroundImage,
+        radius: getComputedStyle(bubble).borderTopLeftRadius,
+        padding: getComputedStyle(bubble).paddingTop + " " + getComputedStyle(bubble).paddingLeft,
+        font: getComputedStyle(root).fontFamily,
+        artPad: art ? getComputedStyle(art).paddingTop : "",
+        avatarBox: avatarBox ? avatarBox.getBoundingClientRect().width + "x" + avatarBox.getBoundingClientRect().height : "",
+      };
+    });
+    const low = Object.entries(looks[id].contrast).filter(([, v]) => v < 4.5);
+    check(low.length === 0, "style " + id + ": text contrast >= 4.5:1 everywhere", JSON.stringify(low));
+    await page.evaluate(() => { document.querySelector("#avatar-chat-style-modal").classList.remove("is-open"); });
+    await page.waitForTimeout(60);
+    await shot(page, "style-" + id + ".png");
+    await page.evaluate(() => { document.querySelector("#avatar-chat-style-modal").classList.add("is-open"); });
+  }
+  const distinct = (k) => new Set(styleIds.map((id) => looks[id][k])).size;
+  check(distinct("shellBg") === styleIds.length, "every style has its own background", distinct("shellBg") + "/" + styleIds.length);
+  check(distinct("radius") >= 4 && distinct("padding") >= 4, "styles change shape too: " + distinct("radius") + " bubble radii, " + distinct("padding") + " paddings");
+  check(distinct("font") >= 4, "styles change the font (" + distinct("font") + " families)");
+  check(distinct("artPad") === 1 && distinct("avatarBox") === 1, "art keeps its geometry in every style", JSON.stringify(styleIds.map((id) => looks[id].artPad + " " + looks[id].avatarBox)));
+  check(await page.$eval(".avatar-chat-web", (e) => e.className) === "avatar-chat-web ac-style-" + styleIds[styleIds.length - 1], "picking previews at once");
+  await page.click("#avatar-chat-style-cancel");
+  check(await page.$eval(".avatar-chat-web", (e) => e.className) === "avatar-chat-web ac-style-classic", "Cancel puts the saved style back");
+  await page.click("#avatar-chat-style-open");
+  await page.waitForSelector("#avatar-chat-style-modal.is-open");
+  await page.waitForTimeout(300);
+  await page.selectOption("#avatar-chat-page-style", "amber");
+  await page.click("#avatar-chat-style-save");
+  await page.waitForTimeout(700);
+  st = await (await fetch(BASE + "/__state")).json();
+  const savedStyle = st.posts.filter((x) => x.action === "savePageStyle").pop();
+  check(st.pageStyle === "amber" && savedStyle && savedStyle.token.length === 32, "Save stores the page style with the token", JSON.stringify(savedStyle && savedStyle.q));
+  check(await page.$eval(".avatar-chat-web", (e) => e.className) === "avatar-chat-web ac-style-amber", "the saved style stays on after the modal closes");
+  const served = await (await fetch(BASE + "/?page=avatarchat.xjs")).text();
+  check(/class="avatar-chat-web ac-style-amber"/.test(served), "the served HTML already wears it (no flash of the default)");
+  await page.reload();
+  await page.waitForSelector(".avatar-chat-group", { timeout: 10000 });
+  check(await page.$eval("#avatar-chat-page-style", (e) => e.value) === "amber", "after a reload the picker shows the saved style");
+
   check(errors.length === 0, "no page errors", errors.join(" | "));
   check(dialogs.length === 0, "no alert() ran", dialogs.join(" | "));
   await browser.close();

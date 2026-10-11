@@ -68,6 +68,148 @@ load('http.js');
     return Object.prototype.toString.call(value) === "[object Array]";
   }
 
+  // build/lib/webprefs.js
+  var PAGE_STYLES = [
+    { id: "classic", label: "Classic" },
+    { id: "cga", label: "CGA" },
+    { id: "modern-dark", label: "Modern dark" },
+    { id: "modern-light", label: "Modern light" },
+    { id: "amber", label: "Amber phosphor" },
+    { id: "green", label: "Green phosphor" },
+    { id: "win95", label: "Windows 95" },
+    { id: "compact", label: "Flat compact" }
+  ];
+  var DEFAULT_PAGE_STYLE = "classic";
+  var PREFS_VERSION = 1;
+  var MAX_ROOMS = 50;
+  function emptyPrefs() {
+    return { version: PREFS_VERSION, style: "", rooms: null };
+  }
+  function knownStyle(id) {
+    for (var i = 0; i < PAGE_STYLES.length; i++)
+      if (PAGE_STYLES[i].id === id)
+        return true;
+    return false;
+  }
+  function offeredStyles(allow) {
+    var out = [];
+    for (var i = 0; i < PAGE_STYLES.length; i++) {
+      if (!allow.length || allow.indexOf(PAGE_STYLES[i].id) >= 0)
+        out.push(PAGE_STYLES[i]);
+    }
+    return out.length ? out : PAGE_STYLES.slice();
+  }
+  function defaultStyle(wanted, offered) {
+    for (var i = 0; i < offered.length; i++)
+      if (offered[i].id === wanted)
+        return wanted;
+    for (var i = 0; i < offered.length; i++)
+      if (offered[i].id === DEFAULT_PAGE_STYLE)
+        return DEFAULT_PAGE_STYLE;
+    return offered[0].id;
+  }
+  function resolveStyle(picked, offered, fallback) {
+    for (var i = 0; i < offered.length; i++)
+      if (offered[i].id === picked)
+        return picked;
+    return fallback;
+  }
+  function cleanRooms(list) {
+    var out = [];
+    var seen = {};
+    var src = isArray(list) ? list : [];
+    for (var i = 0; i < src.length && out.length < MAX_ROOMS; i++) {
+      if (typeof src[i] !== "string")
+        continue;
+      var name = sanitizeChannel(src[i], "");
+      var key = channelKey(name);
+      if (!name.length || seen[key] || src[i] !== name)
+        continue;
+      seen[key] = true;
+      out.push(name);
+    }
+    return out;
+  }
+  function normalizePrefs(raw) {
+    var out = emptyPrefs();
+    var src = raw && typeof raw === "object" ? raw : {};
+    var style = trimText(src.style).toLowerCase();
+    out.style = knownStyle(style) ? style : "";
+    out.rooms = isArray(src.rooms) ? cleanRooms(src.rooms) : null;
+    return out;
+  }
+  function joinedRooms(prefs, defaultRoom) {
+    return prefs.rooms === null ? [defaultRoom] : prefs.rooms.slice();
+  }
+  function addRoom(rooms2, name) {
+    var key = channelKey(name);
+    for (var i = 0; i < rooms2.length; i++)
+      if (channelKey(rooms2[i]) === key)
+        return rooms2.slice();
+    var out = rooms2.slice();
+    if (out.length < MAX_ROOMS)
+      out.push(name);
+    return out;
+  }
+  function removeRoom(rooms2, name) {
+    var key = channelKey(name);
+    var out = [];
+    for (var i = 0; i < rooms2.length; i++)
+      if (channelKey(rooms2[i]) !== key)
+        out.push(rooms2[i]);
+    return out;
+  }
+  function prefsPath(number) {
+    return system.data_dir + "chat/webprefs/" + format("%04u", number) + ".json";
+  }
+  function readPrefs(number) {
+    if (!(number > 0))
+      return emptyPrefs();
+    var path = prefsPath(number);
+    if (!file_exists(path))
+      return emptyPrefs();
+    var f = new File(path);
+    if (!f.open("r"))
+      return emptyPrefs();
+    var raw = "";
+    try {
+      raw = f.read() || "";
+    } finally {
+      f.close();
+    }
+    try {
+      return normalizePrefs(JSON.parse(raw));
+    } catch (_e) {
+      return emptyPrefs();
+    }
+  }
+  function writePrefs(number, prefs) {
+    if (!(number > 0))
+      return false;
+    var clean = normalizePrefs(prefs);
+    var dir = system.data_dir + "chat/webprefs/";
+    if (!file_isdir(dir))
+      mkpath(dir);
+    var path = prefsPath(number);
+    var tmp = path + ".tmp" + String(Math.floor(Math.random() * 1e9));
+    var f = new File(tmp);
+    if (!f.open("w+"))
+      return false;
+    try {
+      f.write(JSON.stringify(clean, null, 1));
+    } finally {
+      f.close();
+    }
+    if (!file_rename(tmp, path)) {
+      try {
+        file_remove(tmp);
+      } catch (_e) {
+      }
+      return false;
+    }
+    return true;
+  }
+
   // build/lib/config.js
   var DEFAULT_NSFW_KEYWORDS = [
     "nude",
@@ -130,6 +272,7 @@ load('http.js');
       if (list.indexOf(t) >= 0 || t === "jpg" && list.indexOf("jpeg") >= 0)
         allowed.push(t);
     }
+    var styles = offeredStyles(splitList(web("web_styles", "")));
     return {
       iniPath: iniPath,
       iniFound: iniFound,
@@ -152,7 +295,9 @@ load('http.js');
       uploadDir: web("web_upload_dir", ""),
       /* web_upload_url_base is the older name for the same key. */
       uploadUrlBase: web("web_media_base_url", web("web_upload_url_base", "")).replace(/\/+$/, ""),
-      uploadsPerHour: Math.max(0, parseIntOr(web("web_uploads_per_hour", "30"), 30))
+      uploadsPerHour: Math.max(0, parseIntOr(web("web_uploads_per_hour", "30"), 30)),
+      styles: styles,
+      defaultStyle: defaultStyle(web("web_default_style", "").toLowerCase(), styles)
     };
   }
   function iniPathFor(webSettings, execDir) {
@@ -1380,6 +1525,21 @@ load('http.js');
     }
     return null;
   }
+  function sidebarRooms(cfg, viewer) {
+    return joinedRooms(readPrefs(viewer.number), defaultChannel(cfg, viewer));
+  }
+  function setSidebarRooms(viewer, rooms2) {
+    var p = readPrefs(viewer.number);
+    p.rooms = rooms2;
+    return writePrefs(viewer.number, p);
+  }
+  function existingRoom(c, cfg, viewer, name) {
+    var names = roomNames(c, cfg, viewer);
+    for (var i = 0; i < names.length; i++)
+      if (channelKey(names[i]) === channelKey(name))
+        return names[i];
+    return null;
+  }
   function run(cfg, viewer, action) {
     var requested = param("channel");
     var channel = usableChannel(requested || defaultChannel(cfg, viewer), cfg, viewer);
@@ -1492,9 +1652,70 @@ load('http.js');
         var text_1 = messageParam();
         if (!trimText(text_1).length)
           return { error: "empty message" };
-        return withClient(cfg, function(c2) {
+        var sent = withClient(cfg, function(c2) {
           return sendPublic(c2, viewer, channel, text_1);
         });
+        if (sent.success === true) {
+          var joined = sidebarRooms(cfg, viewer);
+          var next = addRoom(joined, channel);
+          if (next.length !== joined.length)
+            setSidebarRooms(viewer, next);
+        }
+        return sent;
+      }
+      case "prefs":
+        if (gate = needLogin(viewer))
+          return gate;
+        return {
+          ok: true,
+          style: resolveStyle(readPrefs(viewer.number).style, cfg.styles, cfg.defaultStyle),
+          styles: cfg.styles,
+          rooms: sidebarRooms(cfg, viewer)
+        };
+      case "joinRoom": {
+        if (gate = needWrite(viewer))
+          return gate;
+        if (!channel || !trimText(requested).length)
+          return { error: "that room is reserved" };
+        var create_1 = param("create") === "1";
+        var found = withClient(cfg, function(c2) {
+          var name2 = existingRoom(c2, cfg, viewer, channel);
+          if (name2)
+            return { name: name2, created: false };
+          if (!create_1)
+            return { error: "no room #" + channel + " yet" };
+          createRoom(c2, channel);
+          return { name: channel, created: true };
+        });
+        if (found.error || !found.name)
+          return { error: found.error || "could not join" };
+        var rooms2 = addRoom(sidebarRooms(cfg, viewer), found.name);
+        if (!setSidebarRooms(viewer, rooms2))
+          return { error: "could not save" };
+        return { ok: true, channel: found.name, created: !!found.created, rooms: rooms2 };
+      }
+      case "leaveRoom": {
+        if (gate = needWrite(viewer))
+          return gate;
+        var name = trimText(requested);
+        if (!name.length)
+          return { error: "channel required" };
+        var rooms2 = removeRoom(sidebarRooms(cfg, viewer), name);
+        if (!setSidebarRooms(viewer, rooms2))
+          return { error: "could not save" };
+        return { ok: true, rooms: rooms2 };
+      }
+      case "savePageStyle": {
+        if (gate = needWrite(viewer))
+          return gate;
+        var wanted = trimText(param("style")).toLowerCase();
+        if (resolveStyle(wanted, cfg.styles, "") !== wanted || !wanted.length)
+          return { error: "no such page style" };
+        var p = readPrefs(viewer.number);
+        p.style = wanted;
+        if (!writePrefs(viewer.number, p))
+          return { error: "could not save" };
+        return { ok: true, style: wanted };
       }
       case "sendPrivate": {
         if (gate = needWrite(viewer))

@@ -16,9 +16,19 @@ chat server and has no logins.
 
 ## What it does
 
-- Public rooms: switch rooms, create one, see who is in a room and how
-  many are in each, with unread counts. Everyone sees the MOTD ticker;
-  only the host BBS's sysop can post to it.
+- Rooms, the way Futureland's chat page does them. The sidebar lists the
+  rooms you joined, each with its user count and unread badge; the open
+  one is highlighted. Click a row to view it, its x to leave it. Beside
+  the MOTD, **Join a room** opens the picker and **Leave** leaves the room
+  you are in; looking at a room you haven't joined (a `?channel=` link)
+  shows **Join #name** instead. The picker lists every public room with
+  its user count and whether you are in it, and one click joins. Under it
+  is a name box whose button says what it will do: **Join #x** for a room
+  that exists, **Create #x** for a new one, which is made and joined.
+  Leaving your last room offers the default room. Sending in a room joins
+  it. Your rooms are kept per account on this BBS (see Security notes), so
+  they follow you between browsers. Everyone sees the MOTD ticker; only the host BBS's
+  sysop can post to it.
 - Private messages between members, including members of other BBSes on
   the same chat server, with a thread list and unread counts.
 - Avatars: the sender's avatar as it travels on the message. Otherwise
@@ -40,6 +50,15 @@ chat server and has no logins.
   `data/chat/nickstyle/NNNN.json` record the door, the shell and
   Futureland's site use, so a change shows everywhere. Anything else in
   that record, written by another client, is kept as it is.
+- Page styles: the same modal has a **Page style** list. Each entry is a
+  whole look for the page, colours and shape together (corners, borders,
+  spacing, shadows, font); picking one previews it at once and Save keeps
+  it. Classic is the look the page has always had; the others are CGA,
+  Modern dark, Modern light, Amber phosphor, Green phosphor, Windows 95
+  and Flat compact. Avatars and BITMAP art keep their own colours and
+  size in every style. The page is served already wearing your style, so
+  it never flashes the default first. The sysop picks which styles are
+  offered and the default (`web_styles`, `web_default_style`).
 - Inline pictures (up to three per message), audio and video players for
   media links, and a link card for the first other link. Pictures whose
   link or message matches `nsfw_keywords` are blurred until clicked.
@@ -146,6 +165,8 @@ web_uploads = on
 ; web_upload_dir = /sbbs/webv4/root/chatmedia
 ; web_media_base_url = https://bbs.example.org/chatmedia
 ; web_motd_host_qwkid = MYBBS
+; web_styles = classic, cga, modern-dark, modern-light, amber, green, win95, compact
+; web_default_style = classic
 ```
 
 The section must come last. Synchronet's INI reader files every key after
@@ -229,6 +250,12 @@ which is the rule for the whole network.
 - **Rooms that clash with accounts.** A room can't share a name with a
   local account, because `channels.<alias>` is that member's private
   mailbox.
+- **Your page settings.** Joined rooms and the page style are kept in
+  `data/chat/webprefs/NNNN.json`, one small file per account, written
+  only by this page and only with the write token. It is apart from
+  Synchronet's user records and from the shared handle style record. A
+  room name is stored only when it is a plain name (letters, digits, `_`,
+  `-`), and a style only when it is on the sysop's list.
 - **Link cards.** The BBS fetches them, never the browser. Only http and
   https on the default ports are fetched, with no user:password in the
   URL. The address must be public; loopback, private, link-local, CGNAT,

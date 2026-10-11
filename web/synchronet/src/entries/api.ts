@@ -16,10 +16,18 @@
  *   POST ?action=send&channel=..&message=..                              (login, token)
  *   POST ?action=sendPrivate&target=..[&system=..]&message=..           (login, token)
  *   POST ?action=createChannel&channel=..                                (login, token)
+ *   GET  ?action=prefs                            your page style + sidebar rooms (login)
+ *   POST ?action=joinRoom&channel=..[&create=1]   add a room to your sidebar;
+ *                                                 create=1 makes it if it is new (login, token)
+ *   POST ?action=leaveRoom&channel=..             drop it from your sidebar (login, token)
+ *   POST ?action=savePageStyle&style=ID           your page style        (login, token)
  *   POST ?action=saveStyle   body: JSON {colors}                         (login, token)
  *   POST ?action=setAvatar&collection=ID&index=N  use a shared avatar   (login, token)
  *   POST ?action=setAvatar&data=BASE64            a drawn/uploaded one  (login, token)
  *   POST ?action=avatarEnabled&enabled=0|1        disable / re-enable   (login, token)
+ *
+ * Sidebar rooms and the page style live in this BBS's own per-user record
+ * (webprefs.ts). Sending in a room adds it to your sidebar.
  *
  * saveStyle edits the letter colours only: a tag another client stored in
  * the shared record is kept as it is.
@@ -33,7 +41,8 @@ import * as chat from '../lib/chat';
 import * as avatars from '../lib/avatars';
 import { getCard } from '../lib/preview';
 import { readStyle, writeStyle } from '../lib/style';
-import { cleanMessageText, sanitizeAlias, trimText } from '../lib/util';
+import { channelKey, cleanMessageText, sanitizeAlias, trimText } from '../lib/util';
+import * as webprefs from '../lib/webprefs';
 
 type Reply = { [k: string]: unknown };
 
@@ -77,6 +86,23 @@ function needWrite(viewer: chat.Viewer): Reply | null {
         http_reply.status = '403 Forbidden';
         return { error: 'stale page: reload it' };
     }
+    return null;
+}
+
+function sidebarRooms(cfg: WebConfig, viewer: chat.Viewer): string[] {
+    return webprefs.joinedRooms(webprefs.readPrefs(viewer.number), chat.defaultChannel(cfg, viewer));
+}
+
+function setSidebarRooms(viewer: chat.Viewer, rooms: string[]): boolean {
+    const p = webprefs.readPrefs(viewer.number);
+    p.rooms = rooms;
+    return webprefs.writePrefs(viewer.number, p);
+}
+
+/* The room as the chat service spells it, or null when there is none. */
+function existingRoom(c: JSONClient, cfg: WebConfig, viewer: chat.Viewer, name: string): string | null {
+    const names = chat.roomNames(c, cfg, viewer);
+    for (let i = 0; i < names.length; i++) if (channelKey(names[i]) === channelKey(name)) return names[i]!;
     return null;
 }
 
@@ -182,7 +208,58 @@ function run(cfg: WebConfig, viewer: chat.Viewer, action: string): Reply {
             if (!channel) return { error: 'that room is reserved' };
             const text = messageParam();
             if (!trimText(text).length) return { error: 'empty message' };
-            return chat.withClient(cfg, function (c) { return chat.sendPublic(c, viewer, channel, text); });
+            const sent = chat.withClient(cfg, function (c) { return chat.sendPublic(c, viewer, channel, text); });
+            if ((sent as { success?: boolean }).success === true) {
+                const joined = sidebarRooms(cfg, viewer);
+                const next = webprefs.addRoom(joined, channel);
+                if (next.length !== joined.length) setSidebarRooms(viewer, next);
+            }
+            return sent;
+        }
+
+        case 'prefs':
+            if ((gate = needLogin(viewer))) return gate;
+            return {
+                ok: true,
+                style: webprefs.resolveStyle(webprefs.readPrefs(viewer.number).style, cfg.styles, cfg.defaultStyle),
+                styles: cfg.styles,
+                rooms: sidebarRooms(cfg, viewer)
+            };
+
+        case 'joinRoom': {
+            if ((gate = needWrite(viewer))) return gate;
+            if (!channel || !trimText(requested).length) return { error: 'that room is reserved' };
+            const create = param('create') === '1';
+            const found = chat.withClient(cfg, function (c) {
+                const name = existingRoom(c, cfg, viewer, channel);
+                if (name) return { name: name, created: false };
+                if (!create) return { error: 'no room #' + channel + ' yet' };
+                chat.createRoom(c, channel);
+                return { name: channel, created: true };
+            }) as { name?: string; created?: boolean; error?: string };
+            if (found.error || !found.name) return { error: found.error || 'could not join' };
+            const rooms = webprefs.addRoom(sidebarRooms(cfg, viewer), found.name);
+            if (!setSidebarRooms(viewer, rooms)) return { error: 'could not save' };
+            return { ok: true, channel: found.name, created: !!found.created, rooms: rooms };
+        }
+
+        case 'leaveRoom': {
+            if ((gate = needWrite(viewer))) return gate;
+            const name = trimText(requested);
+            if (!name.length) return { error: 'channel required' };
+            const rooms = webprefs.removeRoom(sidebarRooms(cfg, viewer), name);
+            if (!setSidebarRooms(viewer, rooms)) return { error: 'could not save' };
+            return { ok: true, rooms: rooms };
+        }
+
+        case 'savePageStyle': {
+            if ((gate = needWrite(viewer))) return gate;
+            const wanted = trimText(param('style')).toLowerCase();
+            if (webprefs.resolveStyle(wanted, cfg.styles, '') !== wanted || !wanted.length) return { error: 'no such page style' };
+            const p = webprefs.readPrefs(viewer.number);
+            p.style = wanted;
+            if (!webprefs.writePrefs(viewer.number, p)) return { error: 'could not save' };
+            return { ok: true, style: wanted };
         }
 
         case 'sendPrivate': {

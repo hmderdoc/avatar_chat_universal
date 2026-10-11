@@ -9,12 +9,27 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Added
 
-- **WebSocket listener in `avatar_chat_server`** for browser clients.
-  `-ws-addr` (`ws_addr`) turns it on; the same packets as TCP, one per
-  frame, sharing channels with the doors. `ws_origins` limits which web
-  pages may connect (default any); 30 s pings drop dead peers; the deny
-  list applies. WEB.md covers it and the framing a page needs to also
-  work through Synchronet's `websocketservice.js`.
+- **Web chat in `avatar_chat_server`.** One listener (`web_addr`; the
+  older `ws_addr` still works) serves the standalone page from
+  `web/standalone`, the WebSocket at `/chat`, `/config.json`, `/img` and
+  `/preview` for pictures and link cards, and the media endpoint when it's
+  set up. The browser only ever talks to that one origin; WebSocket
+  origins default to same-origin (`ws_origins` adds more). `upstream =
+  host:port` relays each browser to someone else's chat server instead of
+  running a local one. Browser packets are limited to what the page needs,
+  stamped with the user's nick and `system_name`, and capped
+  (`web_max_conns`, `web_max_per_ip`, `fetch_per_minute`). No accounts:
+  the page has no private messages or MOTD. WEB.md covers it.
+- **Synchronet web app** in `web/synchronet`, moved from the old JS door's
+  bundle (`bbs_avatar_chat`) and caught up with the door: handle styles
+  shown and edited, inline pictures with the NSFW veil, audio and video
+  players, link cards fetched on the BBS with SSRF guards, mention
+  highlight, remote avatars by alias and QWK ID, and file drop/paste
+  uploads stored under the web root (off unless `web_uploads = on`). It
+  installs into stock webv4, goes through its own SSJS APIs as the
+  logged-in user, reads this door's `avatar_chat.ini`, and checks a
+  per-session token on writes. Server side is TypeScript built to
+  `dist/webv4`; see web/synchronet/README.md.
 - **Mouse.** The door asks for xterm mouse reports (SGR, with X10
   fallback): the wheel scrolls the chat and lists, pills run their
   commands, a name starts `/msg`, a picture opens in `/img`, a `/play`

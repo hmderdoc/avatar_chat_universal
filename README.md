@@ -31,6 +31,10 @@ Single static binary per platform. No runtime dependencies.
   public futureland server.
 - Optional **IRC and Discord bridge** daemons link external rooms to one Avatar
   Chat channel.
+- **Web chat** two ways: a page for stock Synchronet webv4 that goes
+  through the BBS's own APIs (`web/synchronet`), and a standalone page the
+  bundled server hosts for any BBS or none, running its own chat or
+  relaying to another (`web/standalone`).
 - Runs as a **standalone CLI app** without a drop file (`./avatar_chat_universal -user alice`)
   for testing or shell-only use.
 
@@ -155,6 +159,10 @@ app scopes and Socket Mode setup.
   collection directory, the in-door selector / upload / editor flows.
 - [MEDIA.md](MEDIA.md) — chat attachments: running the server's media
   endpoint and `/upload` in the door.
+- [WEB.md](WEB.md) — the standalone web page and the server's web
+  listener, local or relay mode.
+- [web/synchronet/README.md](web/synchronet/README.md) — the Synchronet
+  webv4 page: install, settings, uploads, moving from the old JS door.
 - [SCREENSAVER.md](SCREENSAVER.md) — idle animations, ANSI gallery setup,
   idle-interleave behavior.
 

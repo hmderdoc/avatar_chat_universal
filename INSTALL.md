@@ -317,9 +317,9 @@ The same binary can also store chat attachments for `/upload`
 (`-media-addr :10089 -media-dir ...`, then `upload_url` in the door's
 config). See MEDIA.md.
 
-For browser clients, `-ws-addr :10090` adds a WebSocket listener carrying
-the same packets. See WEB.md, which also covers the Synchronet route
-(`websocketservice.js` in front of `json-service.js`).
+For web users, `-web-addr :8080` serves the web chat page and its
+WebSocket from the same binary. With `-upstream host:port` it hosts no chat
+and relays web users to someone else's chat server instead. See WEB.md.
 
 ---
 

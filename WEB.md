@@ -1,88 +1,179 @@
-# Browser clients (WebSocket)
+# Web chat page
 
-Browsers can't open the chat server's raw TCP port, so a web page reaches
-the chat over WebSocket instead. Two servers offer it:
+`avatar_chat_server` can serve a web page for Avatar Chat: plain HTML, one
+JavaScript file and one CSS file, no build step. Web users share rooms
+with the doors, the shell and the bridges.
 
-- the bundled `avatar_chat_server`, with its own WebSocket listener;
-- a Synchronet board running `json-service.js`, through Synchronet's stock
-  `websocketservice.js` proxy.
+The page only ever talks to the server that served it. The chat, the
+pictures in messages, link cards and uploads all go through that one
+origin, and the page's Content-Security-Policy keeps the browser to it.
+The server either hosts the chat itself or relays web users to someone
+else's chat server.
 
-The web page itself is not written yet; this file covers the server side
-and the wire format a page has to speak.
+Synchronet boards have their own web app, which goes through the BBS's
+APIs and logins (`web/synchronet`). This page is for sysops without
+Synchronet, or without a BBS at all.
 
-## Bundled server
+## Two ways to run it
 
-The listener is off unless you give it an address:
+**Host your own chat.** The usual chat server on TCP for doors, plus the
+web listener:
 
 ```sh
-./avatar_chat_server -addr :10088 -ws-addr :10090
+./avatar_chat_server -addr :10088 -web-addr :8080 -system-name "My BBS"
 ```
 
-or in the `-config` INI (top level or a `[websocket]` section):
+**Relay to someone else's chat.** Your server hosts no chat; each web user
+gets their own TCP connection to the other server, the way a door would:
+
+```sh
+./avatar_chat_server -upstream futureland.today:10088 -web-addr :8080 -system-name "My BBS"
+```
+
+With `upstream` set there is no TCP listener on your side. The upstream can
+be another `avatar_chat_server` or a Synchronet board's `json-service.js`;
+both speak the same packets.
+
+Then open `http://your-host:8080/`. A user picks a nickname, which the
+browser remembers, and lands in the default room. `?room=name` opens
+another room.
+
+## Settings
+
+As flags, or in the `-config` INI at the top or under `[web]`. A flag wins
+over the INI.
 
 ```ini
-[websocket]
-ws_addr    = :10090
-ws_origins = https://bbs.example.org, chat.example.net
+; avatar_chat_server.ini
+[web]
+web_addr        = :8080
+system_name     = My BBS
+default_channel = main
+; upstream      = futureland.today:10088
+; web_create_rooms = on
 ```
 
 | Key (INI) | Flag | Default | Meaning |
 | --- | --- | --- | --- |
-| `ws_addr` | `-ws-addr` | (off) | Listen address for WebSocket clients. Upgrades are accepted at `/` and `/chat`. |
-| `ws_origins` | `-ws-origins` | (any) | Comma-separated web pages allowed to connect: a full origin (`https://bbs.example.org`, scheme and port must match) or a bare host name (`chat.example.net`, any scheme or port). Requests with no `Origin` header (not a browser) are always let in. |
+| `web_addr` (or `ws_addr`) | `-web-addr` (or `-ws-addr`) | (off) | Listen address for the page and its WebSocket. |
+| `upstream` | `-upstream` | (none) | `host:port` of a chat server to relay web users to. Set it and this server hosts no chat. |
+| `system_name` | `-system-name` | `web` | The board name stamped on web users' messages and in who's-here. |
+| `default_channel` | `-default-channel` | `main` | The room the page opens in. |
+| `web_create_rooms` | `-web-create-rooms` | off | Let web users register new public rooms. |
+| `web_max_conns` | `-web-max-conns` | `50` | Web users connected at once. In relay mode this caps your connections to the upstream. |
+| `web_max_per_ip` | `-web-max-per-ip` | `5` | Web users connected at once from one address. |
+| `ws_origins` | `-ws-origins` | (none) | Other web pages allowed to open `/chat`: a full origin (`https://bbs.example.org`) or a bare host name. The page's own origin is always allowed. |
+| `web_dir` | `-web-dir` | (built in) | Serve the page from this directory instead. See Theming. |
+| `web_cache_dir` | `-web-cache-dir` | `webcache` | Where fetched pictures and link cards are cached; `""` for none. |
+| `image_max_mb` | `-image-max-mb` | `5` | Largest picture `/img` passes through. |
+| `fetch_per_minute` | `-fetch-per-minute` | `120` | `/img` plus `/preview` requests per address per minute. |
+| `deny_file` | `-deny` | (none) | Addresses refused everywhere: chat, web and media. |
 
-WebSocket clients share channels, history and `WHO` with the TCP clients
-(doors, the shell, bridges). The server pings every 30 seconds and drops a
-client that sends nothing, not even a pong, for 75 seconds. Packets over
-128 KB are refused with close code 1009. `deny_file` applies here too.
+**Uploads.** Configure the media endpoint (MEDIA.md) and the page accepts
+dropped or pasted pictures and ANSI art, posts them to `/upload` on the
+same origin, and puts the link in the composer. `media_addr = web` serves
+it only on the web listener. A `media_addr` port of its own keeps it there
+too (for doors' `upload_url`) and also mounts it on the web listener.
 
-**TLS.** The listener speaks plain `ws://`. A page served over HTTPS may
-only open `wss://`, so put the port behind a TLS proxy (nginx, Caddy,
-HAProxy). Behind a proxy every client appears to come from the proxy's
-address: `X-Forwarded-For` is not trusted, so do IP filtering at the proxy.
+## What the server does for the page
 
-## Synchronet (json-service.js)
+| Route | What |
+| --- | --- |
+| `/` | The page (`index.html`, `app.js`, `codec.js`, `style.css`, `cp437.png`). Nothing else is served from `web_dir`. |
+| `/chat` | WebSocket carrying chat packets. Upgrades at `/` still work, the way the old `ws_addr` listener took them. |
+| `/config.json` | Default room, board name, message limit, whether uploads and room creation are on. |
+| `/img?url=` | A picture from a chat message, fetched by the server. |
+| `/preview?url=` | A link's card (title, description, picture), fetched by the server. |
+| `/upload`, `/chatmedia/…` | Attachments, when media is configured. |
 
-Add a service that hands each WebSocket connection to the JSON service
-port; it takes effect when Synchronet's services restart:
+### What a web user may send
 
-```ini
-[JSON-WS]
-Port=10090
-Options=NO_HOST_LOOKUP
-Command=websocketservice.js localhost 10088
+The chat protocol has no accounts, so the server screens every packet a
+browser sends before it reaches any chat server, yours or the upstream:
+
+- Only what the page uses gets through: join and leave a room, post to it,
+  load its history, who's here, list rooms, and creating a room if
+  `web_create_rooms` is on. Anything else gets an error back.
+- Rooms are the default room or ones in the chat's `public_channels`
+  registry, the list the door's `/channels` shows. A web user can't open a
+  member's private mailbox by naming it as a room.
+- The nickname is set when the user first joins and stays for that
+  connection; changing it reconnects. Every message is stamped with that
+  nick and `system_name`, whatever the browser claims. The server also
+  sets the time, cleans the text, caps it at 1000 characters, refuses TV
+  tuner markers, and drops a malformed avatar or style.
+
+This doesn't make names trustworthy, since anyone can pick any nickname.
+What it does is label every web message with your board, so other boards
+can tell who carried it. Private messages and posting the message of the
+day aren't offered on this page.
+
+### `/img` and `/preview` are not an open proxy
+
+- They only fetch a URL that has gone out to a browser on this server in
+  chat traffic (a message, history), that a web user posted, or that a
+  card names as its picture. Anything else gets 403.
+- Fetches use the door's guards: http and https on ports 80 and 443 only,
+  every resolved address checked to be public at connect time, redirects
+  re-checked, a byte cap and a timeout.
+- `/img` passes only png, jpeg, gif, webp and bmp, judged by the bytes,
+  never HTML or SVG. It sends them with `nosniff`, a sandboxing CSP and a
+  day's caching.
+- `fetch_per_minute` applies per address, and at most eight fetches run at
+  once. Put a cache or rate limit in your reverse proxy too if the page is
+  public.
+
+Anyone can still post a URL in chat to make your server fetch it once.
+That's the same exposure a door's link previews have.
+
+## HTTPS
+
+The listener speaks plain HTTP and `ws://`. For a public page put it
+behind a TLS proxy (nginx, Caddy, HAProxy) that also forwards WebSocket
+upgrades on `/chat`. The page picks `wss://` itself when it's loaded over
+HTTPS. Uploads get `https://` links from the page's own origin, or set
+`media_url_base`.
+
+Behind a proxy every browser appears to come from the proxy's address.
+`X-Forwarded-For` is not trusted, so the per-address limits and
+`deny_file` see the proxy. Do per-client filtering at the proxy.
+
+An nginx sketch:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_read_timeout 120s;
+}
 ```
 
-Use `Options=NO_HOST_LOOKUP|TLS` on a second port for `wss://`, the way
-the stock `[WSS]` entry does for fTelnet.
+`Host` must reach the server unchanged. The WebSocket origin check compares
+the page's `Origin` with it.
 
-The proxy is a raw byte pipe, not a packet relay, which shapes what a page
-must do (below). The JSON service also sees every web client as
-`localhost`, so its own IP filters can't tell them apart.
+## Theming
 
-## Wire format (one page, both servers)
+Copy `web/standalone` from the repository somewhere, edit `style.css` (the
+CGA colours are custom properties at the top), and point `web_dir` at the
+copy. The server serves only the page's file types from there (html, js,
+css, png, ico, woff2) and refuses dotfiles.
 
-The packets are the same JSON objects the doors send. To work through
-both servers a page should:
+## Wire format
 
-1. **Open with the `binary` subprotocol:** `new WebSocket(url, ["binary"])`
-   and `binaryType = "arraybuffer"`. `websocketservice.js` refuses any
-   other subprotocol, and in text mode it re-encodes every byte as if it
-   were Latin-1 and kills the connection on a 3-byte UTF-8 character (`►`,
-   most emoji). In binary mode bytes pass through untouched.
-2. **Send** each packet as UTF-8 bytes of `JSON.stringify(packet) + "\r\n"`
-   in one binary frame. The JSON service reads lines; the Go server takes
-   the line ending or leaves it.
-3. **Receive by buffering, not by frame.** Through the proxy a frame is
-   whatever arrived on the socket (at most 4 KB): a packet can span frames
-   and a frame can hold several. Append each frame's bytes, split on `\n`,
-   strip `\r`, decode UTF-8, and parse each complete line. The Go server
-   sends one packet per text frame; feeding those through the same
-   splitter works. Handle both `string` and `ArrayBuffer` frames.
-4. **Skip lines that aren't JSON.** The proxy sends
-   `Redirecting to server...` first.
-5. **Answer `{"scope":"SOCKET","func":"PING","data":x}`** with a `PONG`
-   carrying the same `data`. Futureland's JSON service drops clients that
-   go quiet; the proxy itself neither sends nor answers WebSocket pings.
-   A page can also send its own `SOCKET` `PING` to keep a NAT open; both
-   servers answer it.
+The page speaks the packets the doors send, over WebSocket:
+
+- It opens `/chat` with the `binary` subprotocol and sends each packet as
+  `JSON.stringify(packet) + "\r\n"` in one frame.
+- It buffers what it receives and splits it on newlines, so it copes with a
+  packet spread over frames or several in one. The server sends one packet
+  per text frame.
+- It skips lines that aren't JSON and answers a `SOCKET` `PING` with a
+  `PONG`.
+
+The server pings every 30 seconds and drops a browser that sends nothing,
+not even a pong, for 75 seconds. Packets over 128 KB close the socket with
+code 1009. In relay mode the server answers the upstream's own keepalive
+pings itself.

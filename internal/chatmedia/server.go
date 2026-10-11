@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -275,6 +276,11 @@ func (s *Server) publicBase(r *http.Request) string {
 	if s.cfg.URLBase != "" {
 		return strings.TrimRight(s.cfg.URLBase, "/")
 	}
+	// A page served from this same host (the web front end) sends its
+	// Origin; its scheme says whether a TLS proxy sits in front.
+	if o, err := url.Parse(r.Header.Get("Origin")); err == nil && strings.EqualFold(o.Host, r.Host) && (o.Scheme == "https" || o.Scheme == "http") {
+		return o.Scheme + "://" + r.Host
+	}
 	return "http://" + r.Host
 }
 
@@ -342,6 +348,11 @@ func remoteIP(r *http.Request) string {
 	}
 	return host
 }
+
+// PurgeLoop purges now and then hourly until ctx ends. ListenAndServe
+// runs it; a caller that only mounts Handler on its own listener runs it
+// itself.
+func (s *Server) PurgeLoop(ctx context.Context) { s.purgeLoop(ctx) }
 
 func (s *Server) purgeLoop(ctx context.Context) {
 	s.Purge()

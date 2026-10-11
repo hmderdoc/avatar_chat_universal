@@ -43,9 +43,9 @@ endpoint, because the chat network only carries the link.
 
 | Key (INI) | Flag | Default | Meaning |
 | --- | --- | --- | --- |
-| `media_addr` | `-media-addr` | (off) | HTTP listen address, e.g. `:10089`. |
+| `media_addr` | `-media-addr` | (off) | HTTP listen address, e.g. `:10089`, or `web` to serve it only on the web page's listener (WEB.md). With a web listener on, it is mounted there too. |
 | `media_dir` | `-media-dir` | `chatmedia` | Where files are stored. |
-| `media_url_base` | `-media-url-base` | `http://<request host>` | The public base URL put in links. Set it when the endpoint sits behind a proxy or uses HTTPS. |
+| `media_url_base` | `-media-url-base` | `http://<request host>` (`https://` for an upload from a page served over HTTPS by the same host) | The public base URL put in links. Set it when the endpoint sits behind a proxy or uses HTTPS. |
 | `max_image_mb` | `-max-image-mb` | `20` | Largest picture accepted. |
 | `max_ansi_mb` | `-max-ansi-mb` | `1` | Largest art file accepted. |
 | `retention_days` | `-retention-days` | `7` | Files older than this are deleted (checked hourly). |

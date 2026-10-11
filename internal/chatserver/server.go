@@ -40,14 +40,6 @@ type Server struct {
 	// Deny, when set, refuses connections from listed addresses before
 	// anything is read from them. A nil list denies nobody.
 	Deny *denylist.List
-	// WSAddr, when set, is a second listener taking the same packets over
-	// WebSocket, one per text frame, for browser clients (see ws.go).
-	WSAddr string
-	// WSOrigins limits which web pages may open a WebSocket: full origins
-	// ("https://bbs.example.org") or bare host names. Empty allows any.
-	WSOrigins []string
-
-	wsPing, wsWait time.Duration // keepalive overrides for tests
 
 	store *store
 
@@ -99,12 +91,13 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}
 }
 
-// conn is one client, over TCP or WebSocket. Both share the packet loop,
-// the subscription registry and the nick handling; only the wire differs.
-// Writes are serialized through writeMu.
+// conn is one client, over TCP or any other Wire (the web front end's
+// WebSocket). All share the packet loop, the subscription registry and the
+// nick handling; only the wire differs. Writes are serialized through
+// writeMu.
 type conn struct {
 	server  *Server
-	wire    wire
+	wire    Wire
 	writeMu sync.Mutex
 
 	id     string // remote addr, used in logs and as a default nick
@@ -117,10 +110,10 @@ type conn struct {
 	closeMu sync.Mutex
 }
 
-// wire carries whole packets: a CRLF-terminated line on TCP, one text
-// frame on WebSocket.
-type wire interface {
-	writePacket(body []byte) error
+// Wire carries whole packets out: a CRLF-terminated line on TCP, one text
+// frame on WebSocket. WritePacket is never called concurrently.
+type Wire interface {
+	WritePacket(body []byte) error
 	Close() error
 }
 
@@ -129,7 +122,7 @@ type tcpWire struct {
 	w *bufio.Writer
 }
 
-func (t *tcpWire) writePacket(body []byte) error {
+func (t *tcpWire) WritePacket(body []byte) error {
 	_ = t.c.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	if _, err := t.w.Write(body); err != nil {
 		return err
@@ -153,9 +146,15 @@ func (s *Server) handleConn(ctx context.Context, tcp net.Conn) {
 	s.serve(ctx, c, func() ([]byte, error) { return r.ReadBytes('\n') })
 }
 
+// ServeConn runs a client that arrived some other way than the TCP
+// listener (the web front end's WebSocket) until next fails or ctx ends.
+// id names it in WHO when it never gives a nick. next returns the next
+// chunk off the wire; a chunk may hold several newline-separated packets.
+func (s *Server) ServeConn(ctx context.Context, w Wire, id string, next func() ([]byte, error)) {
+	s.serve(ctx, &conn{server: s, wire: w, id: id, subs: map[string]bool{}}, next)
+}
+
 // serve runs one connection's packet loop until next fails or ctx ends.
-// next returns the next chunk off the wire: a line on TCP, a frame on
-// WebSocket. A chunk may hold several newline-separated packets.
 func (s *Server) serve(ctx context.Context, c *conn, next func() ([]byte, error)) {
 	s.mu.Lock()
 	s.connections[c] = true
@@ -408,7 +407,7 @@ func (c *conn) send(pkt *packet) {
 	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	if err := c.wire.writePacket(body); err != nil {
+	if err := c.wire.WritePacket(body); err != nil {
 		c.markClosed()
 	}
 }
@@ -424,3 +423,10 @@ func (c *conn) markClosed() {
 
 // helpers used by tests
 var _ io.Reader = (*bufio.Reader)(nil)
+
+// Keys lists the immediate child keys at scope.location, as the KEYS verb
+// answers them. The web front end reads the public_channels registry
+// through it.
+func (s *Server) Keys(scope, location string) []string {
+	return s.store.Keys(scope, location)
+}

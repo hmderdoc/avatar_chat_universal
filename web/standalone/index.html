@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avatar Chat</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <span class="brand">Avatar Chat</span>
+  <button type="button" id="room-btn" class="room" title="Rooms">#<span id="room-name">main</span></button>
+  <span id="status" class="status off">connecting</span>
+  <span class="spacer"></span>
+  <button type="button" id="who-btn" class="pill" title="Who's here">who <span id="who-count">0</span></button>
+  <button type="button" id="nick-btn" class="pill" title="Change nickname"><span id="nick-name">nick</span></button>
+</header>
+
+<main class="layout">
+  <section id="transcript" class="transcript" aria-live="polite"></section>
+  <aside id="roster" class="roster" aria-label="Who's here">
+    <h2>Here now</h2>
+    <ul id="roster-list"></ul>
+  </aside>
+</main>
+
+<footer class="composer">
+  <form id="send-form" autocomplete="off">
+    <textarea id="input" rows="1" maxlength="1000" placeholder="Say something (/help for commands)" enterkeyhint="send"></textarea>
+    <span id="counter" class="counter"></span>
+    <button type="submit" class="send">Send</button>
+  </form>
+  <div id="drop-hint" class="drop-hint" hidden>Drop a picture or ANSI file to upload it</div>
+</footer>
+
+<div id="drop-veil" class="drop-veil" hidden>Drop to upload</div>
+
+<dialog id="nick-dialog">
+  <form method="dialog" id="nick-form">
+    <h2>Pick a nickname</h2>
+    <p class="hint">Letters, digits, spaces, - and _, up to 25. Anyone can take any name here: there are no accounts.</p>
+    <input id="nick-input" maxlength="25" required autocomplete="nickname">
+    <p id="nick-error" class="error" hidden></p>
+    <menu><button type="submit" class="send">Chat</button></menu>
+  </form>
+</dialog>
+
+<dialog id="rooms-dialog">
+  <form method="dialog">
+    <h2>Rooms</h2>
+    <ul id="rooms-list" class="rooms-list"><li class="hint">loading…</li></ul>
+    <div id="create-room" class="create-room" hidden>
+      <input id="create-input" maxlength="32" placeholder="new room name">
+      <button type="button" id="create-btn" class="pill">Create</button>
+    </div>
+    <menu><button value="close" class="pill">Close</button></menu>
+  </form>
+</dialog>
+
+<script src="codec.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

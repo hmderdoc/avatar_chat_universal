@@ -268,6 +268,21 @@ Card colours are the theme keys `card_site`, `card_title` and `card_edge`
 
 ---
 
+## Chat attachments
+
+`/upload` receives one file by Zmodem (a picture: png, jpeg, gif, webp,
+bmp; or ANSI art: `.ans`, `.bin`), checks its type by its bytes, posts it to
+your media server and puts the returned link in the caller's input line.
+Nothing is sent until they press Enter. The media server is the bundled
+`avatar_chat_server` with `-media-addr`; see MEDIA.md for running it.
+
+| Key             | Default | Meaning |
+| --------------- | ------- | ------- |
+| `upload_url`    | (unset) | Your media server's upload address, e.g. `https://bbs.example.org:10089/upload`. Unset turns `/upload` off. |
+| `upload_max_mb` | `20`    | Largest file the door will receive. The server applies its own limits too. |
+
+---
+
 ## Attention cues
 
 - **Mentions.** A line from someone else that says your name as a whole

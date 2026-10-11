@@ -54,6 +54,21 @@ versioning follows loose [SemVer](https://semver.org/) (see
   `<data>/linkpreviews` (24 h, failures 1 h), veiled by the NSFW keywords.
   New keys `link_previews` and `link_preview_ttl_hours`; theme keys
   `card_site`, `card_title`, `card_edge`.
+- **Chat attachments.** `avatar_chat_server` has an optional HTTP media
+  endpoint (`-media-addr`, `-media-dir`, `-media-url-base`, or a `[media]`
+  section via `-config`): `POST /upload` stores a picture (re-encoded,
+  metadata stripped) or ANSI art for `retention_days` (7) under the web
+  chat's `/chatmedia/<date>/<id>.<ext>` layout and answers with its URL;
+  HTML and SVG are never stored, files are served with a fixed type,
+  `nosniff` and a `default-src 'none'` policy, uploads are rate limited
+  per address and capped in total. The door's new `/upload` command
+  receives a file by Zmodem, posts it to `upload_url` and puts the link in
+  the input line to send. See MEDIA.md.
+
+### Fixed
+
+- After a Zmodem upload (avatar or attachment) the sender's closing "OO"
+  is consumed instead of landing in the input line as two typed O's.
 
 ### Changed
 

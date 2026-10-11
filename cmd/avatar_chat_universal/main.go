@@ -13,6 +13,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
+	"github.com/hmderdoc/avatar_chat_universal/internal/chatmedia"
 	"github.com/hmderdoc/avatar_chat_universal/internal/config"
 	"github.com/hmderdoc/avatar_chat_universal/internal/dropfile"
 	"github.com/hmderdoc/avatar_chat_universal/internal/inlineimg"
@@ -405,6 +406,11 @@ func run() error {
 		}
 		return a.Base64(), nil
 	}
+	if cfg.UploadURL != "" {
+		app.OnMediaUpload = func() (string, int, error) {
+			return runMediaUpload(ctx, conn, input, cfg.UploadURL, cfg.UploadMaxMB)
+		}
+	}
 	app.OnAvatarEditor = func() (string, error) {
 		// Seed the editor with the user's current avatar if they have one.
 		var baseline avatar.Avatar
@@ -482,6 +488,39 @@ func runAvatarUpload(conn termio.Conn, input *ansi.Input) (avatar.Avatar, error)
 		return nil, fmt.Errorf("invalid avatar: %v", err)
 	}
 	return a.Clone(), nil
+}
+
+// runMediaUpload receives one chat attachment by Zmodem, checks by its
+// bytes that it is a picture or ANSI art (the media server checks again and
+// re-encodes), and posts it to uploadURL. It returns the link to send and the
+// server's retention in days.
+func runMediaUpload(ctx context.Context, conn termio.Conn, input *ansi.Input, uploadURL string, maxMB int) (string, int, error) {
+	if maxMB <= 0 {
+		maxMB = 20
+	}
+	limit := maxMB << 20
+	var data []byte
+	var name string
+	err := input.WithRawAccess(conn, func() error {
+		received, offered, zerr := upload.ReceiveZMODEM(conn, limit+1)
+		if zerr != nil {
+			return zerr
+		}
+		data, name = received, offered
+		return nil
+	})
+	if err != nil {
+		return "", 0, err
+	}
+	if len(data) > limit {
+		return "", 0, fmt.Errorf("%s is larger than %d MB", name, maxMB)
+	}
+	if _, _, err := chatmedia.Detect(name, data); err != nil {
+		return "", 0, err
+	}
+	upCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	return chatmedia.Upload(upCtx, uploadURL, name, data)
 }
 
 // runAvatarEditor opens the in-door drawing editor seeded with `baseline`

@@ -70,6 +70,12 @@ type Config struct {
 	LinkPreviews        bool // link_previews = true (default) | false
 	LinkPreviewTTLHours int  // how long a fetched card is reused, default 24
 
+	// Chat attachments: /upload receives a file by Zmodem and posts it to
+	// this system's media server (avatar_chat_server -media-addr). Empty
+	// UploadURL turns /upload off. See MEDIA.md.
+	UploadURL   string // e.g. https://bbs.example.org:10089/upload
+	UploadMaxMB int    // largest file the door will receive, default 20
+
 	// Avatar and handle-style storage. See CONFIG.md "Avatar storage".
 	AvatarStore       string // "auto" (default), "synchronet" or "local"
 	SynchronetDataDir string // explicit Synchronet data dir; overrides detection
@@ -109,6 +115,7 @@ func Default() *Config {
 		ImageCacheMB:         50,
 		LinkPreviews:         true,
 		LinkPreviewTTLHours:  24,
+		UploadMaxMB:          20,
 		Raw:                  map[string]string{},
 	}
 }
@@ -226,6 +233,10 @@ func Load(path string) (*Config, error) {
 			} else {
 				cfg.NSFWKeywords = splitCSV(val)
 			}
+		case "upload_url":
+			cfg.UploadURL = val
+		case "upload_max_mb":
+			cfg.UploadMaxMB = atoiOr(val, cfg.UploadMaxMB)
 		case "avatar_store":
 			if val != "" {
 				cfg.AvatarStore = strings.ToLower(val)

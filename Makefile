@@ -33,6 +33,7 @@ DIST_FILES := \
 	slack_bridge.ini.example \
 	README.md \
 	INSTALL.md \
+	MEDIA.md \
 	CONFIG.md \
 	THEMING.md \
 	BRIDGES.md \

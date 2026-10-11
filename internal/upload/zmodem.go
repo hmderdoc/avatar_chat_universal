@@ -258,6 +258,10 @@ have_file:
 			// Send ZFIN back, then "OO" to terminate.
 			_ = r.sendHex(zfin, [4]byte{0, 0, 0, 0})
 			_, _ = conn.Write([]byte{'O', 'O'})
+			// The sender answers our ZFIN with its own "OO" ("over and
+			// out"). Swallow it here, or the chat's input reader takes it
+			// for two typed O's.
+			r.drainOverAndOut(time.Second)
 			if maxBytes > 0 && len(payload) > maxBytes {
 				payload = payload[:maxBytes]
 			}
@@ -378,6 +382,24 @@ func (r *zmodemReader) readByte(timeout time.Duration) (byte, error) {
 		}
 	}
 	return b, err
+}
+
+// drainOverAndOut reads up to the two 'O' bytes a sender writes after the
+// final ZFIN, waiting at most wait for them. It stops at the first other
+// byte (which is consumed: it arrives inside the transfer's tail, before
+// the chat resumes reading) or when the sender stays quiet.
+func (r *zmodemReader) drainOverAndOut(wait time.Duration) {
+	deadline := time.Now().Add(wait)
+	for got := 0; got < 2; got++ {
+		left := time.Until(deadline)
+		if left <= 0 {
+			return
+		}
+		b, err := r.readByte(left)
+		if err != nil || b != 'O' {
+			return
+		}
+	}
 }
 
 // recvHeader scans for `ZPAD [ZPAD] ZDLE <fmt>` and decodes the header.

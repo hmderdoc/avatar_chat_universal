@@ -41,6 +41,10 @@ type App struct {
 	// pause/resume the input pump itself (via Input.WithRawAccess) and
 	// return the new avatar's base64 on success.
 	OnAvatarUpload func() (b64 string, err error)
+	// OnMediaUpload runs a Zmodem receive for a chat attachment, posts it to
+	// the system's media server and returns the URL to send plus how many
+	// days the server keeps it. nil = uploads are not configured.
+	OnMediaUpload func() (url string, days int, err error)
 	// OnAvatarPick relaunches the bundled+sysop avatar selector. The
 	// callback owns the conn for the duration. Returns:
 	//   - b64 set + action "picked" when the user chose an avatar.
@@ -1056,6 +1060,9 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 	case "/tvcolor":
 		a.toggleTVColor()
 		return false, true
+	case "/upload":
+		a.handleMediaUpload()
+		return false, true
 	case "/help", "/?":
 		a.Session.Notice("/me /msg /r /join /part /who /img /channels /clear /avatar /settings /quit")
 		a.Session.Notice("/join keeps the old channel joined (unread counts in /channels); /part leaves it")
@@ -1070,12 +1077,43 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		if a.cards != nil {
 			a.Session.Notice("other links get a preview card (site, title, summary) under the message")
 		}
+		if a.OnMediaUpload != nil {
+			a.Session.Notice("/upload sends a picture or ANSI art by Zmodem; its link lands in your input line")
+		}
 		a.Session.Notice("TV: /tvtuner <host> <port> <channel> | /tvtuner off | /tvon | /tvoff")
 		a.Session.Notice("TV: PgUp=history (PgDn/Down or 30s closes) | /tvcolor or Ctrl-T = truecolor/16")
 		return false, true
 	}
 	a.Session.Notice(fmt.Sprintf("unknown command: %s", cmd))
 	return false, true
+}
+
+// handleMediaUpload receives one file by Zmodem, hands it to the media
+// server and puts the returned link in the input line for the user to send,
+// the web chat's convention: nothing is posted until they press Enter.
+func (a *App) handleMediaUpload() {
+	if a.OnMediaUpload == nil {
+		a.Session.Notice("/upload: file uploads are not set up on this system")
+		return
+	}
+	a.Session.Notice("\x01WZmodem ready.\x01n Send a picture (png jpg gif webp bmp) or art (.ans .bin):")
+	a.Session.Notice("  SyncTERM: \x01WAlt-U\x01n, pick the file  |  NetRunner / fTelnet: Send -> Zmodem")
+	a.Session.Notice("  Press \x01WEsc\x01n or cancel in your terminal to stop.")
+	a.draw()
+	_ = a.renderBlocking()
+	url, days, err := a.OnMediaUpload()
+	a.forceFullRedraw()
+	if err != nil {
+		a.Session.Notice(fmt.Sprintf("/upload: %v", err))
+		return
+	}
+	a.inputLine.SetValue(url)
+	note := "uploaded -- the link is in your input line; press Enter to send it"
+	if days > 0 {
+		note += fmt.Sprintf(" (kept %d days)", days)
+	}
+	a.Session.Notice("\x01G" + note + "\x01n")
+	a.dirty = true
 }
 
 func (a *App) handleAvatarCmd(parts []string) {

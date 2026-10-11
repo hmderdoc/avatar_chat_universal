@@ -151,6 +151,8 @@ app scopes and Socket Mode setup.
   mapping for Discord/Telegram/Matrix/Slack-style adapters.
 - [AVATARS.md](AVATARS.md) — avatar format, validation rules, sysop-managed
   collection directory, the in-door selector / upload / editor flows.
+- [MEDIA.md](MEDIA.md) — chat attachments: running the server's media
+  endpoint and `/upload` in the door.
 - [SCREENSAVER.md](SCREENSAVER.md) — idle animations, ANSI gallery setup,
   idle-interleave behavior.
 

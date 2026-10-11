@@ -294,6 +294,10 @@ Users on either door, both pointed at your server, share channels.
 State is in-memory only for now; restart the server and history is gone.
 Persist-to-disk is on the roadmap.
 
+The same binary can also store chat attachments for `/upload`
+(`-media-addr :10089 -media-dir ...`, then `upload_url` in the door's
+config). See MEDIA.md.
+
 ---
 
 ## Running a bridge as a systemd service

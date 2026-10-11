@@ -189,6 +189,13 @@ func (i *InputLine) PushHistory(line string) {
 // Value returns the current buffer as a string.
 func (i *InputLine) Value() string { return string(i.buf) }
 
+// SetValue replaces the buffer, leaving the cursor at its end.
+func (i *InputLine) SetValue(s string) {
+	i.buf = append(i.buf[:0], []rune(s)...)
+	i.historyIdx = -1
+	i.scratch = i.scratch[:0]
+}
+
 // Reset empties the buffer.
 func (i *InputLine) Reset() {
 	i.buf = i.buf[:0]

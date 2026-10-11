@@ -104,6 +104,14 @@ func TestReceiveZMODEM_AgainstLrzsz(t *testing.T) {
 		if filepath.Base(res.name) != "avatar.bin" {
 			t.Errorf("filename: got %q want %q", res.name, "avatar.bin")
 		}
+		// The sender's closing "OO" must not be left for the caller's
+		// input reader, which would take it for typed text.
+		_ = cmd.Wait()
+		_ = ourEnd.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+		var tail [16]byte
+		if n, _ := ourEnd.Read(tail[:]); n > 0 {
+			t.Errorf("bytes left after the transfer: %q", tail[:n])
+		}
 	case <-time.After(45 * time.Second):
 		t.Fatalf("timeout: ReceiveZMODEM did not complete within 45s")
 	}

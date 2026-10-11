@@ -152,7 +152,7 @@ const server = http.createServer(async (req, res) => {
           channel: "main", serverTime: Date.now(),
           channels: summaries(),
           who: { channel: "main", users: [{ nick: "Carol", system: "Test BBS", userNumber: 0, avatar: AVATAR, style: state.messages[0].style },
-            { nick: "Tester", system: "Test BBS", userNumber: 77, avatar: avatarOf(0x41, 0x07) }] },
+            { nick: "Tester", system: "Test BBS", userNumber: 77, avatar: avatarOf(0x41, 0x07) }, { nick: "Beta Tester", system: "Test BBS", userNumber: 0 }] },
           history: q.history === "1" ? { channel: "main", messages: state.messages } : undefined,
           private: { threads: [] },
           motd: { previewText: "mock motd", timestamp: Date.now() },
@@ -162,7 +162,7 @@ const server = http.createServer(async (req, res) => {
         return json(res, { channel: "main", messages: state.messages, serverTime: Date.now() });
       case "who":
         return json(res, { channel: "main", users: [{ nick: "Carol", system: "Test BBS", userNumber: 0, avatar: AVATAR, style: state.messages[0].style },
-          { nick: "Tester", system: "Test BBS", userNumber: 77, avatar: avatarOf(0x41, 0x07) }], serverTime: Date.now() });
+          { nick: "Tester", system: "Test BBS", userNumber: 77, avatar: avatarOf(0x41, 0x07) }, { nick: "Beta Tester", system: "Test BBS", userNumber: 0 }], serverTime: Date.now() });
       case "channels":
         return json(res, { channels: summaries(), serverTime: Date.now() });
       case "joinRoom": {

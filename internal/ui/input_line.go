@@ -93,9 +93,13 @@ func (i *InputLine) HandleKey(k ansi.Key) (submit bool, cancel bool) {
 	return false, false
 }
 
+// tabWords is how many trailing words handleTab tries as one name.
+const tabWords = 4
+
 // handleTab does prefix-completion against the last word in the buffer.
 // First press: find all candidates whose lower-case form starts with the
-// last word; replace the word with the first match. Subsequent Tab presses
+// last word (or the last few, for names with spaces); replace them with the
+// first match. Subsequent Tab presses
 // cycle through the rest.
 func (i *InputLine) handleTab() {
 	if i.CompletionProvider == nil {
@@ -107,21 +111,37 @@ func (i *InputLine) handleTab() {
 		i.buf = append(i.buf[:i.tabAnchor], []rune(i.tabMatches[i.tabIdx])...)
 		return
 	}
-	// Find the last whitespace-bounded word in the buffer.
+	// Starts of the last few words, nearest first. Names can hold spaces
+	// ("Beta Tester"), so the trailing words are tried as one prefix too,
+	// longest first.
+	space := func(r rune) bool { return r == ' ' || r == '\t' }
 	end := len(i.buf)
-	start := end
-	for start > 0 && i.buf[start-1] != ' ' && i.buf[start-1] != '\t' {
-		start--
+	var starts []int
+	for s := end; len(starts) < tabWords; {
+		for s > 0 && !space(i.buf[s-1]) {
+			s--
+		}
+		starts = append(starts, s)
+		for s > 0 && space(i.buf[s-1]) {
+			s--
+		}
+		if s == 0 {
+			break
+		}
 	}
-	if start == end {
+	if starts[0] == end {
 		return // nothing to complete
 	}
-	prefix := strings.ToLower(string(i.buf[start:end]))
 	candidates := i.CompletionProvider()
 	var matches []string
-	for _, c := range candidates {
-		if strings.HasPrefix(strings.ToLower(c), prefix) {
-			matches = append(matches, c)
+	start := end
+	for w := len(starts) - 1; w >= 0 && len(matches) == 0; w-- {
+		start = starts[w]
+		prefix := strings.ToLower(string(i.buf[start:end]))
+		for _, c := range candidates {
+			if strings.HasPrefix(strings.ToLower(c), prefix) {
+				matches = append(matches, c)
+			}
 		}
 	}
 	if len(matches) == 0 {

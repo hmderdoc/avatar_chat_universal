@@ -277,6 +277,18 @@ func run() error {
 		fmt.Fprintf(conn, "warning: could not read handle style: %v\r\n", err)
 	}
 
+	// First run, after the avatar: name colours, offered once. C opens
+	// /settings at the handle editor as chat starts.
+	userPrefs := &prefs.Store{Root: *dataDir, BBSID: bbsID}
+	startInSettings := false
+	if needsSelect && offerHandleColors(userPrefs, user.DisplayName(), style) {
+		ansi.Reset(conn)
+		ansi.ClearScreen(conn)
+		fmt.Fprintf(conn, "\r\nPress C to colour your name, any other key to skip...\r\n")
+		k, ok, _ := input.Next(30 * time.Second)
+		startInSettings = ok && k.Type == ansi.KeyChar && (k.Rune == 'c' || k.Rune == 'C')
+	}
+
 	ansi.Reset(conn)
 	ansi.ClearScreen(conn)
 
@@ -307,7 +319,6 @@ func run() error {
 	if cfg.MotdChannel != "" {
 		session.MotdChannel = cfg.MotdChannel
 	}
-	userPrefs := &prefs.Store{Root: *dataDir, BBSID: bbsID}
 	ignores := &ignore.List{
 		Load: func() string { return userPrefs.Get(user.DisplayName(), "ignore") },
 		Save: func(v string) error { return userPrefs.Set(user.DisplayName(), "ignore", v) },
@@ -421,6 +432,7 @@ func run() error {
 		return userPrefs.Set(user.DisplayName(), "mouse", v)
 	}
 	app.BoardWide = boardWide
+	app.StartInSettings = startInSettings
 	app.OnStyleSave = func(st *nickstyle.Style) error {
 		stored, _ := store.ReadStyle(user.DisplayName())
 		return store.WriteStyle(user.DisplayName(), nickstyle.KeepTag(st, stored))
@@ -538,6 +550,28 @@ func run() error {
 	ansi.ClearScreen(conn)
 	fmt.Fprintf(conn, "Goodbye, %s.\r\n", user.DisplayName())
 	return nil
+}
+
+// handleOfferKey is the door pref that records the first-run offer of
+// name colours, so it is made once.
+const handleOfferKey = "handle_colors_offered"
+
+// offerHandleColors reports whether name should be offered the handle
+// colour editor now: its style has no colours and it was never offered
+// them. It records the offer; if that can't be stored it doesn't offer,
+// rather than ask on every run.
+func offerHandleColors(p *prefs.Store, name string, st *nickstyle.Style) bool {
+	if p.Get(name, handleOfferKey) != "" {
+		return false
+	}
+	if st != nil {
+		for _, c := range st.Colors {
+			if nickstyle.Hex(c) != "" {
+				return false
+			}
+		}
+	}
+	return p.Set(name, handleOfferKey, "1") == nil
 }
 
 // runAvatarUpload runs a Zmodem receive against conn and returns the validated

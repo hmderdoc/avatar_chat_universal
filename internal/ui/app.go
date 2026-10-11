@@ -97,6 +97,9 @@ type App struct {
 	// BoardWide is set when avatars and handle styles are the user's real
 	// BBS records (Synchronet mode); /settings and /avatar help say so.
 	BoardWide bool
+	// StartInSettings opens /settings once chat starts: the first-run
+	// offer of name colours was taken (cmd/avatar_chat_universal).
+	StartInSettings bool
 	// pendingStyle carries unsaved /settings handle edits across an avatar
 	// action (picker, editor, upload) and back into the panel.
 	pendingStyle *nickstyle.Style
@@ -737,6 +740,10 @@ func (a *App) Run(ctx context.Context) error {
 	a.draw()
 	if err := a.renderBlocking(); err != nil {
 		return err
+	}
+	if a.StartInSettings {
+		a.StartInSettings = false
+		a.openSettings()
 	}
 
 	var reconnect reconnectState

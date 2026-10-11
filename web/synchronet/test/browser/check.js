@@ -40,6 +40,53 @@ function check(cond, name, detail) {
   await page.waitForSelector(".avatar-chat-group", { timeout: 10000 });
   await page.waitForTimeout(1200);
 
+  // first logon: no avatar yet, so the welcome asks, with name colours
+  // offered while the stored style has none
+  check(await page.$("#avatar-chat-welcome-modal.is-open") !== null, "no avatar yet: the welcome asks");
+  check(await page.$eval("#avatar-chat-welcome-name", (e) => e.textContent) === "Tester", "the welcome shows the name");
+  check(await page.isVisible("#avatar-chat-welcome-colors"), "name colours offered while the style has none");
+  check(!/account|key|claim|mailbox|secur|tag/i.test(await page.$eval("#avatar-chat-welcome-modal", (e) => e.innerText)), "nothing about accounts, keys or tags in the welcome");
+  await shot(page, "welcome.png");
+  await page.click("#avatar-chat-welcome-colors");
+  check(await page.$("#avatar-chat-welcome-modal.is-open") === null && await page.$("#avatar-chat-style-modal.is-open") !== null, "Colour your name opens the handle style modal");
+  await page.click("#avatar-chat-style-cancel");
+  await page.reload();
+  await page.waitForSelector("#avatar-chat-welcome-modal.is-open", { timeout: 5000 }).catch(() => {});
+  check(await page.$("#avatar-chat-welcome-modal.is-open") !== null, "asked again on the next page load");
+  await page.click("#avatar-chat-welcome-avatar-open");
+  check(await page.$("#avatar-chat-welcome-modal.is-open") === null && await page.$("#avatar-chat-avatar-modal.is-open") !== null, "Choose avatar opens the avatar modal");
+  await page.click("#avatar-chat-avatar-close");
+  await page.reload();
+  await page.waitForSelector("#avatar-chat-welcome-modal.is-open", { timeout: 5000 }).catch(() => {});
+  await page.click("#avatar-chat-welcome-later");
+  check(await page.$("#avatar-chat-welcome-modal.is-open") === null, "Not now closes it");
+  await page.waitForSelector(".avatar-chat-group", { timeout: 10000 });
+
+  // Tab completes names like the door: case-insensitive prefix, sorted,
+  // the longest run of up to four words, Tab / Shift+Tab cycle
+  const val = () => page.$eval("#avatar-chat-input", (e) => e.value);
+  await page.fill("#avatar-chat-input", "hi beta t");
+  await page.press("#avatar-chat-input", "Tab");
+  check(await val() === "hi Beta Tester", "Tab completes a name with a space", await val());
+  await page.fill("#avatar-chat-input", "ca");
+  await page.press("#avatar-chat-input", "Tab");
+  check(await val() === "Carol", "Tab completes a speaker, nothing appended", await val());
+  await page.fill("#avatar-chat-input", "te");
+  await page.press("#avatar-chat-input", "Tab");
+  const t1 = await val();
+  await page.press("#avatar-chat-input", "Tab");
+  const t2 = await val();
+  await page.press("#avatar-chat-input", "Shift+Tab");
+  const t3 = await val();
+  check(t1 === "Tester" && t2 === "Tester" && t3 === "Tester", "one match cycles to itself", [t1, t2, t3].join(","));
+  await page.fill("#avatar-chat-input", "d");
+  await page.press("#avatar-chat-input", "Tab");
+  check(await val() === "Dave", "single-letter prefix", await val());
+  await page.fill("#avatar-chat-input", "zzz");
+  await page.press("#avatar-chat-input", "Tab");
+  check(await val() === "zzz" && await page.evaluate(() => document.activeElement.id !== "avatar-chat-input"), "no match: Tab moves focus as usual");
+  await page.fill("#avatar-chat-input", "");
+
   const carol = await page.$$eval(".avatar-chat-handle", (els) => {
     const e = els.find((x) => x.textContent === "Carol");
     return e ? Array.from(e.querySelectorAll("span")).map((s) => s.style.color) : null;
@@ -381,9 +428,19 @@ function check(cond, name, detail) {
     const pmPost = st.posts.filter((x) => x.action === "sendPrivate").pop();
     check(pmPost && pmPost.q.target === "Webby" && pmPost.q.system === "web.example" && pmPost.q.mailbox === "Webby@web_example",
       "the reply carries the web user's mailbox for the BBS to re-check", JSON.stringify(pmPost && pmPost.q));
+    await page.fill("#avatar-chat-input", "wE");
+    await page.press("#avatar-chat-input", "Tab");
+    check(await page.$eval("#avatar-chat-input", (e) => e.value) === "Webby", "Tab completes the PM peer");
+    await page.fill("#avatar-chat-input", "");
   }
   const shown = await page.evaluate(() => document.body.innerText);
   check(shown.indexOf("web_example") < 0 && shown.indexOf("Webby@") < 0, "no mailbox string is on screen");
+
+  // with an avatar saved, the welcome doesn't ask again
+  await page.reload();
+  await page.waitForSelector("#avatar-chat-input", { timeout: 10000 });
+  await page.waitForTimeout(1500);
+  check(await page.$("#avatar-chat-welcome-modal.is-open") === null, "with an avatar, no welcome");
 
   check(errors.length === 0, "no page errors", errors.join(" | "));
   check(dialogs.length === 0, "no alert() ran", dialogs.join(" | "));

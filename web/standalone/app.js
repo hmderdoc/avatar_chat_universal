@@ -30,7 +30,10 @@
         roomForm: $("room-form"), roomInput: $("room-input"), roomSubmit: $("room-submit"),
         noRoomsModal: $("norooms-modal"), noRoomsDefault: $("norooms-default"), noRoomsMain: $("norooms-main"),
         noRoomsPick: $("norooms-pick"), noRoomsCancel: $("norooms-cancel"),
+        welcomeModal: $("welcome-modal"), welcomeAvatar: $("welcome-avatar"), welcomeName: $("welcome-name"),
+        welcomeAvatarOpen: $("welcome-avatar-open"), welcomeColors: $("welcome-colors"), welcomeLater: $("welcome-later"),
         settingsModal: $("settings-modal"), settingsForm: $("settings-form"), settingsNick: $("settings-nick"),
+        settingsColors: $("settings-colors"),
         styleLetters: $("style-letters"), stylePreview: $("style-preview"), stylePreset: $("style-preset"),
         styleA: $("style-a"), styleB: $("style-b"),
         settingsStyle: $("settings-style"), settingsStatus: $("settings-status"), settingsCancel: $("settings-cancel"),
@@ -67,6 +70,7 @@
         publicRooms: [],       // names from public_channels
         whoTimers: new Map(),
         key: "", claimed: false, refused: false,
+        welcomed: false, welcomeNext: false, // the first-logon welcome, once per page load
         pm: "",                // key of the private thread on screen, "" for a room
         threads: new Map(),    // lower(name)|lower(host) -> {name, host, mailbox, msgs, unread, last}
     };
@@ -313,6 +317,10 @@
         if (state.pm && state.threads.has(state.pm)) openThread(state.pm);
         else openView(state.view || state.joined[0] || cfg.defaultChannel);
         refreshCounts();
+        if (!state.welcomed && needsWelcome() && !els.nickModal.classList.contains("is-open")) openWelcome();
+        else offerRooms();
+    }
+    function offerRooms() {
         if (!state.joined.length && !state.pm) openModal(els.noRoomsModal, els.noRoomsMain);
     }
     function onClaim(data) {
@@ -438,6 +446,7 @@
     }
 
     // --- messages -------------------------------------------------------------
+    const spoken = new Map(); // lower(name) -> name, for Tab completion
     function isTuner(s) { return /^\[TVTUNER\|.*\]$/.test(s); }
     function isSelfEcho(m) {
         if (!m.nick || !isMe(m.nick.name, m.nick.host)) return false;
@@ -470,6 +479,7 @@
         const nick = m.nick && typeof m.nick === "object" ? m.nick : {name: String(m.nick || "")};
         const name = plain(nick.name).trim();
         if (!name) { systemLine(plain(str)); return; }
+        spoken.set(lower(name), name);
         const empty = els.messages.querySelector(".avatar-chat-empty");
         if (empty) empty.remove();
         const pinned = nearBottom();
@@ -1133,6 +1143,26 @@
     }
     function anyModalOpen() { return !!document.querySelector(".avatar-chat-modal.is-open"); }
 
+    // --- first logon: like the door's first run, no avatar yet (and not
+    // settled by a Remove) gets one welcome per page load -------------------
+    function needsWelcome() { return !state.avatar && !load("noavatar"); }
+    function openWelcome() {
+        state.welcomed = true;
+        state.welcomeNext = true;
+        fillAvatar(els.welcomeAvatar, "");
+        els.welcomeAvatar.textContent = "none";
+        els.welcomeName.replaceChildren(handle(state.nick, state.colors));
+        els.welcomeColors.hidden = state.colors.some((c) => c);
+        openModal(els.welcomeModal, els.welcomeAvatarOpen);
+    }
+    // welcomeDone offers the rooms once the welcome, and whatever it
+    // opened, has closed.
+    function welcomeDone() {
+        if (!state.welcomeNext || anyModalOpen()) return;
+        state.welcomeNext = false;
+        offerRooms();
+    }
+
     // --- nickname and settings --------------------------------------------------------
     function validNick(n) { return /^[\p{L}\p{N} _-]{1,25}$/u.test(n); }
     function askNick(why) {
@@ -1244,6 +1274,7 @@
     function closeSettings(saved) {
         if (!saved) applyStyle(state.style);
         closeModal(els.settingsModal);
+        welcomeDone();
     }
 
     // --- composer ----------------------------------------------------------------------
@@ -1256,6 +1287,56 @@
             return;
         }
         if (postText(text)) els.input.value = "";
+    }
+
+    // --- Tab completes a name, like the door's input line: the word before
+    // the caret, or the last two to four for names with spaces (the
+    // longest that starts a name wins), against the room's members, anyone
+    // seen speaking and the PM peer. Tab again cycles, Shift+Tab goes back,
+    // any other key ends it; with no match Tab moves focus as usual. -------
+    const tab = {matches: null, idx: 0, start: 0, end: 0};
+    function knownNames() {
+        const out = new Map();
+        const add = (n) => {
+            n = plain(n).trim();
+            if (n && !out.has(lower(n))) out.set(lower(n), n);
+        };
+        (state.who.get(lower(state.view)) || []).forEach((p) => add(p.nick));
+        spoken.forEach(add);
+        const t = state.pm && state.threads.get(state.pm);
+        if (t) add(t.name);
+        return Array.from(out.values());
+    }
+    // nameMatches gives {start, matches} for text up to caret, or null.
+    function nameMatches(text, caret, names) {
+        const before = text.slice(0, caret);
+        if (!before || /\s$/.test(before)) return null;
+        const starts = [];
+        for (let i = before.length - 1; i >= 0 && starts.length < 4; i--) {
+            if (!/\s/.test(before[i]) && (i === 0 || /\s/.test(before[i - 1]))) starts.push(i);
+        }
+        for (let k = starts.length - 1; k >= 0; k--) {
+            const prefix = lower(before.slice(starts[k]));
+            const matches = names.filter((n) => lower(n).indexOf(prefix) === 0).sort();
+            if (matches.length) return {start: starts[k], matches};
+        }
+        return null;
+    }
+    function completeName(ev) {
+        const input = els.input;
+        if (tab.matches) {
+            tab.idx = (tab.idx + (ev.shiftKey ? tab.matches.length - 1 : 1)) % tab.matches.length;
+        } else {
+            if (ev.shiftKey || input.selectionStart !== input.selectionEnd) return;
+            const hit = nameMatches(input.value, input.selectionStart, knownNames());
+            if (!hit) return;
+            Object.assign(tab, {matches: hit.matches, idx: 0, start: hit.start, end: input.selectionStart});
+        }
+        ev.preventDefault();
+        const name = tab.matches[tab.idx];
+        input.value = input.value.slice(0, tab.start) + name + input.value.slice(tab.end);
+        tab.end = tab.start + name.length;
+        input.setSelectionRange(tab.end, tab.end);
     }
 
     function postText(text) {
@@ -1559,12 +1640,16 @@
     // --- wiring -----------------------------------------------------------------------
     els.form.addEventListener("submit", (ev) => { ev.preventDefault(); submit(); });
     els.input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Tab" && !ev.ctrlKey && !ev.altKey && !ev.metaKey) { completeName(ev); return; }
+        if (!/^(Shift|Control|Alt|Meta)$/.test(ev.key)) tab.matches = null;
         if (ev.key === "Escape" && state.pendingArt) {
             ev.preventDefault();
             ev.stopPropagation();
             setPending(null);
         }
     });
+    els.input.addEventListener("blur", () => { tab.matches = null; });
+    els.input.addEventListener("input", () => { tab.matches = null; });
     els.input.addEventListener("paste", (ev) => {
         const files = ev.clipboardData && ev.clipboardData.files;
         if (files && files.length) { ev.preventDefault(); acceptFile(files[0]); }
@@ -1612,6 +1697,21 @@
     els.noRoomsMain.onclick = () => joinRoom(cfg.defaultChannel);
     els.noRoomsPick.onclick = openRoomModal;
     els.noRoomsCancel.onclick = () => closeModal(els.noRoomsModal);
+
+    els.welcomeAvatarOpen.onclick = () => {
+        openAvatarModal();
+        closeModal(els.welcomeModal);
+    };
+    els.welcomeColors.onclick = () => {
+        openSettings();
+        closeModal(els.welcomeModal);
+        els.settingsColors.scrollIntoView({block: "nearest"});
+        els.stylePreset.focus();
+    };
+    els.welcomeLater.onclick = () => {
+        closeModal(els.welcomeModal);
+        welcomeDone();
+    };
 
     els.nickForm.addEventListener("submit", (ev) => {
         ev.preventDefault();
@@ -1667,7 +1767,10 @@
     });
 
     els.avatarOpen.onclick = openAvatarModal;
-    els.avatarClose.onclick = () => closeModal(els.avatarModal);
+    els.avatarClose.onclick = () => {
+        closeModal(els.avatarModal);
+        welcomeDone();
+    };
     els.avatarDraw.onclick = () => openAvatarEditor(AvatarArt.avatarBase64ToCells(state.avatar));
     els.avatarUpload.onclick = () => els.avatarFile.click();
     els.avatarFile.onchange = () => {
@@ -1675,7 +1778,11 @@
         els.avatarFile.value = "";
         if (f) acceptAvatarFile(f);
     };
-    els.avatarRemove.onclick = () => setAvatar("", "Removed. Your messages go out without an avatar.");
+    // Removing is a choice made: the welcome doesn't ask again.
+    els.avatarRemove.onclick = () => {
+        save("noavatar", "1");
+        setAvatar("", "Removed. Your messages go out without an avatar.");
+    };
     els.avatarCollection.onchange = () => showCollection(els.avatarCollection.value);
     els.avatarUse.onclick = () => {
         const b64 = avatarState.list[avatarState.selected];
@@ -1688,12 +1795,13 @@
     document.addEventListener("keydown", (ev) => {
         if (ev.key !== "Escape" || (window.AnsiEditorModal && AnsiEditorModal.isOpen)) return;
         if (els.settingsModal.classList.contains("is-open")) { closeSettings(false); return; }
-        [els.cardModal, els.avatarModal, els.roomModal, els.noRoomsModal].some((m) => {
+        [els.cardModal, els.avatarModal, els.welcomeModal, els.roomModal, els.noRoomsModal].some((m) => {
             if (!m.classList.contains("is-open")) return false;
             closeModal(m);
             return true;
         });
         if (state.nick && els.nickModal.classList.contains("is-open")) closeModal(els.nickModal);
+        welcomeDone();
     });
     // A click on the dark overlay closes it too.
     document.querySelectorAll(".avatar-chat-modal").forEach((m) => {
@@ -1701,6 +1809,7 @@
             if (ev.target !== m || m === els.nickModal) return;
             if (m === els.settingsModal) closeSettings(false);
             else closeModal(m);
+            welcomeDone();
         });
     });
 

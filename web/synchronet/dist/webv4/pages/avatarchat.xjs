@@ -129,6 +129,24 @@
         </div>
     </div>
 
+    <div id="avatar-chat-welcome-modal" class="avatar-chat-modal" aria-hidden="true">
+        <div class="avatar-chat-modal-card" role="dialog" aria-modal="true" aria-labelledby="avatar-chat-welcome-title">
+            <div class="avatar-chat-modal-header">
+                <h4 id="avatar-chat-welcome-title" class="avatar-chat-modal-title">Welcome</h4>
+            </div>
+            <div class="avatar-chat-avatar-current">
+                <div id="avatar-chat-welcome-avatar" class="avatar-chat-avatar-preview"></div>
+                <div id="avatar-chat-welcome-name"></div>
+            </div>
+            <p class="avatar-chat-modal-text">You have no avatar yet. Pick one to go with your messages.</p>
+            <div class="avatar-chat-modal-actions">
+                <button id="avatar-chat-welcome-avatar-open" class="avatar-chat-sidebar-button is-primary" type="button">Choose avatar</button>
+                <button id="avatar-chat-welcome-colors" class="avatar-chat-sidebar-button" type="button">Colour your name</button>
+                <button id="avatar-chat-welcome-later" class="avatar-chat-sidebar-button" type="button">Not now</button>
+            </div>
+        </div>
+    </div>
+
     <div id="avatar-chat-style-modal" class="avatar-chat-modal" aria-hidden="true">
         <div class="avatar-chat-modal-card avatar-chat-style-card" role="dialog" aria-modal="true" aria-labelledby="avatar-chat-style-title">
             <div class="avatar-chat-modal-header">

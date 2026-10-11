@@ -80,7 +80,7 @@
             <div class="avatar-chat-modal-header">
                 <h4 id="nick-title" class="avatar-chat-modal-title">Pick a nickname</h4>
             </div>
-            <p class="avatar-chat-modal-text">Letters, digits, spaces, - and _, up to 25. There are no accounts here: anyone can take any name.</p>
+            <p class="avatar-chat-modal-text">Letters, digits, spaces, - and _, up to 25.</p>
             <input id="nick-input" class="avatar-chat-sidebar-input" maxlength="25" autocomplete="nickname">
             <div id="nick-error" class="avatar-chat-modal-text sa-error" aria-live="polite"></div>
             <div class="avatar-chat-modal-actions">
@@ -118,6 +118,24 @@
         </div>
     </div>
 
+    <div id="welcome-modal" class="avatar-chat-modal" aria-hidden="true">
+        <div class="avatar-chat-modal-card" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+            <div class="avatar-chat-modal-header">
+                <h4 id="welcome-title" class="avatar-chat-modal-title">Welcome</h4>
+            </div>
+            <div class="sa-card-body">
+                <div id="welcome-avatar" class="avatar-chat-avatar-preview"></div>
+                <div id="welcome-name" class="sa-card-name"></div>
+            </div>
+            <p class="avatar-chat-modal-text">You have no avatar yet. Pick one to go with your messages.</p>
+            <div class="avatar-chat-modal-actions">
+                <button id="welcome-avatar-open" class="avatar-chat-sidebar-button is-primary" type="button">Choose avatar</button>
+                <button id="welcome-colors" class="avatar-chat-sidebar-button" type="button">Colour your name</button>
+                <button id="welcome-later" class="avatar-chat-sidebar-button" type="button">Not now</button>
+            </div>
+        </div>
+    </div>
+
     <div id="settings-modal" class="avatar-chat-modal" aria-hidden="true">
         <form id="settings-form" class="avatar-chat-modal-card avatar-chat-style-card" role="dialog" aria-modal="true" aria-labelledby="settings-title" autocomplete="off">
             <div class="avatar-chat-modal-header">
@@ -126,7 +144,7 @@
             <label class="sa-field">Nickname
                 <input id="settings-nick" class="avatar-chat-sidebar-input" maxlength="25" autocomplete="nickname">
             </label>
-            <div class="sa-field">Handle colours
+            <div id="settings-colors" class="sa-field">Handle colours
                 <span class="avatar-chat-modal-text">A colour for each letter of your name, kept in this browser for that name.</span>
                 <div id="style-preview" class="avatar-chat-style-preview"></div>
                 <div id="style-letters" class="avatar-chat-style-letters"></div>

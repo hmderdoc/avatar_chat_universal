@@ -9,6 +9,24 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Added
 
+- **A first-logon welcome.** Someone who has never chosen an avatar is
+  asked to, as the door already did: the standalone page (after the name
+  is taken, before the no-rooms prompt) and the Synchronet page show their
+  avatar and name with **Choose avatar**, **Colour your name** (only while
+  the name has no colours) and **Not now** (this page load only). An
+  explicit "no avatar" is settled and not asked again: Remove on the
+  standalone page (kept in the browser), Disable on the Synchronet page.
+- **The door offers name colours on first run**, once: after the avatar
+  picker, a user whose handle style has no colours is asked "Press C to
+  colour your name"; C opens /settings at the handle editor as chat
+  starts. The offer is recorded in the door prefs
+  (`handle_colors_offered`).
+- **Tab completes names on both web pages**, like the door: the word
+  before the caret (or the last two to four, for names with spaces)
+  against the room's members, anyone seen speaking and the PM peer,
+  case-insensitive, sorted; Tab again cycles, Shift+Tab goes back. With no
+  match Tab moves focus as usual.
+- door: Tab completes names with spaces, e.g. 'Beta T' -> 'Beta Tester'.
 - **Private messages on the standalone page.** A web user's mailbox is
   `name@origin` (the server's `system_name` with anything outside
   `[A-Za-z0-9_-]` as `_`), carried as `nick.mailbox`, which the server

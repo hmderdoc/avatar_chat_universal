@@ -3942,7 +3942,85 @@
         });
     }
 
+    /* ---- Tab completes a name ----
+       Like the door's input line: the word before the caret, or the last
+       two to four for names with spaces (the longest that starts a name
+       wins), against the room's users, anyone seen speaking and the PM
+       peer. Tab again cycles, Shift+Tab goes back, any other key ends it;
+       with no match Tab moves focus as usual. */
+    var tabState = { matches: null, idx: 0, start: 0, end: 0 };
+    var spokenNames = {}; /* upper(name) -> name */
+
+    function knownNames() {
+        var out = {};
+        var list = [];
+        function add(name) {
+            name = trimText(String(name || ''));
+            if (name && !out[normalizeUpper(name)]) {
+                out[normalizeUpper(name)] = true;
+                list.push(name);
+            }
+        }
+        messages.forEach(function (m) {
+            if (m && m.sender) {
+                spokenNames[normalizeUpper(m.sender)] = m.sender;
+            }
+        });
+        users.forEach(function (u) { add(u && u.nick); });
+        Object.keys(spokenNames).forEach(function (k) { add(spokenNames[k]); });
+        if (activeView.type === 'private') {
+            add(activeView.name);
+        }
+        return list;
+    }
+
+    function nameMatches(text, caret, names) {
+        var before = text.slice(0, caret);
+        var starts = [];
+        var i;
+        var k;
+        if (!before || /\s$/.test(before)) {
+            return null;
+        }
+        for (i = before.length - 1; i >= 0 && starts.length < 4; i -= 1) {
+            if (!/\s/.test(before.charAt(i)) && (i === 0 || /\s/.test(before.charAt(i - 1)))) {
+                starts.push(i);
+            }
+        }
+        for (k = starts.length - 1; k >= 0; k -= 1) {
+            var prefix = before.slice(starts[k]).toLowerCase();
+            var matches = names.filter(function (n) { return n.toLowerCase().indexOf(prefix) === 0; }).sort();
+            if (matches.length) {
+                return { start: starts[k], matches: matches };
+            }
+        }
+        return null;
+    }
+
+    function completeName(event) {
+        var name;
+        if (tabState.matches) {
+            tabState.idx = (tabState.idx + (event.shiftKey ? tabState.matches.length - 1 : 1)) % tabState.matches.length;
+        } else {
+            if (event.shiftKey || input.selectionStart !== input.selectionEnd) {
+                return;
+            }
+            var hit = nameMatches(input.value, input.selectionStart, knownNames());
+            if (!hit) {
+                return;
+            }
+            tabState = { matches: hit.matches, idx: 0, start: hit.start, end: input.selectionStart };
+        }
+        event.preventDefault();
+        name = tabState.matches[tabState.idx];
+        input.value = input.value.slice(0, tabState.start) + name + input.value.slice(tabState.end);
+        tabState.end = tabState.start + name.length;
+        input.setSelectionRange(tabState.end, tabState.end);
+    }
+
     if (form && input) {
+        input.addEventListener('blur', function () { tabState.matches = null; });
+        input.addEventListener('input', function () { tabState.matches = null; });
         input.addEventListener('paste', function (event) {
             var files = event.clipboardData && event.clipboardData.files;
             if (files && files.length) {
@@ -3951,6 +4029,13 @@
             }
         });
         input.addEventListener('keydown', function (event) {
+            if (event.key === 'Tab' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+                completeName(event);
+                return;
+            }
+            if (!/^(Shift|Control|Alt|Meta)$/.test(event.key)) {
+                tabState.matches = null;
+            }
             if (event.key === 'Escape' && pendingAnsiUpload) {
                 event.preventDefault();
                 event.stopPropagation();
@@ -4126,29 +4211,31 @@
         applyPageStyle(savedPageStyle);
     }
 
-    if (styleOpen && styleModal) {
-        styleOpen.addEventListener('click', function () {
-            styleStatus.textContent = 'Loading...';
-            if (pageStyleSelect) {
-                pageStyleSelect.value = savedPageStyle;
+    function openStyleModal() {
+        styleStatus.textContent = 'Loading...';
+        if (pageStyleSelect) {
+            pageStyleSelect.value = savedPageStyle;
+        }
+        styleModal.classList.add('is-open');
+        styleModal.setAttribute('aria-hidden', 'false');
+        fetchJSON(apiBase + '?action=style').then(function (reply) {
+            var st = reply && reply.style ? reply.style : {};
+            var alias = String(pageConfig.userAlias || '');
+            var colors = Array.isArray(st.colors) ? st.colors : [];
+            var i;
+            styleState.colors = [];
+            for (i = 0; i < alias.length; i += 1) {
+                styleState.colors.push(HEX_COLOR.test(colors[i] || '') ? colors[i] : '');
             }
-            styleModal.classList.add('is-open');
-            styleModal.setAttribute('aria-hidden', 'false');
-            fetchJSON(apiBase + '?action=style').then(function (reply) {
-                var st = reply && reply.style ? reply.style : {};
-                var alias = String(pageConfig.userAlias || '');
-                var colors = Array.isArray(st.colors) ? st.colors : [];
-                var i;
-                styleState.colors = [];
-                for (i = 0; i < alias.length; i += 1) {
-                    styleState.colors.push(HEX_COLOR.test(colors[i] || '') ? colors[i] : '');
-                }
-                styleStatus.textContent = '';
-                renderStyleEditor();
-            }).catch(function (error) {
-                styleStatus.textContent = error && error.message ? String(error.message) : 'Could not load your style.';
-            });
+            styleStatus.textContent = '';
+            renderStyleEditor();
+        }).catch(function (error) {
+            styleStatus.textContent = error && error.message ? String(error.message) : 'Could not load your style.';
         });
+    }
+
+    if (styleOpen && styleModal) {
+        styleOpen.addEventListener('click', openStyleModal);
         styleLetters.addEventListener('input', function (event) {
             var i = event.target.getAttribute('data-letter');
             if (i !== null) {
@@ -4676,6 +4763,60 @@
         });
     }
 
+    /* ---- First logon ----
+       Like the door's first run: a member who has never chosen an avatar
+       (none, and not disabled, which is a choice made) is asked once per
+       page load, with name colours offered while their style has none. */
+    var welcomeModal = document.getElementById('avatar-chat-welcome-modal');
+    var welcomeAvatar = document.getElementById('avatar-chat-welcome-avatar');
+    var welcomeName = document.getElementById('avatar-chat-welcome-name');
+    var welcomeAvatarOpen = document.getElementById('avatar-chat-welcome-avatar-open');
+    var welcomeColors = document.getElementById('avatar-chat-welcome-colors');
+    var welcomeLater = document.getElementById('avatar-chat-welcome-later');
+
+    function closeWelcomeModal() {
+        welcomeModal.classList.remove('is-open');
+        welcomeModal.setAttribute('aria-hidden', 'true');
+    }
+
+    function maybeWelcome() {
+        if (!pageConfig.isLoggedIn || !welcomeModal || !avatarModal || !styleModal) {
+            return;
+        }
+        Promise.all([fetchJSON(apiBase + '?action=avatar'), fetchJSON(apiBase + '?action=style')]).then(function (replies) {
+            var avatar = replies[0] && replies[0].ok ? replies[0].avatar : undefined;
+            var style = replies[1] && replies[1].style ? replies[1].style : {};
+            var colors = Array.isArray(style.colors) ? style.colors.filter(function (c) { return HEX_COLOR.test(c || ''); }) : [];
+            if (avatar === undefined || (avatar && (avatar.data || avatar.disabled)) || document.querySelector('.avatar-chat-modal.is-open')) {
+                return;
+            }
+            welcomeAvatar.innerHTML = '<div class="avatar-chat-avatar-placeholder">none</div>';
+            welcomeName.innerHTML = renderHandle(String(pageConfig.userAlias || ''), style);
+            welcomeColors.hidden = colors.length > 0;
+            welcomeModal.classList.add('is-open');
+            welcomeModal.setAttribute('aria-hidden', 'false');
+            welcomeAvatarOpen.focus();
+        }).catch(function () {});
+    }
+
+    if (welcomeModal) {
+        welcomeAvatarOpen.addEventListener('click', function () {
+            closeWelcomeModal();
+            openAvatarModal();
+        });
+        welcomeColors.addEventListener('click', function () {
+            closeWelcomeModal();
+            openStyleModal();
+            stylePreset.focus();
+        });
+        welcomeLater.addEventListener('click', closeWelcomeModal);
+        welcomeModal.addEventListener('click', function (event) {
+            if (event.target === welcomeModal) {
+                closeWelcomeModal();
+            }
+        });
+    }
+
     updateChannelLabel();
     renderUsersTitle();
     updateQueryString();
@@ -4693,6 +4834,7 @@
         loadPrivateThreads(false);
         loadActiveHistory(false);
         loadUsers(false);
+        maybeWelcome();
         if (pageConfig.canUseRealtime) {
             connectEvents();
             startReconcileLoop();
@@ -4726,6 +4868,10 @@
         }
         if (event.key === 'Escape' && styleModal && styleModal.classList.contains('is-open')) {
             closeStyleModal();
+            return;
+        }
+        if (event.key === 'Escape' && welcomeModal && welcomeModal.classList.contains('is-open')) {
+            closeWelcomeModal();
             return;
         }
         if (event.key === 'Escape' && avatarModal && avatarModal.classList.contains('is-open') &&

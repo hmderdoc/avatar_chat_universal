@@ -5,7 +5,8 @@
 // `host` and `port` config at this server's address and you're done.
 //
 // With -media-addr (or media_addr in -config) it also runs a small HTTP file
-// drop for chat attachments: see MEDIA.md.
+// drop for chat attachments: see MEDIA.md. -deny (deny_file) names a file of
+// addresses to refuse on both.
 package main
 
 import (
@@ -18,6 +19,7 @@ import (
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/chatmedia"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chatserver"
+	"github.com/hmderdoc/avatar_chat_universal/internal/denylist"
 )
 
 func main() {
@@ -32,6 +34,7 @@ func main() {
 	flag.IntVar(&mcfg.RetentionDays, "retention-days", mcfg.RetentionDays, "days an attachment is kept")
 	flag.IntVar(&mcfg.MaxStoreMB, "max-store-mb", mcfg.MaxStoreMB, "total attachment storage, MB; uploads are refused when full")
 	flag.IntVar(&mcfg.PerIPPerHour, "uploads-per-hour", mcfg.PerIPPerHour, "uploads allowed per remote address per hour (0 = unlimited)")
+	flag.StringVar(&mcfg.DenyFile, "deny", "", "file of IP addresses and CIDR ranges to refuse, chat and media alike (re-read when it changes)")
 	flag.Parse()
 
 	// The INI fills in what the command line left at its default; an
@@ -61,10 +64,16 @@ func main() {
 		pickInt("retention-days", &mcfg.RetentionDays, fileCfg.RetentionDays)
 		pickInt("max-store-mb", &mcfg.MaxStoreMB, fileCfg.MaxStoreMB)
 		pickInt("uploads-per-hour", &mcfg.PerIPPerHour, fileCfg.PerIPPerHour)
+		pick("deny", &mcfg.DenyFile, fileCfg.DenyFile)
 	}
 
 	srv := chatserver.New(*addr)
 	srv.Logger = log.New(os.Stderr, "chatserver: ", log.LstdFlags|log.Lmicroseconds)
+	var deny *denylist.List
+	if mcfg.DenyFile != "" {
+		deny = denylist.New(mcfg.DenyFile, srv.Logger)
+	}
+	srv.Deny = deny
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -75,6 +84,7 @@ func main() {
 			log.Fatalf("media: %v", err)
 		}
 		media.Logger = srv.Logger
+		media.Deny = deny
 		go func() {
 			if err := media.ListenAndServe(ctx); err != nil {
 				log.Fatalf("media endpoint stopped: %v", err)

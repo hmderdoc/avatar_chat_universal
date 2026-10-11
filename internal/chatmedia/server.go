@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/hmderdoc/avatar_chat_universal/internal/denylist"
 )
 
 // Config is the media endpoint's settings. A zero Addr leaves it off.
@@ -29,6 +31,7 @@ type Config struct {
 	RetentionDays int    // files older than this are deleted
 	MaxStoreMB    int    // total stored; uploads refused when full
 	PerIPPerHour  int    // uploads per remote address per hour; 0 = unlimited
+	DenyFile      string // server-wide deny list (chat and media); "" = none
 }
 
 // Defaults are the web chat's limits where it has one.
@@ -60,7 +63,10 @@ var contentTypes = map[string]string{
 type Server struct {
 	cfg    Config
 	Logger *log.Logger
-	now    func() time.Time
+	// Deny, when set, answers 403 to listed addresses before an upload is
+	// read or a file is served. A nil list denies nobody.
+	Deny *denylist.List
+	now  func() time.Time
 
 	mu     sync.Mutex
 	used   int64                  // bytes stored
@@ -99,7 +105,14 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/upload", s.handleUpload)
 	mux.HandleFunc("/chatmedia/", s.handleServe)
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.Deny.Denied(r.RemoteAddr) {
+			s.Logger.Printf("media: refused %s (deny list)", r.RemoteAddr)
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 // ListenAndServe runs the endpoint and the purge loop until ctx ends.

@@ -4,11 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
+	"github.com/hmderdoc/avatar_chat_universal/internal/denylist"
 )
 
 // startServer spins up a server on a random localhost port and returns its
@@ -173,4 +178,42 @@ func contains(s, sub string) bool {
 		}
 		return false
 	})()
+}
+
+// A listed address is disconnected on accept, before it can subscribe.
+func TestDenyListRefusesConnection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "deny.txt")
+	if err := os.WriteFile(path, []byte("127.0.0.1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().String()
+	l.Close()
+	srv := New(addr)
+	srv.Logger = log.New(io.Discard, "", 0)
+	srv.Deny = denylist.New(path, srv.Logger)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() { _ = srv.ListenAndServe(ctx) }()
+
+	var c net.Conn
+	for i := 0; i < 100; i++ {
+		if c, err = net.Dial("tcp", addr); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if c == nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.Close()
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if n, err := c.Read(make([]byte, 16)); err == nil || n > 0 {
+		t.Fatalf("denied connection stayed open (n=%d err=%v)", n, err)
+	} else if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		t.Fatal("denied connection was not closed")
+	}
 }

@@ -10,6 +10,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,6 +21,8 @@ import (
 	"time"
 
 	"golang.org/x/image/bmp"
+
+	"github.com/hmderdoc/avatar_chat_universal/internal/denylist"
 )
 
 func testPic() *image.RGBA {
@@ -358,5 +361,30 @@ func TestLoadINI(t *testing.T) {
 	}
 	if cfg.Addr != ":10089" || cfg.Dir != "/srv/m" || cfg.RetentionDays != 3 || cfg.PerIPPerHour != 0 {
 		t.Fatalf("%+v", cfg)
+	}
+}
+
+// A listed address gets 403 before its upload is read, and cannot fetch files.
+func TestDenyListRefusesBeforeProcessing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "deny.txt")
+	if err := os.WriteFile(path, []byte("127.0.0.0/8\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, hs := newTestServer(t, Config{})
+	s.Deny = denylist.New(path, log.New(io.Discard, "", 0))
+	code, _ := post(t, hs.URL, "a.png", encPNG(t))
+	if code != http.StatusForbidden {
+		t.Fatalf("upload from a denied address: %d, want 403", code)
+	}
+	if s.used != 0 {
+		t.Fatalf("denied upload was stored (%d bytes)", s.used)
+	}
+	resp, err := http.Get(hs.URL + "/chatmedia/2026-01-01/0123456789abcdef01234567.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("serve to a denied address: %d, want 403", resp.StatusCode)
 	}
 }

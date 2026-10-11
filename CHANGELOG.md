@@ -9,6 +9,11 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Added
 
+- **Deny list for `avatar_chat_server`.** `-deny <file>` (`deny_file`) lists
+  IP addresses and CIDR ranges to refuse on the chat port and the media
+  endpoint; edits take effect within a second. See MEDIA.md.
+- **TV lounge popups show handle styles** for senders who have one.
+
 - **Synchronet users keep their own avatar.** On Synchronet the door now
   reads and writes the caller's real BBS avatar (`data/user/NNNN.ini`), so
   nobody is asked to pick an avatar they already have, and a change made in
@@ -66,6 +71,8 @@ versioning follows loose [SemVer](https://semver.org/) (see
   the input line to send. See MEDIA.md.
 
 ### Fixed
+
+- SyncTERM's upload key is Alt-U; the avatar upload hints said Alt-S.
 
 - After a Zmodem upload (avatar or attachment) the sender's closing "OO"
   is consumed instead of landing in the input line as two typed O's.

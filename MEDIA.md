@@ -51,6 +51,7 @@ endpoint, because the chat network only carries the link.
 | `retention_days` | `-retention-days` | `7` | Files older than this are deleted (checked hourly). |
 | `max_store_mb` | `-max-store-mb` | `500` | Total storage; uploads are refused when full. |
 | `uploads_per_hour` | `-uploads-per-hour` | `30` | Uploads per remote address per hour; `0` = no limit. |
+| `deny_file` | `-deny` | (none) | File of addresses to refuse, for chat and media alike. See below. |
 
 An explicit flag wins over the INI.
 
@@ -108,3 +109,27 @@ levels you are comfortable with, or only expose the port where you need it
 (for example, keep it on localhost and let only the door's host reach it,
 with your web server proxying `/chatmedia/` for the public). An
 authenticated upload is a likely future addition.
+
+## Deny list
+
+`-deny <file>` (or `deny_file` in the INI) names a list of addresses the
+server refuses. It covers the chat port too, not just media, and works with
+or without the media endpoint. One entry per line, `#` starts a comment:
+
+```
+# flooded main on 2026-10-10
+203.0.113.7
+198.51.100.0/24
+2001:db8::/32
+```
+
+A chat connection from a listed address is closed as soon as it is
+accepted; a media request gets `403` before its upload is read. The file is
+re-read within a second of being saved, so no restart is needed, and a
+missing file means nobody is refused. Malformed lines are logged and
+skipped.
+
+Two things to know. Callers on another BBS all reach your server from that
+BBS's address, so listing it refuses the whole board, not one caller. And
+behind a reverse proxy the media endpoint sees the proxy's address, so
+refuse web abusers at the proxy instead.

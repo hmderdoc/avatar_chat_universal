@@ -10,7 +10,7 @@ import (
 
 // LoadINI reads media keys from an INI file into cfg: media_addr, media_dir,
 // media_url_base, max_image_mb, max_ansi_mb, retention_days, max_store_mb,
-// uploads_per_hour. Keys may sit at the top or under [media]; other
+// uploads_per_hour, deny_file. Keys may sit at the top or under [media]; other
 // sections are ignored. Lines starting with ; or # are comments.
 func LoadINI(path string, cfg *Config) error {
 	f, err := os.Open(path)
@@ -65,6 +65,8 @@ func LoadINI(path string, cfg *Config) error {
 			e = num(&cfg.RetentionDays)
 		case "max_store_mb":
 			e = num(&cfg.MaxStoreMB)
+		case "deny_file":
+			cfg.DenyFile = v
 		case "uploads_per_hour":
 			e = num(&cfg.PerIPPerHour)
 		}

@@ -10,6 +10,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/hmderdoc/avatar_chat_universal/internal/denylist"
 )
 
 // MaxPacket matches Socket.prototype.max_recv in json-sock.js.
@@ -34,6 +36,9 @@ type packet struct {
 type Server struct {
 	Addr   string
 	Logger *log.Logger
+	// Deny, when set, refuses connections from listed addresses before
+	// anything is read from them. A nil list denies nobody.
+	Deny *denylist.List
 
 	store *store
 
@@ -75,6 +80,11 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 			default:
 			}
 			return fmt.Errorf("chatserver: accept: %v", err)
+		}
+		if s.Deny.Denied(c.RemoteAddr().String()) {
+			s.Logger.Printf("chatserver: refused %s (deny list)", c.RemoteAddr())
+			_ = c.Close()
+			continue
 		}
 		go s.handleConn(ctx, c)
 	}

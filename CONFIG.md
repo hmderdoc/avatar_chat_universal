@@ -496,8 +496,8 @@ each one starts with `web_`.
 | `web_upload_video_max_mb` | `50` | Largest video. Video is stored as uploaded, not re-encoded. |
 | `web_upload_retention_days` | `7` | Day folders older than this are removed when someone uploads. `0` keeps everything. |
 | `web_uploads_per_hour` | `30` | Uploads one user may finish per hour. `0` means no limit. |
-| `web_upload_dir` | `<web_root>/chatmedia` | Where files go. If you move it, also set `web_upload_url_base`. |
-| `web_upload_url_base` | from the request | Public address of that folder, e.g. `https://bbs.example.org/chatmedia`. Without it, the link is built from the request's host and scheme, honouring `X-Forwarded-Host` and `X-Forwarded-Proto` from a reverse proxy. |
+| `web_upload_dir` | `<web_root>/chatmedia` | Where files go. If you move it, also set `web_media_base_url`. |
+| `web_media_base_url` | from the request | Public address of that folder, e.g. `https://bbs.example.org/chatmedia`, for a reverse proxy that rewrites `Host`. Without it, the link is built from the browser's `Host` header, port included (a site on `:4080` links `:4080`), with `https` when the proxy sends `X-Forwarded-Proto: https`. `web_upload_url_base` is the older name and still works. |
 | `web_motd_host_qwkid` | empty | QWK ID of the BBS whose sysop may post to the MOTD room. The old JS bundle's `motd_host_qwkid` at the top of the file still counts. |
 | `web_motd_host_system` | empty | The same by BBS name, when no QWK ID is set. With neither set, the sysop may post when `host` is `127.0.0.1`/`localhost` or equals the BBS name. |
 

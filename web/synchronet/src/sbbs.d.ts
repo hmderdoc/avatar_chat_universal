@@ -12,6 +12,7 @@ interface SbbsSystem {
     qwk_id: string;
     inet_addr: string;
     data_dir: string;
+    text_dir: string;
     ctrl_dir: string;
     exec_dir: string;
     mods_dir: string;
@@ -98,11 +99,18 @@ declare class HTTPRequest {
     response_headers_parsed: { [key: string]: string[] };
 }
 
-interface AvatarObject { data?: string; }
+interface AvatarObject { data?: string; disabled?: boolean | string | number; created?: unknown; updated?: unknown; }
 interface AvatarLib {
-    read_localuser(number: number): AvatarObject | null;
-    read_netuser(name: string, netaddr: string): AvatarObject | null;
+    size: number;
+    defs: { width: number; height: number };
+    is_valid(bin: string): boolean;
+    read_localuser(number: number): AvatarObject | null | false;
+    read_netuser(name: string, netaddr: string): AvatarObject | null | false;
+    update_localuser(number: number, data: string): boolean;
+    enable_localuser(number: number, enabled: boolean): boolean;
 }
+interface SauceRecord { title?: string; author?: string; group?: string; date?: unknown; rows?: number; tinfo4?: number | string; comment?: string[]; }
+interface SauceLib { read(path: string): SauceRecord | null | false; }
 
 interface WebSettings {
     web_directory: string;
@@ -144,5 +152,7 @@ declare function mkpath(path: string): boolean;
 declare function rmdir(path: string): boolean;
 declare function resolve_ip(host: string): string | null;
 declare function md5_calc(text: string, hex?: boolean): string;
+declare function base64_encode(text: string): string;
+declare function base64_decode(text: string): string | null;
 /* events.ssjs defines emit() in the scope its modules run in. */
 declare function emit(event: { [key: string]: string | object }): void;

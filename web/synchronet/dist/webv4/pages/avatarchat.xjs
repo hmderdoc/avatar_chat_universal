@@ -33,6 +33,7 @@
                 </div>
 <?xjs if (avatarChatPage.isLoggedIn) { ?>
                 <div class="avatar-chat-sidebar-section">
+                    <button id="avatar-chat-avatar-open" class="avatar-chat-sidebar-button" type="button">Avatar</button>
                     <button id="avatar-chat-style-open" class="avatar-chat-sidebar-button" type="button">Handle Style</button>
                 </div>
 <?xjs } ?>
@@ -72,20 +73,14 @@
 
 <?xjs if (avatarChatPage.isLoggedIn) { ?>
                     <form id="avatar-chat-form" class="avatar-chat-form" autocomplete="off">
-                        <input id="avatar-chat-ansi-file" type="file" accept=".ans,.asc,.nfo,.diz,.ice,.txt,text/plain" hidden>
-                        <input id="avatar-chat-media-file" type="file" hidden>
-                        <div class="avatar-chat-compose-tools">
-                            <button id="avatar-chat-ansi-open" class="avatar-chat-upload-button" type="button">ANSI File</button>
-                            <button id="avatar-chat-media-open" class="avatar-chat-upload-button" type="button" hidden>Attach</button>
-                            <button id="avatar-chat-ansi-clear" class="avatar-chat-upload-clear" type="button" hidden>Clear</button>
-                            <div id="avatar-chat-ansi-dropzone" class="avatar-chat-dropzone" role="button" tabindex="0" aria-label="Drop a file">
-                                Drop ANSI art here or click to choose
-                            </div>
-                        </div>
-                        <div id="avatar-chat-upload-summary" class="avatar-chat-upload-summary" aria-live="polite">
-                            Upload an ANSI file to send it as image art.
-                        </div>
+                        <input id="avatar-chat-file" class="avatar-chat-file-input" type="file" tabindex="-1" aria-hidden="true">
                         <div class="avatar-chat-compose-row">
+                            <button id="avatar-chat-attach" class="avatar-chat-icon-button" type="button" title="Attach a file (or drop or paste one on the chat)" aria-label="Attach a file">
+                                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg>
+                            </button>
+                            <button id="avatar-chat-draw" class="avatar-chat-icon-button" type="button" title="Draw ANSI art" aria-label="Draw ANSI art">
+                                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4zM13.5 6.5l4 4"/></svg>
+                            </button>
                             <input id="avatar-chat-input" class="avatar-chat-input" type="text" maxlength="1000" placeholder="Type a message...">
                             <button class="avatar-chat-send" type="submit">Send</button>
                         </div>
@@ -132,7 +127,7 @@
             <div class="avatar-chat-modal-header">
                 <h4 id="avatar-chat-style-title" class="avatar-chat-modal-title">Handle Style</h4>
             </div>
-            <p class="avatar-chat-modal-text">Colours for each letter of your name and an optional tag. The same style shows in the door, the terminal shell and on the web.</p>
+            <p class="avatar-chat-modal-text">A colour for each letter of your name. The same colours show in the door, the terminal shell and on the web.</p>
             <div id="avatar-chat-style-preview" class="avatar-chat-style-preview"></div>
             <div id="avatar-chat-style-letters" class="avatar-chat-style-letters"></div>
             <div class="avatar-chat-style-row">
@@ -148,15 +143,37 @@
                 <label>From <input id="avatar-chat-style-a" type="color" value="#55ffff"></label>
                 <label>To <input id="avatar-chat-style-b" type="color" value="#ff55ff"></label>
             </div>
-            <div class="avatar-chat-style-row">
-                <label>Tag <input id="avatar-chat-style-tag" type="text" maxlength="<? write(String(avatarChatPage.maxTag)); ?>" placeholder="(none)"></label>
-                <label>Text <input id="avatar-chat-style-tag-fg" type="color" value="#ffff55"></label>
-                <label>Back <input id="avatar-chat-style-tag-bg" type="color" value="#0000aa"></label>
-            </div>
             <div id="avatar-chat-style-status" class="avatar-chat-modal-text" aria-live="polite"></div>
             <div class="avatar-chat-modal-actions">
                 <button id="avatar-chat-style-save" class="avatar-chat-sidebar-button" type="button">Save</button>
                 <button id="avatar-chat-style-cancel" class="avatar-chat-sidebar-button" type="button">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="avatar-chat-avatar-modal" class="avatar-chat-modal" aria-hidden="true">
+        <div class="avatar-chat-modal-card avatar-chat-avatar-card" role="dialog" aria-modal="true" aria-labelledby="avatar-chat-avatar-title">
+            <div class="avatar-chat-modal-header">
+                <h4 id="avatar-chat-avatar-title" class="avatar-chat-modal-title">Avatar</h4>
+            </div>
+            <p class="avatar-chat-modal-text">Your BBS avatar. The door, the terminal shell and the web all show this one.</p>
+            <div class="avatar-chat-avatar-current">
+                <div id="avatar-chat-avatar-preview" class="avatar-chat-avatar-preview"></div>
+                <div class="avatar-chat-avatar-buttons">
+                    <button id="avatar-chat-avatar-draw" class="avatar-chat-sidebar-button" type="button">Draw</button>
+                    <button id="avatar-chat-avatar-upload" class="avatar-chat-sidebar-button" type="button">Upload .bin / .ans</button>
+                    <button id="avatar-chat-avatar-toggle" class="avatar-chat-sidebar-button" type="button">Disable</button>
+                </div>
+                <input id="avatar-chat-avatar-file" class="avatar-chat-file-input" type="file" accept=".bin,.ans,.asc,.txt" tabindex="-1" aria-hidden="true">
+            </div>
+            <div class="avatar-chat-avatar-library">
+                <label>Library <select id="avatar-chat-avatar-collection"></select></label>
+                <div id="avatar-chat-avatar-grid" class="avatar-chat-avatar-grid"></div>
+            </div>
+            <div id="avatar-chat-avatar-status" class="avatar-chat-modal-text" aria-live="polite"></div>
+            <div class="avatar-chat-modal-actions">
+                <button id="avatar-chat-avatar-use" class="avatar-chat-sidebar-button" type="button" disabled>Use selected</button>
+                <button id="avatar-chat-avatar-close" class="avatar-chat-sidebar-button" type="button">Close</button>
             </div>
         </div>
     </div>

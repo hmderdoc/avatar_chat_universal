@@ -70,3 +70,34 @@ export function ownKeys(obj: unknown): string[] {
 export function isArray(value: unknown): value is unknown[] {
     return Object.prototype.toString.call(value) === '[object Array]';
 }
+
+/* The origin a browser used to reach this site, for links that leave it
+ * (an uploaded file's URL goes to other BBSes and terminals, so it must be
+ * absolute). The Host header carries the port the browser used (":4080");
+ * a reverse proxy normally passes the public Host through, and
+ * X-Forwarded-Proto says whether the outside was https. X-Forwarded-Host
+ * only counts when no Host came at all; vhost (no port) and the BBS's
+ * address are the last resort. A default port (80 for http, 443 for
+ * https) is left off. */
+export interface OriginHints {
+    forwardedProto?: unknown;
+    forwardedHost?: unknown;
+    host?: unknown;
+    vhost?: unknown;
+    scheme?: unknown;
+    fallbackHost?: unknown;
+}
+
+function firstListed(value: unknown): string {
+    return trimText(String(value === undefined || value === null ? '' : value).split(',')[0]);
+}
+
+export function requestOrigin(h: OriginHints): string {
+    let proto = firstListed(h.forwardedProto).toLowerCase() || firstListed(h.scheme).toLowerCase() || 'http';
+    if (proto !== 'https') proto = 'http';
+    let host = firstListed(h.host) || firstListed(h.forwardedHost) || firstListed(h.vhost) || firstListed(h.fallbackHost) || 'localhost';
+    host = host.replace(/[^A-Za-z0-9.\-:\[\]]/g, '').toLowerCase();
+    const m = /^(\[[^\]]*\]|[^:]*):(\d+)$/.exec(host);
+    if (m && ((proto === 'http' && m[2] === '80') || (proto === 'https' && m[2] === '443'))) host = m[1]!;
+    return proto + '://' + host;
+}

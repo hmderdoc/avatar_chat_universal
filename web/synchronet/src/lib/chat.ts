@@ -5,6 +5,7 @@
  * room is registered under public_channels.<room>. */
 
 import { WebConfig } from './config';
+import { current as currentAvatar } from './avatars';
 import { normalizeStyle, readStyle, wireStyle, HandleStyle } from './style';
 import { channelKey, isArray, normalizeUpper, ownKeys, sanitizeAlias, sanitizeChannel, trimText } from './util';
 
@@ -178,10 +179,10 @@ export function ownNick(viewer: Viewer): { [k: string]: unknown } {
         ip: user.ip_address || '0.0.0.0'
     };
     if (trimText(system.qwk_id).length) nick['qwkid'] = system.qwk_id;
+    /* A disabled avatar isn't sent: nobody sees it until it's enabled. */
     try {
-        const lib = load({}, 'avatar_lib.js') as AvatarLib;
-        const a = lib && typeof lib.read_localuser === 'function' ? lib.read_localuser(viewer.number) : null;
-        if (a && a.data) nick['avatar'] = String(a.data);
+        const a = currentAvatar(viewer.number);
+        if (a && !a.disabled) nick['avatar'] = a.data;
     } catch (_e) { /* no avatar library: send without */ }
     const style = wireStyle(readStyle(viewer.number), viewer.alias);
     if (style) nick['style'] = style;

@@ -150,7 +150,8 @@ load('http.js');
       uploadTypes: allowed,
       uploadRetentionDays: Math.max(0, parseIntOr(web("web_upload_retention_days", "7"), 7)),
       uploadDir: web("web_upload_dir", ""),
-      uploadUrlBase: web("web_upload_url_base", "").replace(/\/+$/, ""),
+      /* web_upload_url_base is the older name for the same key. */
+      uploadUrlBase: web("web_media_base_url", web("web_upload_url_base", "")).replace(/\/+$/, ""),
       uploadsPerHour: Math.max(0, parseIntOr(web("web_uploads_per_hour", "30"), 30))
     };
   }
@@ -212,6 +213,187 @@ load('http.js');
     var sent = trimText(http_request.header["x-avatarchat-token"]);
     var stored = readToken(number);
     return sent.length === 32 && sent === stored;
+  }
+
+  // build/lib/avatars.js
+  var COLLECTION_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._+()-]{0,79}\.bin$/;
+  function avatarLib() {
+    return load({ system: system }, "avatar_lib.js");
+  }
+  function sauceLib() {
+    return load({ system: system }, "sauce_lib.js");
+  }
+  function isDisabled(obj) {
+    var d = obj.disabled;
+    return d === true || d === "true" || d === 1 || d === "1";
+  }
+  function current(number) {
+    if (!(number > 0))
+      return null;
+    var obj = avatarLib().read_localuser(number);
+    if (!obj || !obj.data)
+      return null;
+    return { data: String(obj.data), disabled: isDisabled(obj) };
+  }
+  function libraryDir() {
+    return backslash(system.text_dir + "avatars/");
+  }
+  function collectionFiles() {
+    var files = directory(libraryDir() + "*.bin") || [];
+    var out = [];
+    for (var i = 0; i < files.length; i++) {
+      var name = file_getname(files[i]);
+      if (/\.\d+\.bin$/i.test(name) || !COLLECTION_NAME.test(name))
+        continue;
+      out.push(files[i]);
+    }
+    out.sort();
+    return out;
+  }
+  function collectionFile(id) {
+    if (!COLLECTION_NAME.test(id) || file_getname(id) !== id)
+      return "";
+    var files = collectionFiles();
+    for (var i = 0; i < files.length; i++)
+      if (file_getname(files[i]) === id)
+        return files[i];
+    return "";
+  }
+  function countIn(path, lib, sauce) {
+    var f = new File(path);
+    if (!f.open("rb"))
+      return 0;
+    var n = Math.floor(f.length / lib.size);
+    f.close();
+    if (sauce && sauce.rows && sauce.rows > 0)
+      n = Math.min(n, Math.floor(sauce.rows / lib.defs.height));
+    return n;
+  }
+  function chunk(path, index, lib, count) {
+    if (index < 0 || index >= count)
+      return "";
+    var f = new File(path);
+    if (!f.open("rb"))
+      return "";
+    var bin = "";
+    try {
+      f.position = index * lib.size;
+      bin = f.read(lib.size);
+    } finally {
+      f.close();
+    }
+    return lib.is_valid(bin) ? bin : "";
+  }
+  function summarize(path, lib, sauce) {
+    if (!sauce)
+      return null;
+    var count = countIn(path, lib, sauce);
+    if (count < 1)
+      return null;
+    var previewIndex = 0;
+    var t4 = parseInt(String(sauce.tinfo4 === void 0 ? "" : sauce.tinfo4), 10) - 1;
+    if (!isNaN(t4) && t4 >= 0 && t4 < count)
+      previewIndex = t4;
+    var bin = chunk(path, previewIndex, lib, count);
+    if (!bin.length)
+      return null;
+    var comments = sauce.comment && sauce.comment.length !== void 0 ? sauce.comment : [];
+    var id = file_getname(path);
+    return {
+      id: id,
+      title: sauce.title && String(sauce.title).length ? String(sauce.title) : id.replace(/\.bin$/i, ""),
+      author: sauce.author && String(sauce.author).length ? String(sauce.author) : "Unknown",
+      group: sauce.group && String(sauce.group).length ? String(sauce.group) : "Unknown",
+      count: count,
+      previewIndex: previewIndex,
+      preview: base64_encode(bin),
+      description: String(comments[previewIndex] || "")
+    };
+  }
+  function collections() {
+    var lib = avatarLib();
+    var sl = sauceLib();
+    var files = collectionFiles();
+    var out = [];
+    for (var i = 0; i < files.length; i++) {
+      var s = summarize(files[i], lib, sl.read(files[i]));
+      if (s)
+        out.push(s);
+    }
+    return out;
+  }
+  function collection(id) {
+    var path = collectionFile(id);
+    if (!path.length)
+      return null;
+    var lib = avatarLib();
+    var sauce = sauceLib().read(path);
+    var s = summarize(path, lib, sauce);
+    if (!s || !sauce)
+      return null;
+    var comments = sauce.comment && sauce.comment.length !== void 0 ? sauce.comment : [];
+    var avatars = [];
+    for (var i = 0; i < s.count; i++) {
+      var bin = chunk(path, i, lib, s.count);
+      if (bin.length)
+        avatars.push({ index: i, label: String(comments[i] || ""), data: base64_encode(bin) });
+    }
+    return {
+      id: s.id,
+      title: s.title,
+      author: s.author,
+      group: s.group,
+      count: s.count,
+      previewIndex: s.previewIndex,
+      preview: s.preview,
+      description: s.description,
+      avatars: avatars
+    };
+  }
+  function save(number, bin, lib) {
+    if (!lib.update_localuser(number, base64_encode(bin)))
+      return { ok: false, error: "could not save the avatar" };
+    var now = lib.read_localuser(number);
+    if (now && isDisabled(now))
+      lib.enable_localuser(number, true);
+    return { ok: true, avatar: current(number) };
+  }
+  function useFromCollection(number, id, index) {
+    var path = collectionFile(id);
+    if (!path.length)
+      return { ok: false, error: "no such collection" };
+    var lib = avatarLib();
+    var count = countIn(path, lib, sauceLib().read(path));
+    var bin = chunk(path, index, lib, count);
+    if (!bin.length)
+      return { ok: false, error: "no such avatar" };
+    return save(number, bin, lib);
+  }
+  function useData(number, data) {
+    var lib = avatarLib();
+    var bin = null;
+    if (/^[A-Za-z0-9+\/]+={0,2}$/.test(data) && data.length <= 400) {
+      try {
+        bin = base64_decode(data);
+      } catch (_e) {
+        bin = null;
+      }
+    }
+    if (!bin || bin.length !== lib.size || !lib.is_valid(bin))
+      return { ok: false, error: "that is not a 10x6 avatar" };
+    return save(number, bin, lib);
+  }
+  function setEnabled(number, enabled) {
+    var lib = avatarLib();
+    var now = lib.read_localuser(number);
+    if (!now || !now.data)
+      return { ok: false, error: "no avatar saved yet" };
+    if (isDisabled(now) === enabled)
+      lib.enable_localuser(number, enabled);
+    var after = current(number);
+    if (!after || after.disabled === enabled)
+      return { ok: false, error: "could not save the avatar state" };
+    return { ok: true, avatar: after };
   }
 
   // build/lib/style.js
@@ -468,10 +650,9 @@ load('http.js');
     if (trimText(system.qwk_id).length)
       nick["qwkid"] = system.qwk_id;
     try {
-      var lib = load({}, "avatar_lib.js");
-      var a = lib && typeof lib.read_localuser === "function" ? lib.read_localuser(viewer.number) : null;
-      if (a && a.data)
-        nick["avatar"] = String(a.data);
+      var a = current(viewer.number);
+      if (a && !a.disabled)
+        nick["avatar"] = a.data;
     } catch (_e) {
     }
     var style = wireStyle(readStyle(viewer.number), viewer.alias);
@@ -1055,9 +1236,9 @@ load('http.js');
     return isPrivateAddress(target) ? "address not allowed" : null;
   }
   function fetchGuarded(url) {
-    var current = String(url);
+    var current2 = String(url);
     for (var hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      var check = validateTarget(current);
+      var check = validateTarget(current2);
       if (!check.ok)
         return { error: check.error };
       var hostError = checkHostPublic(check.host || "");
@@ -1066,7 +1247,7 @@ load('http.js');
       var req = new HTTPRequest(void 0, void 0, ["Range: bytes=0-262143", "Accept: text/html,application/xhtml+xml;q=0.9,*/*;q=0.5"], RECV_TIMEOUT_SECONDS);
       var body = "";
       try {
-        body = req.Get(current);
+        body = req.Get(current2);
       } catch (_e) {
         return { error: "fetch failed" };
       }
@@ -1076,16 +1257,16 @@ load('http.js');
         var location = headers["location"] && headers["location"][0];
         if (!location)
           return { error: "bad redirect" };
-        var next = resolveUrl(location, current);
+        var next = resolveUrl(location, current2);
         if (!next)
           return { error: "bad redirect" };
-        current = next;
+        current2 = next;
         continue;
       }
       if (code !== 200 && code !== 206)
         return { error: "http " + code };
       var contentType = String(headers["content-type"] && headers["content-type"][0] || "").toLowerCase();
-      return { finalUrl: current, body: body || "", contentType: contentType };
+      return { finalUrl: current2, body: body || "", contentType: contentType };
     }
     return { error: "too many redirects" };
   }
@@ -1207,22 +1388,22 @@ load('http.js');
       case "history":
         if (!channel)
           return { error: "channel unavailable" };
-        return withClient(cfg, function(c) {
-          return { channel: channel, messages: history(c, channel, countParam(cfg), viewer), serverTime: Date.now() };
+        return withClient(cfg, function(c2) {
+          return { channel: channel, messages: history(c2, channel, countParam(cfg), viewer), serverTime: Date.now() };
         });
       case "who":
         if (!channel)
           return { error: "channel unavailable" };
-        return withClient(cfg, function(c) {
-          return { channel: channel, users: who(c, channel), serverTime: Date.now() };
+        return withClient(cfg, function(c2) {
+          return { channel: channel, users: who(c2, channel), serverTime: Date.now() };
         });
       case "channels":
-        return withClient(cfg, function(c) {
-          return { channels: rooms(c, cfg, viewer, timestampParam("since")), serverTime: Date.now() };
+        return withClient(cfg, function(c2) {
+          return { channels: rooms(c2, cfg, viewer, timestampParam("since")), serverTime: Date.now() };
         });
       case "motd":
-        return withClient(cfg, function(c) {
-          var m = latestMotd(c, cfg, viewer);
+        return withClient(cfg, function(c2) {
+          var m = latestMotd(c2, cfg, viewer);
           return {
             channel: cfg.motdChannel,
             message: m,
@@ -1234,19 +1415,19 @@ load('http.js');
       case "sync": {
         var active_1 = channel || defaultChannel(cfg, viewer);
         var since_1 = timestampParam("since");
-        return withClient(cfg, function(c) {
+        return withClient(cfg, function(c2) {
           var out = { channel: active_1, serverTime: Date.now() };
           var summaries = null;
           if (flagOn("channels", true))
-            out["channels"] = summaries = rooms(c, cfg, viewer, since_1);
+            out["channels"] = summaries = rooms(c2, cfg, viewer, since_1);
           if (flagOn("who", true))
-            out["who"] = { channel: active_1, users: who(c, active_1) };
+            out["who"] = { channel: active_1, users: who(c2, active_1) };
           if (flagOn("history", false))
-            out["history"] = { channel: active_1, messages: history(c, active_1, countParam(cfg), viewer) };
+            out["history"] = { channel: active_1, messages: history(c2, active_1, countParam(cfg), viewer) };
           if (flagOn("private", true) && viewer.authed)
-            out["private"] = { threads: privateThreads(c, cfg, viewer, since_1) };
+            out["private"] = { threads: privateThreads(c2, cfg, viewer, since_1) };
           if (flagOn("motd", false)) {
-            var m = latestMotd(c, cfg, viewer);
+            var m = latestMotd(c2, cfg, viewer);
             out["motd"] = { previewText: m ? trimText(m.text) : "", timestamp: m ? m.timestamp : 0 };
           }
           if (flagOn("presence", false)) {
@@ -1264,14 +1445,14 @@ load('http.js');
                 if (summaries[i].userCount > 0)
                   add(summaries[i].name);
             } else {
-              var all = roomNames(c, cfg, viewer);
+              var all = roomNames(c2, cfg, viewer);
               for (var i = 0; i < all.length; i++)
                 add(all[i]);
             }
             add(active_1);
             var people = [];
             for (var i = 0; i < names_1.length; i++)
-              people = people.concat(who(c, names_1[i]));
+              people = people.concat(who(c2, names_1[i]));
             out["presence"] = people;
           }
           return out;
@@ -1280,8 +1461,8 @@ load('http.js');
       case "private":
         if (gate = needLogin(viewer))
           return gate;
-        return withClient(cfg, function(c) {
-          return { threads: privateThreads(c, cfg, viewer, timestampParam("since")), serverTime: Date.now() };
+        return withClient(cfg, function(c2) {
+          return { threads: privateThreads(c2, cfg, viewer, timestampParam("since")), serverTime: Date.now() };
         });
       case "privateHistory": {
         if (gate = needLogin(viewer))
@@ -1289,10 +1470,10 @@ load('http.js');
         var target_1 = sanitizeAlias(param("target"));
         if (!target_1.length)
           return { error: "target required" };
-        return withClient(cfg, function(c) {
-          var r = privateHistory(c, cfg, viewer, target_1, trimText(param("system")));
-          r["serverTime"] = Date.now();
-          return r;
+        return withClient(cfg, function(c2) {
+          var r2 = privateHistory(c2, cfg, viewer, target_1, trimText(param("system")));
+          r2["serverTime"] = Date.now();
+          return r2;
         });
       }
       case "createChannel":
@@ -1300,8 +1481,8 @@ load('http.js');
           return gate;
         if (!channel)
           return { error: "that room is reserved" };
-        return withClient(cfg, function(c) {
-          return createRoom(c, channel);
+        return withClient(cfg, function(c2) {
+          return createRoom(c2, channel);
         });
       case "send": {
         if (gate = needWrite(viewer))
@@ -1311,8 +1492,8 @@ load('http.js');
         var text_1 = messageParam();
         if (!trimText(text_1).length)
           return { error: "empty message" };
-        return withClient(cfg, function(c) {
-          return sendPublic(c, viewer, channel, text_1);
+        return withClient(cfg, function(c2) {
+          return sendPublic(c2, viewer, channel, text_1);
         });
       }
       case "sendPrivate": {
@@ -1324,8 +1505,8 @@ load('http.js');
           return { error: "target required" };
         if (!trimText(text_2).length)
           return { error: "empty message" };
-        return withClient(cfg, function(c) {
-          return sendPrivate(c, viewer, target_2, trimText(param("system")), text_2);
+        return withClient(cfg, function(c2) {
+          return sendPrivate(c2, viewer, target_2, trimText(param("system")), text_2);
         });
       }
       case "style":
@@ -1343,8 +1524,30 @@ load('http.js');
         }
         if (!body || typeof body !== "object")
           return { error: "bad request" };
-        var saved = writeStyle(viewer.number, { colors: body.colors, tag: body.tag });
+        var saved = writeStyle(viewer.number, { colors: body.colors, tag: readStyle(viewer.number).tag });
         return saved.ok ? { ok: true, style: saved.style } : { error: saved.reason || "could not save" };
+      }
+      case "avatar":
+        if (gate = needLogin(viewer))
+          return gate;
+        return { ok: true, avatar: current(viewer.number), collections: collections() };
+      case "avatarCollection": {
+        if (gate = needLogin(viewer))
+          return gate;
+        var c = collection(param("collection"));
+        return c ? { ok: true, collection: c } : { error: "no such collection" };
+      }
+      case "setAvatar": {
+        if (gate = needWrite(viewer))
+          return gate;
+        var r = has("data") ? useData(viewer.number, trimText(param("data"))) : useFromCollection(viewer.number, param("collection"), parseInt(param("index"), 10));
+        return r.ok ? { ok: true, avatar: r.avatar } : { error: r.error || "could not save" };
+      }
+      case "avatarEnabled": {
+        if (gate = needWrite(viewer))
+          return gate;
+        var r = setEnabled(viewer.number, param("enabled") === "1");
+        return r.ok ? { ok: true, avatar: r.avatar } : { error: r.error || "could not save" };
       }
       case "preview": {
         if (gate = needLogin(viewer))

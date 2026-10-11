@@ -10,11 +10,19 @@
  *   GET  ?action=private[&since=ms]               your private threads   (login)
  *   GET  ?action=privateHistory&target=Alias[&system=BBS]                (login)
  *   GET  ?action=style                            your handle style      (login)
+ *   GET  ?action=avatar                           your avatar + the shared collections (login)
+ *   GET  ?action=avatarCollection&collection=ID   one collection's avatars (login)
  *   GET  ?action=preview&url=..                   a link card            (login)
  *   POST ?action=send&channel=..&message=..                              (login, token)
  *   POST ?action=sendPrivate&target=..[&system=..]&message=..           (login, token)
  *   POST ?action=createChannel&channel=..                                (login, token)
- *   POST ?action=saveStyle   body: JSON {colors, tag}                    (login, token)
+ *   POST ?action=saveStyle   body: JSON {colors}                         (login, token)
+ *   POST ?action=setAvatar&collection=ID&index=N  use a shared avatar   (login, token)
+ *   POST ?action=setAvatar&data=BASE64            a drawn/uploaded one  (login, token)
+ *   POST ?action=avatarEnabled&enabled=0|1        disable / re-enable   (login, token)
+ *
+ * saveStyle edits the letter colours only: a tag another client stored in
+ * the shared record is kept as it is.
  *
  * Writes need the X-AvatarChat-Token header the page was given (csrf.ts).
  * Guests can read public rooms and nothing else, as before. */
@@ -22,6 +30,7 @@
 import { loadConfig, WebConfig } from '../lib/config';
 import { writeAllowed } from '../lib/csrf';
 import * as chat from '../lib/chat';
+import * as avatars from '../lib/avatars';
 import { getCard } from '../lib/preview';
 import { readStyle, writeStyle } from '../lib/style';
 import { cleanMessageText, sanitizeAlias, trimText } from '../lib/util';
@@ -193,11 +202,35 @@ function run(cfg: WebConfig, viewer: chat.Viewer, action: string): Reply {
 
         case 'saveStyle': {
             if ((gate = needWrite(viewer))) return gate;
-            let body: { colors?: unknown; tag?: unknown } | null = null;
+            let body: { colors?: unknown } | null = null;
             try { body = JSON.parse(http_request.post_data || '{}'); } catch (_e) { body = null; }
             if (!body || typeof body !== 'object') return { error: 'bad request' };
-            const saved = writeStyle(viewer.number, { colors: body.colors, tag: body.tag });
+            const saved = writeStyle(viewer.number, { colors: body.colors, tag: readStyle(viewer.number).tag });
             return saved.ok ? { ok: true, style: saved.style } : { error: saved.reason || 'could not save' };
+        }
+
+        case 'avatar':
+            if ((gate = needLogin(viewer))) return gate;
+            return { ok: true, avatar: avatars.current(viewer.number), collections: avatars.collections() };
+
+        case 'avatarCollection': {
+            if ((gate = needLogin(viewer))) return gate;
+            const c = avatars.collection(param('collection'));
+            return c ? { ok: true, collection: c } : { error: 'no such collection' };
+        }
+
+        case 'setAvatar': {
+            if ((gate = needWrite(viewer))) return gate;
+            const r = has('data')
+                ? avatars.useData(viewer.number, trimText(param('data')))
+                : avatars.useFromCollection(viewer.number, param('collection'), parseInt(param('index'), 10));
+            return r.ok ? { ok: true, avatar: r.avatar } : { error: r.error || 'could not save' };
+        }
+
+        case 'avatarEnabled': {
+            if ((gate = needWrite(viewer))) return gate;
+            const r = avatars.setEnabled(viewer.number, param('enabled') === '1');
+            return r.ok ? { ok: true, avatar: r.avatar } : { error: r.error || 'could not save' };
         }
 
         case 'preview': {

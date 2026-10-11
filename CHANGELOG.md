@@ -30,6 +30,23 @@ versioning follows loose [SemVer](https://semver.org/) (see
   logged-in user, reads this door's `avatar_chat.ini`, and checks a
   per-session token on writes. Server side is TypeScript built to
   `dist/webv4`; see web/synchronet/README.md.
+- **Synchronet web app, after the first live try:**
+  - The composer is one row: a paperclip (attach), a pencil (ANSI
+    editor), the message box and Send. Drop a file anywhere on the chat or
+    paste it into the box. The ANSI file button, Clear button, drop box,
+    helper text and the two stray "Choose File" inputs (bootstrap's
+    `input[type=file]` rule beat `hidden`) are gone.
+  - The ANSI editor (Futureland's, vendored in `web/synchronet/editor`):
+    80x25 from the pencil, Done sends a BITMAP.
+  - An **Avatar** button for your real BBS avatar: pick from the sysop's
+    `text/avatars` collections, draw or edit at 10x6, upload a `.bin` or
+    `.ans`, or disable it. Written through Synchronet's `avatar_lib`.
+  - The handle style editor sets letter colours only; the page no longer
+    shows or edits tags, and a save keeps whatever tag another client
+    stored in the record.
+  - Upload links keep the port the browser used (`:4080`). New
+    `web_media_base_url` pins them for a proxy that rewrites `Host`
+    (`web_upload_url_base` still read).
 - **Mouse.** The door asks for xterm mouse reports (SGR, with X10
   fallback): the wheel scrolls the chat and lists, pills run their
   commands, a name starts `/msg`, a picture opens in `/img`, a `/play`

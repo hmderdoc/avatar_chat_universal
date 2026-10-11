@@ -19,7 +19,7 @@ import { loadConfig, WebConfig } from '../lib/config';
 import { writeAllowed } from '../lib/csrf';
 import { currentViewer, Viewer } from '../lib/chat';
 import { CHUNK_RAW_BYTES, dayFolderName, daysBetween, sniff, stripJpegMetadata, stripPngMetadata, validUploadId } from '../lib/media';
-import { trimText } from '../lib/util';
+import { requestOrigin } from '../lib/util';
 
 const STAGE_STALE_SECONDS = 3600;
 const MAX_OPEN_UPLOADS = 3;
@@ -74,14 +74,19 @@ function mediaDir(cfg: WebConfig): string {
     return slash(cfg.uploadDir.length ? cfg.uploadDir : backslash(settings.web_root) + 'chatmedia');
 }
 
-/* The link has to be the public one: behind a proxy the request itself is
- * plain HTTP on some inside port. */
+/* The link has to be the one the browser used, port included (a site on
+ * :4080 links :4080): requestOrigin (util.ts) reads it off the request.
+ * web_media_base_url overrides it for a proxy that rewrites Host. */
 function publicBase(cfg: WebConfig): string {
     if (cfg.uploadUrlBase.length) return cfg.uploadUrlBase;
-    const proto = trimText(http_request.header['x-forwarded-proto']) || http_request.scheme || 'http';
-    const host = trimText(http_request.header['x-forwarded-host']) || trimText(http_request.vhost) ||
-        trimText(http_request.header['host']) || system.inet_addr;
-    return trimText(proto.split(',')[0]) + '://' + trimText(host.split(',')[0]) + '/chatmedia';
+    return requestOrigin({
+        forwardedProto: http_request.header['x-forwarded-proto'],
+        forwardedHost: http_request.header['x-forwarded-host'],
+        host: http_request.header['host'],
+        vhost: http_request.vhost,
+        scheme: http_request.scheme,
+        fallbackHost: system.inet_addr
+    }) + '/chatmedia';
 }
 
 function today(): string { return strftime('%Y-%m-%d', time()); }

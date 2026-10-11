@@ -19,7 +19,7 @@ PID=$!
 sleep 1
 
 SB="$TMP/sandbox"
-mkdir -p "$SB/exec" "$SB/data/user" "$SB/webroot" "$SB/xtrn/avatar_chat_universal"
+mkdir -p "$SB/exec" "$SB/ctrl" "$SB/data/user" "$SB/webroot" "$SB/xtrn/avatar_chat_universal"
 cat >"$SB/xtrn/avatar_chat_universal/avatar_chat.ini" <<INI
 host = 127.0.0.1
 port = $PORT

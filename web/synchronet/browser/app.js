@@ -124,6 +124,17 @@
         return cache[key] || null;
     }
     // --- End avatar cache ---
+
+    /* Set when the user changes their avatar on this page: the new one in
+       base64, or '' when they disabled it. null until then. */
+    var ownAvatarOverride = null;
+
+    function isOwnName(name, system) {
+        if (!pageConfig.userAlias || normalizeUpper(name) !== normalizeUpper(pageConfig.userAlias)) {
+            return false;
+        }
+        return !system || normalizeUpper(system) === normalizeUpper(pageConfig.systemName || '');
+    }
     var reconnectTimer = 0;
     var reconcileTimer = 0;
     var sendRefreshTimer = 0;
@@ -167,11 +178,9 @@
     var roomInput = document.getElementById('avatar-chat-room-input');
     var messageContainer = document.getElementById('avatar-chat-messages');
     var form = document.getElementById('avatar-chat-form');
-    var ansiFileInput = document.getElementById('avatar-chat-ansi-file');
-    var ansiOpen = document.getElementById('avatar-chat-ansi-open');
-    var ansiClear = document.getElementById('avatar-chat-ansi-clear');
-    var ansiDropzone = document.getElementById('avatar-chat-ansi-dropzone');
-    var uploadSummary = document.getElementById('avatar-chat-upload-summary');
+    var fileInput = document.getElementById('avatar-chat-file');
+    var attachButton = document.getElementById('avatar-chat-attach');
+    var drawButton = document.getElementById('avatar-chat-draw');
     var input = document.getElementById('avatar-chat-input');
     var usersPanelRoom = currentPublicChannel;
     var panelUsers = Array.isArray(users) ? users.slice() : [];
@@ -730,53 +739,38 @@
         return alias || systemName || '';
     }
 
+    /* The composer has no status area of its own: what an attachment is
+       doing shows as the message box's placeholder, and errors go to the
+       status bar. A prepared ANSI file holds the box (read-only) until Send
+       posts it or Esc drops it. */
     function renderAnsiUploadState() {
         var hasUpload = !!pendingAnsiUpload;
-        var summaryText = uploadConfig.enabled
-            ? 'Attach a picture, sound or video, or drop ANSI art to send it as an image.'
-            : 'Upload an ANSI file to send it as image art.';
-        var dropzoneText = uploadConfig.enabled ? 'Drop a picture, sound, video or ANSI art here' : 'Drop ANSI file here or click to choose';
-        var summaryClass = 'avatar-chat-upload-summary';
+        var placeholder = inputDefaultPlaceholder;
 
         if (ansiUploadBusy) {
-            summaryText = ansiUploadMessage || 'Encoding ANSI file...';
-            dropzoneText = 'Working...';
-            summaryClass += ' is-busy';
+            placeholder = ansiUploadMessage || 'Working...';
         } else if (hasUpload) {
-            summaryText = ansiUploadMessage || ('Ready to send ' + pendingAnsiUpload.fileName + ' (' + pendingAnsiUpload.width + 'x' + pendingAnsiUpload.height + ').');
-            dropzoneText = 'Click to replace or drop another file';
-            summaryClass += ' is-ready';
-        } else if (ansiUploadMessageType === 'error') {
-            summaryText = ansiUploadMessage || 'Unable to prepare the ANSI file.';
-            summaryClass += ' is-error';
-        } else if (ansiUploadMessage.length) {
-            summaryText = ansiUploadMessage;
+            placeholder = pendingAnsiUpload.fileName + ' (' + pendingAnsiUpload.width + 'x' + pendingAnsiUpload.height +
+                ') ready: Send posts it, Esc drops it';
         }
-
-        if (uploadSummary) {
-            uploadSummary.className = summaryClass;
-            uploadSummary.textContent = summaryText;
-            uploadSummary.title = summaryText;
+        if (attachButton) {
+            attachButton.disabled = ansiUploadBusy;
         }
-        if (ansiDropzone) {
-            ansiDropzone.textContent = dropzoneText;
-            ansiDropzone.classList.toggle('is-busy', ansiUploadBusy);
+        if (drawButton) {
+            drawButton.disabled = ansiUploadBusy;
         }
-        if (ansiClear) {
-            ansiClear.hidden = !hasUpload;
-            ansiClear.disabled = ansiUploadBusy;
+        if (fileInput) {
+            fileInput.disabled = ansiUploadBusy;
         }
-        if (ansiOpen) {
-            ansiOpen.disabled = ansiUploadBusy;
-        }
-        if (ansiFileInput) {
-            ansiFileInput.disabled = ansiUploadBusy;
+        if (form) {
+            form.classList.toggle('is-busy', ansiUploadBusy);
+            form.classList.toggle('has-art', hasUpload);
         }
         if (input) {
-            input.disabled = ansiUploadBusy || hasUpload;
-            input.placeholder = hasUpload
-                ? 'ANSI upload ready to send'
-                : (ansiUploadBusy ? 'Preparing ANSI upload...' : inputDefaultPlaceholder);
+            input.disabled = ansiUploadBusy;
+            input.readOnly = hasUpload;
+            input.placeholder = placeholder;
+            input.title = hasUpload || ansiUploadBusy ? placeholder : '';
         }
     }
 
@@ -785,8 +779,8 @@
         ansiUploadBusy = false;
         ansiUploadMessage = '';
         ansiUploadMessageType = '';
-        if (ansiFileInput) {
-            ansiFileInput.value = '';
+        if (fileInput) {
+            fileInput.value = '';
         }
         renderAnsiUploadState();
     }
@@ -818,16 +812,19 @@
         }).then(function (upload) {
             pendingAnsiUpload = upload;
             ansiUploadBusy = false;
-            ansiUploadMessage = 'Ready to send ' + upload.fileName + ' (' + upload.width + 'x' + upload.height + ').';
+            ansiUploadMessage = '';
             ansiUploadMessageType = 'ready';
             renderAnsiUploadState();
+            if (input) {
+                input.focus();
+            }
         }).catch(function (error) {
             pendingAnsiUpload = null;
             ansiUploadBusy = false;
-            ansiUploadMessage = error && error.message ? String(error.message) : 'Unable to encode the ANSI file.';
-            ansiUploadMessageType = 'error';
+            ansiUploadMessage = '';
+            ansiUploadMessageType = '';
             renderAnsiUploadState();
-            setStatus('error', ansiUploadMessage, false);
+            setStatus('error', error && error.message ? String(error.message) : 'Unable to encode the ANSI file.', false);
         });
     }
 
@@ -1635,7 +1632,6 @@
     function renderHandle(name, style) {
         var text = String(name || '');
         var colors = style && Array.isArray(style.colors) ? style.colors : [];
-        var tag = style && style.tag && style.tag.text ? style.tag : null;
         var html = '<strong class="avatar-chat-handle">';
         var i;
         if (!colors.length) {
@@ -1650,11 +1646,6 @@
             }
         }
         html += '</strong>';
-        if (tag) {
-            html += ' <span class="avatar-chat-handle-tag" style="' +
-                (HEX_COLOR.test(tag.fg || '') ? 'color:' + tag.fg + ';' : '') +
-                (HEX_COLOR.test(tag.bg || '') ? 'background:' + tag.bg + ';' : '') + '">' + escapeHtml(tag.text) + '</span>';
-        }
         return html;
     }
 
@@ -2663,12 +2654,15 @@
 
             html += '<button type="button" class="avatar-chat-user" data-private-user="' + escapeAttr(entry.nick || '') + '" data-private-system="' + escapeAttr(entry.system || '') + '" data-private-avatar="' + escapeAttr(entry.avatar || '') + '">';
             html += '<div class="avatar-chat-user-avatar">';
-            var displayAvatar = entry.avatar || getCachedAvatar(entry.nick, entry.system) || (entry.userNumber > 0 && getCachedAvatarByNumber(entry.userNumber)) || null;
+            /* The roster's nick is from when that page joined: after an
+               avatar change here, show the new one for yourself. */
+            var mine = ownAvatarOverride !== null && isOwnName(entry.nick, entry.system);
+            var displayAvatar = mine ? ownAvatarOverride : (entry.avatar || getCachedAvatar(entry.nick, entry.system) || (entry.userNumber > 0 && getCachedAvatarByNumber(entry.userNumber)) || null);
             if (displayAvatar) {
                 html += '<div data-avatar-bin="' + escapeAttr(displayAvatar) + '"></div>';
-            } else if (entry.userNumber && entry.userNumber > 0) {
+            } else if (!mine && entry.userNumber && entry.userNumber > 0) {
                 html += '<div data-avatar="' + String(entry.userNumber) + '"></div>';
-            } else if (entry.qwkid && entry.nick) {
+            } else if (!mine && entry.qwkid && entry.nick) {
                 html += '<div data-avatar="' + escapeAttr(entry.nick + '@' + entry.qwkid) + '"></div>';
             } else {
                 html += '<div class="avatar-chat-avatar-placeholder" data-initial="' + escapeAttr(initial) + '">' + escapeHtml(initial) + '</div>';
@@ -3510,10 +3504,12 @@
        chunks (the web server hands scripts at most 4 MiB of body), the BBS
        checks what it really is, and the link lands in the composer: nothing
        is sent until the user presses Send. ANSI art keeps its own path: it
-       becomes a [BITMAP|...] message right here in the browser. */
+       becomes a [BITMAP|...] message right here in the browser, uploads on
+       or off. One attach button, plus drop and paste anywhere on the chat;
+       the file decides which path it takes. */
     var uploadEndpoint = './api/avatarchat-upload.ssjs';
-    var mediaOpen = document.getElementById('avatar-chat-media-open');
-    var mediaFileInput = document.getElementById('avatar-chat-media-file');
+    var ART_EXTENSIONS = /\.(ans|asc|nfo|diz|ice|txt)$/i;
+    var ART_MAX_BYTES = 1048576;
     var MEDIA_KINDS = {
         png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image',
         mp3: 'audio', ogg: 'audio', wav: 'audio', flac: 'audio', m4a: 'audio',
@@ -3531,8 +3527,17 @@
         return kind;
     }
 
+    /* Busy notes ride in the composer's placeholder; errors go to the
+       status bar. */
     function setUploadNote(text, type) {
-        ansiUploadMessage = text;
+        if (type === 'error') {
+            ansiUploadMessage = '';
+            ansiUploadMessageType = '';
+            renderAnsiUploadState();
+            setStatus('error', text, false);
+            return;
+        }
+        ansiUploadMessage = type === 'busy' ? text : '';
         ansiUploadMessageType = type || '';
         renderAnsiUploadState();
     }
@@ -3601,8 +3606,8 @@
         }).then(function (done) {
             ansiUploadBusy = false;
             input.value = trimText(input.value).length ? trimText(input.value) + ' ' + done.url : done.url;
-            setUploadNote(name + ' uploaded; press Send to post the link' +
-                (done.expiresDays ? ' (kept ' + done.expiresDays + ' days).' : '.'), 'ready');
+            setUploadNote('', 'ready');
+            clearStatusIfMatch('error');
             input.focus();
         }).catch(function (error) {
             ansiUploadBusy = false;
@@ -3613,47 +3618,112 @@
         });
     }
 
-    /* A dropped or pasted file: media goes up, anything else is tried as
-       ANSI art. */
+    /* A dropped, pasted or chosen file. ANSI art by its name, or anything
+       that isn't a picture, sound or video by its type, is tried as art;
+       media goes up when the sysop turned uploads on. */
+    function looksLikeArt(file) {
+        var name = String(file.name || '');
+        if (ART_EXTENSIONS.test(name)) {
+            return true;
+        }
+        return !/^(image|audio|video)\//.test(String(file.type || '')) && !mediaKindOf(file) && file.size <= ART_MAX_BYTES;
+    }
+
     function acceptFile(file) {
         if (!file || ansiUploadBusy) {
             return;
         }
-        if (uploadConfig.enabled && mediaKindOf(file)) {
-            uploadMedia(file);
+        clearStatusIfMatch('error');
+        if (looksLikeArt(file)) {
+            queueAnsiUpload(file);
             return;
         }
-        if (uploadConfig.enabled && /^(image|audio|video)\//.test(String(file.type || ''))) {
-            setUploadNote(String(file.name || 'That file') + ' is not a type this board takes.', 'error');
+        if (!uploadConfig.enabled) {
+            setUploadNote('This board only takes ANSI art here; picture, sound and video uploads are off.', 'error');
             return;
         }
-        queueAnsiUpload(file);
+        uploadMedia(file);
     }
 
-    if (uploadConfig.enabled && mediaOpen && mediaFileInput) {
-        mediaOpen.hidden = false;
-        mediaFileInput.setAttribute('accept', (uploadConfig.types || []).map(function (t) { return '.' + t; }).join(',') + (uploadConfig.types.indexOf('jpg') >= 0 ? ',.jpeg' : ''));
-        mediaOpen.addEventListener('click', function () {
+    if (fileInput && attachButton) {
+        fileInput.setAttribute('accept', ['.ans', '.asc', '.nfo', '.diz', '.ice', '.txt'].concat(
+            uploadConfig.enabled ? (uploadConfig.types || []).map(function (t) { return '.' + t; }) : [],
+            uploadConfig.enabled && (uploadConfig.types || []).indexOf('jpg') >= 0 ? ['.jpeg'] : []).join(','));
+        attachButton.title = uploadConfig.enabled
+            ? 'Attach a picture, sound, video or ANSI art (or drop or paste it on the chat)'
+            : 'Attach ANSI art (or drop or paste it on the chat)';
+        attachButton.addEventListener('click', function () {
             if (!ansiUploadBusy) {
-                mediaFileInput.click();
+                fileInput.click();
             }
         });
-        mediaFileInput.addEventListener('change', function () {
-            var file = mediaFileInput.files && mediaFileInput.files.length ? mediaFileInput.files[0] : null;
-            mediaFileInput.value = '';
+        fileInput.addEventListener('change', function () {
+            var file = fileInput.files && fileInput.files.length ? fileInput.files[0] : null;
+            fileInput.value = '';
             if (file) {
-                uploadMedia(file);
+                acceptFile(file);
             }
         });
     }
 
-    if (uploadConfig.enabled && input) {
+    if (form && input) {
         input.addEventListener('paste', function (event) {
             var files = event.clipboardData && event.clipboardData.files;
             if (files && files.length) {
                 event.preventDefault();
                 acceptFile(files[0]);
             }
+        });
+        input.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape' && pendingAnsiUpload) {
+                event.preventDefault();
+                event.stopPropagation();
+                clearPendingAnsiUpload();
+            }
+        });
+    }
+
+    /* Drop anywhere on the chat panel: no drop box, just an outline while a
+       file is over it. */
+    var dropTarget = form && form.closest ? form.closest('.avatar-chat-chatpanel') : null;
+    var dragDepth = 0;
+
+    function dragHasFiles(event) {
+        var types = event.dataTransfer && event.dataTransfer.types;
+        return !!types && Array.prototype.indexOf.call(types, 'Files') >= 0;
+    }
+
+    if (dropTarget) {
+        dropTarget.addEventListener('dragenter', function (event) {
+            if (!dragHasFiles(event)) {
+                return;
+            }
+            event.preventDefault();
+            dragDepth += 1;
+            dropTarget.classList.add('is-dragover');
+        });
+        dropTarget.addEventListener('dragover', function (event) {
+            if (dragHasFiles(event)) {
+                event.preventDefault();
+            }
+        });
+        dropTarget.addEventListener('dragleave', function () {
+            dragDepth = Math.max(0, dragDepth - 1);
+            if (!dragDepth) {
+                dropTarget.classList.remove('is-dragover');
+            }
+        });
+        dropTarget.addEventListener('drop', function (event) {
+            var file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files.length
+                ? event.dataTransfer.files[0]
+                : null;
+            dragDepth = 0;
+            dropTarget.classList.remove('is-dragover');
+            if (!file) {
+                return;
+            }
+            event.preventDefault();
+            acceptFile(file);
         });
     }
 
@@ -3667,9 +3737,10 @@
     });
 
     /* ---- Handle style editor ----
-       The record every client shares (data/chat/nickstyle/NNNN.json):
-       one colour per letter of the alias ('' = default) and a tag. Presets
-       match the door's and the shell's (solid, gradient, rainbow). */
+       The record every client shares (data/chat/nickstyle/NNNN.json): one
+       colour per letter of the alias ('' = default). Presets match the
+       door's and the shell's (solid, gradient, rainbow). This page edits the
+       colours only; anything else in the record is kept as it is. */
     var styleOpen = document.getElementById('avatar-chat-style-open');
     var styleModal = document.getElementById('avatar-chat-style-modal');
     var styleLetters = document.getElementById('avatar-chat-style-letters');
@@ -3677,13 +3748,10 @@
     var stylePreset = document.getElementById('avatar-chat-style-preset');
     var styleA = document.getElementById('avatar-chat-style-a');
     var styleB = document.getElementById('avatar-chat-style-b');
-    var styleTag = document.getElementById('avatar-chat-style-tag');
-    var styleTagFg = document.getElementById('avatar-chat-style-tag-fg');
-    var styleTagBg = document.getElementById('avatar-chat-style-tag-bg');
     var styleStatus = document.getElementById('avatar-chat-style-status');
     var styleSave = document.getElementById('avatar-chat-style-save');
     var styleCancel = document.getElementById('avatar-chat-style-cancel');
-    var styleState = { colors: [], tag: { text: '', fg: '', bg: '' } };
+    var styleState = { colors: [] };
 
     function hexChannel(v) {
         var s = Math.max(0, Math.min(255, Math.round(v))).toString(16);
@@ -3737,17 +3805,6 @@
         stylePreview.innerHTML = renderHandle(alias, styleState);
     }
 
-    function readStyleTag() {
-        styleState.tag = {
-            text: String(styleTag.value || '').replace(/[^\x20-\x7e]/g, '').replace(/\|/g, '').replace(/^\s+|\s+$/g, ''),
-            fg: styleTagFg.value,
-            bg: styleTagBg.value
-        };
-        if (!styleState.tag.text.length) {
-            styleState.tag.fg = styleState.tag.bg = '';
-        }
-    }
-
     function closeStyleModal() {
         styleModal.classList.remove('is-open');
         styleModal.setAttribute('aria-hidden', 'true');
@@ -3767,10 +3824,6 @@
                 for (i = 0; i < alias.length; i += 1) {
                     styleState.colors.push(HEX_COLOR.test(colors[i] || '') ? colors[i] : '');
                 }
-                styleState.tag = st.tag && st.tag.text ? st.tag : { text: '', fg: '', bg: '' };
-                styleTag.value = styleState.tag.text || '';
-                if (styleState.tag.fg) styleTagFg.value = styleState.tag.fg;
-                if (styleState.tag.bg) styleTagBg.value = styleState.tag.bg;
                 styleStatus.textContent = '';
                 renderStyleEditor();
             }).catch(function (error) {
@@ -3800,19 +3853,12 @@
                 renderStyleEditor();
             }
         });
-        [styleTag, styleTagFg, styleTagBg].forEach(function (el) {
-            el.addEventListener('input', function () {
-                readStyleTag();
-                stylePreview.innerHTML = renderHandle(String(pageConfig.userAlias || ''), styleState);
-            });
-        });
         styleSave.addEventListener('click', function () {
-            readStyleTag();
             styleStatus.textContent = 'Saving...';
             fetchJSON(apiBase + '?action=saveStyle', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ colors: styleState.colors, tag: styleState.tag })
+                body: JSON.stringify({ colors: styleState.colors })
             }).then(function (reply) {
                 if (!reply || reply.error) {
                     throw new Error(reply && reply.error ? reply.error : 'could not save');
@@ -3826,79 +3872,431 @@
         styleCancel.addEventListener('click', closeStyleModal);
     }
 
-    renderAnsiUploadState();
+    /* ---- ANSI editor (Futureland's, shipped in ./avatarchat/) ----
+       Loaded on first use: the pencil in the composer draws an 80x25
+       picture that Done sends as a [BITMAP|...] message, and the avatar
+       modal opens it at 10x6. */
+    var EDITOR_BASE = './avatarchat/';
+    var EDITOR_FONT = EDITOR_BASE + 'fonts/CP437.F16';
+    var editorLoading = null;
 
-    if (ansiOpen) {
-        ansiOpen.addEventListener('click', function () {
-            if (!ansiUploadBusy && ansiFileInput) {
-                ansiFileInput.click();
-            }
-        });
+    function ensureEditor() {
+        if (window.AnsiEditorModal && window.AnsiEditor) {
+            return Promise.resolve();
+        }
+        if (!editorLoading) {
+            editorLoading = new Promise(function (resolve, reject) {
+                var css = document.createElement('link');
+                css.rel = 'stylesheet';
+                css.href = EDITOR_BASE + 'ansi-editor-modal.css';
+                document.head.appendChild(css);
+                loadScript(EDITOR_BASE + 'ansi-editor.js', function () {
+                    loadScript(EDITOR_BASE + 'ansi-editor-modal.js', function () {
+                        if (window.AnsiEditorModal && window.AnsiEditor) {
+                            resolve();
+                        } else {
+                            editorLoading = null;
+                            reject(new Error('The ANSI editor could not be loaded.'));
+                        }
+                    });
+                });
+            });
+        }
+        return editorLoading;
     }
 
-    if (ansiFileInput) {
-        ansiFileInput.addEventListener('change', function () {
-            var file = ansiFileInput.files && ansiFileInput.files.length ? ansiFileInput.files[0] : null;
-
-            if (file) {
-                queueAnsiUpload(file);
-            }
-        });
-    }
-
-    if (ansiClear) {
-        ansiClear.addEventListener('click', function () {
-            clearPendingAnsiUpload();
-        });
-    }
-
-    if (ansiDropzone) {
-        ansiDropzone.addEventListener('click', function () {
-            if (!ansiUploadBusy && ansiFileInput) {
-                ansiFileInput.click();
-            }
-        });
-        ansiDropzone.addEventListener('keydown', function (event) {
-            if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                if (!ansiUploadBusy && ansiFileInput) {
-                    ansiFileInput.click();
-                }
-            }
-        });
-        ansiDropzone.addEventListener('dragover', function (event) {
-            event.preventDefault();
-            if (!ansiUploadBusy) {
-                ansiDropzone.classList.add('is-dragover');
-            }
-        });
-        ansiDropzone.addEventListener('dragenter', function (event) {
-            event.preventDefault();
-            if (!ansiUploadBusy) {
-                ansiDropzone.classList.add('is-dragover');
-            }
-        });
-        ansiDropzone.addEventListener('dragleave', function (event) {
-            if (event.target === ansiDropzone) {
-                ansiDropzone.classList.remove('is-dragover');
-            }
-        });
-        ansiDropzone.addEventListener('drop', function (event) {
-            var file = null;
-
-            event.preventDefault();
-            ansiDropzone.classList.remove('is-dragover');
-            if (ansiUploadBusy) {
+    function openArtEditor() {
+        if (ansiUploadBusy) {
+            return;
+        }
+        ensureEditor().then(function () {
+            if (AnsiEditorModal.isOpen) {
                 return;
             }
-            file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files.length
-                ? event.dataTransfer.files[0]
-                : null;
-            if (file) {
-                acceptFile(file);
-            }
+            AnsiEditorModal.open({
+                title: 'ANSI Editor',
+                className: 'avatar-chat-ae',
+                columns: 80,
+                rows: 25,
+                width: Math.min(980, window.innerWidth),
+                height: Math.min(620, window.innerHeight),
+                minWidth: Math.min(480, window.innerWidth),
+                minHeight: Math.min(360, window.innerHeight),
+                fontUrl: EDITOR_FONT,
+                onDone: function (editor) {
+                    var doc = editor && editor.doc;
+                    if (!doc || !doc.data) {
+                        return;
+                    }
+                    ansiUploadBusy = true;
+                    setUploadNote('Sending your drawing...', 'busy');
+                    buildBitmapPayload(doc.data, doc.columns, doc.rows, buildBitmapFromName()).then(function (payload) {
+                        return sendActiveMessage(payload);
+                    }).then(function (response) {
+                        ansiUploadBusy = false;
+                        setUploadNote('', '');
+                        if (response && response.error) {
+                            setStatus('error', String(response.error), false);
+                            return;
+                        }
+                        scheduleHistoryRefresh();
+                    }).catch(function (error) {
+                        ansiUploadBusy = false;
+                        setUploadNote(error && error.message ? String(error.message) : explainServiceError(), 'error');
+                    });
+                }
+            });
+        }).catch(function (error) {
+            setStatus('error', String(error.message || error), false);
         });
     }
+
+    if (drawButton) {
+        drawButton.addEventListener('click', openArtEditor);
+    }
+
+    /* ---- Avatar: the user's real BBS avatar ----
+       Pick one from the sysop's shared collections, draw or edit one at
+       10x6, upload a .bin (one avatar, or a collection to pick from) or an
+       .ans (opened in the editor to check before saving), or disable it.
+       Saved through ./api/avatarchat.ssjs into the same record the door,
+       the terminal chooser and the rest of the site use. */
+    var AVATAR_COLS = 10;
+    var AVATAR_ROWS = 6;
+    var AVATAR_BYTES = AVATAR_COLS * AVATAR_ROWS * 2;
+    var avatarOpen = document.getElementById('avatar-chat-avatar-open');
+    var avatarModal = document.getElementById('avatar-chat-avatar-modal');
+    var avatarPreview = document.getElementById('avatar-chat-avatar-preview');
+    var avatarDraw = document.getElementById('avatar-chat-avatar-draw');
+    var avatarUpload = document.getElementById('avatar-chat-avatar-upload');
+    var avatarToggle = document.getElementById('avatar-chat-avatar-toggle');
+    var avatarFile = document.getElementById('avatar-chat-avatar-file');
+    var avatarCollection = document.getElementById('avatar-chat-avatar-collection');
+    var avatarGrid = document.getElementById('avatar-chat-avatar-grid');
+    var avatarStatus = document.getElementById('avatar-chat-avatar-status');
+    var avatarUse = document.getElementById('avatar-chat-avatar-use');
+    var avatarClose = document.getElementById('avatar-chat-avatar-close');
+    var avatarState = { current: null, collections: [], loaded: {}, list: [], selected: -1, fromFile: false };
+    var FILE_COLLECTION = '__file__';
+
+    function avatarNote(text, isError) {
+        avatarStatus.textContent = text || '';
+        avatarStatus.classList.toggle('is-error', !!isError);
+    }
+
+    function avatarTile(base64) {
+        return '<div data-avatar-bin="' + escapeAttr(base64) + '"></div>';
+    }
+
+    function renderAvatarCurrent() {
+        var cur = avatarState.current;
+        avatarPreview.innerHTML = cur && cur.data
+            ? avatarTile(cur.data)
+            : '<div class="avatar-chat-avatar-placeholder">none</div>';
+        avatarPreview.classList.toggle('is-disabled', !!(cur && cur.disabled));
+        avatarToggle.hidden = !(cur && cur.data);
+        avatarToggle.textContent = cur && cur.disabled ? 'Enable' : 'Disable';
+        renderEmbeddedAvatars(avatarPreview);
+    }
+
+    function renderAvatarGrid() {
+        var html = '';
+        avatarState.list.forEach(function (a, i) {
+            html += '<button type="button" class="avatar-chat-avatar-tile' + (i === avatarState.selected ? ' is-selected' : '') +
+                '" data-index="' + i + '" title="' + escapeAttr(a.label || ('#' + (i + 1))) + '">' + avatarTile(a.data) + '</button>';
+        });
+        avatarGrid.innerHTML = html || '<div class="avatar-chat-empty">No avatars here.</div>';
+        avatarUse.disabled = avatarState.selected < 0;
+        renderEmbeddedAvatars(avatarGrid);
+    }
+
+    function fillCollectionSelect() {
+        var html = '';
+        if (avatarState.fromFile) {
+            html += '<option value="' + FILE_COLLECTION + '">From your file (' + avatarState.list.length + ')</option>';
+        }
+        avatarState.collections.forEach(function (c) {
+            html += '<option value="' + escapeAttr(c.id) + '">' + escapeHtml(c.title + ' (' + c.count + ')') + '</option>';
+        });
+        avatarCollection.innerHTML = html || '<option value="">No shared collections</option>';
+        avatarCollection.disabled = !html;
+    }
+
+    function showCollection(id) {
+        if (id === FILE_COLLECTION) {
+            renderAvatarGrid();
+            return Promise.resolve();
+        }
+        avatarState.fromFile = false;
+        if (!id) {
+            avatarState.list = [];
+            avatarState.selected = -1;
+            renderAvatarGrid();
+            return Promise.resolve();
+        }
+        var cached = avatarState.loaded[id];
+        var pending = cached ? Promise.resolve(cached) : fetchJSON(apiBase + '?action=avatarCollection&collection=' + encodeURIComponent(id)).then(function (reply) {
+            if (!reply || !reply.collection) {
+                throw new Error(reply && reply.error ? reply.error : 'Could not load that collection.');
+            }
+            avatarState.loaded[id] = reply.collection;
+            return reply.collection;
+        });
+        avatarGrid.innerHTML = '<div class="avatar-chat-empty">Loading...</div>';
+        return pending.then(function (c) {
+            avatarState.list = c.avatars || [];
+            avatarState.selected = -1;
+            renderAvatarGrid();
+        }).catch(function (error) {
+            avatarState.list = [];
+            renderAvatarGrid();
+            avatarNote(String(error.message || error), true);
+        });
+    }
+
+    /* After a save: the modal, the roster and the browser's avatar cache
+       all show the new one; the next message carries it from the BBS. */
+    function applyOwnAvatar(avatar) {
+        avatarState.current = avatar || null;
+        ownAvatarOverride = avatar && avatar.data && !avatar.disabled ? avatar.data : '';
+        if (ownAvatarOverride) {
+            cacheAvatar(pageConfig.userAlias, pageConfig.systemName, ownAvatarOverride);
+            cacheAvatar(pageConfig.userAlias, '', ownAvatarOverride);
+            cacheAvatarByNumber(pageConfig.userNumber, ownAvatarOverride);
+        }
+        renderAvatarCurrent();
+        renderUsers();
+        renderEmbeddedAvatars(usersList);
+    }
+
+    function avatarWrite(query, okText) {
+        avatarNote('Saving...');
+        return fetchJSON(apiBase + '?action=' + query, { method: 'POST' }).then(function (reply) {
+            if (!reply || !reply.ok) {
+                throw new Error(reply && reply.error ? reply.error : 'Could not save.');
+            }
+            applyOwnAvatar(reply.avatar);
+            avatarNote(okText);
+        }).catch(function (error) {
+            avatarNote(String(error.message || error), true);
+        });
+    }
+
+    function showAvatarModal() {
+        avatarModal.classList.add('is-open');
+        avatarModal.setAttribute('aria-hidden', 'false');
+    }
+
+    function openAvatarModal() {
+        showAvatarModal();
+        avatarNote('Loading...');
+        fetchJSON(apiBase + '?action=avatar').then(function (reply) {
+            if (!reply || !reply.ok) {
+                throw new Error(reply && reply.error ? reply.error : 'Could not load your avatar.');
+            }
+            avatarState.current = reply.avatar || null;
+            avatarState.collections = reply.collections || [];
+            renderAvatarCurrent();
+            if (!avatarState.fromFile) {
+                fillCollectionSelect();
+                showCollection(avatarCollection.value);
+            }
+            avatarNote('');
+        }).catch(function (error) {
+            avatarNote(String(error.message || error), true);
+        });
+    }
+
+    function closeAvatarModal() {
+        avatarModal.classList.remove('is-open');
+        avatarModal.setAttribute('aria-hidden', 'true');
+    }
+
+    function binToBase64(bytes) {
+        var s = '';
+        var i;
+        for (i = 0; i < bytes.length; i += 1) {
+            s += String.fromCharCode(bytes[i]);
+        }
+        return btoa(s);
+    }
+
+    function cellsToAvatarBase64(cells) {
+        var s = '';
+        var i;
+        var c;
+        for (i = 0; i < AVATAR_COLS * AVATAR_ROWS; i += 1) {
+            c = cells[i] || { code: 32, fg: 7, bg: 0 };
+            s += String.fromCharCode((typeof c.code === 'number' ? c.code : 32) & 0xff);
+            s += String.fromCharCode((((c.bg || 0) & 0x07) << 4) | ((c.fg || 0) & 0x0f));
+        }
+        return btoa(s);
+    }
+
+    function avatarBase64ToCells(base64) {
+        var bin = '';
+        var cells = [];
+        var i;
+        try { bin = atob(base64 || ''); } catch (_e) { bin = ''; }
+        for (i = 0; i < AVATAR_COLS * AVATAR_ROWS; i += 1) {
+            if (bin.length === AVATAR_BYTES) {
+                var attr = bin.charCodeAt(i * 2 + 1) & 0xff;
+                cells.push({ code: bin.charCodeAt(i * 2) & 0xff, fg: attr & 0x0f, bg: (attr >> 4) & 0x07 });
+            } else {
+                cells.push({ code: 32, fg: 7, bg: 0 });
+            }
+        }
+        return cells;
+    }
+
+    /* The editor at a fixed 10x6, seeded with cells, zoomed up so the
+       cells are big enough to paint. Done saves; Cancel goes back. */
+    function openAvatarEditor(seedCells) {
+        ensureEditor().then(function () {
+            closeAvatarModal();
+            AnsiEditorModal.open({
+                title: 'Avatar Editor (10x6)',
+                className: 'avatar-chat-ae avatar-chat-ae-avatar',
+                columns: AVATAR_COLS,
+                rows: AVATAR_ROWS,
+                width: Math.min(900, window.innerWidth),
+                height: Math.min(620, window.innerHeight),
+                minWidth: Math.min(480, window.innerWidth),
+                minHeight: Math.min(360, window.innerHeight),
+                fontUrl: EDITOR_FONT,
+                onReady: function (editor) {
+                    if (editor && editor.doc && typeof editor.doc.replaceAll === 'function') {
+                        editor.doc.replaceAll(seedCells, AVATAR_COLS, AVATAR_ROWS);
+                        editor.columns = AVATAR_COLS;
+                        editor.rows = AVATAR_ROWS;
+                        if (editor._rebuildCanvas) editor._rebuildCanvas();
+                        if (editor._moveCursor) editor._moveCursor(0, 0);
+                        if (editor._updateStatusBar) editor._updateStatusBar();
+                        if (editor._selectTool) editor._selectTool('brush');
+                        if (editor._setBrushMode) editor._setBrushMode('custom_block');
+                    }
+                    if (editor && editor.el && editor.el.canvasContainer) {
+                        editor.el.canvasContainer.style.zoom = '5';
+                    }
+                },
+                onDone: function (editor) {
+                    var doc = editor && editor.doc;
+                    showAvatarModal();
+                    if (!doc || doc.columns !== AVATAR_COLS || doc.rows !== AVATAR_ROWS || !doc.data) {
+                        avatarNote('The avatar has to stay 10x6.', true);
+                        return;
+                    }
+                    avatarWrite('setAvatar&data=' + encodeURIComponent(cellsToAvatarBase64(doc.data)), 'Saved. Your next message carries it.');
+                },
+                onCancel: function () {
+                    /* After this Escape has finished, or the page's own
+                       Escape handler would close the modal again. */
+                    window.setTimeout(showAvatarModal, 0);
+                }
+            });
+        }).catch(function (error) {
+            avatarNote(String(error.message || error), true);
+        });
+    }
+
+    /* An uploaded file: one 120-byte avatar is saved as is; a .bin of
+       several (a collection) is shown to pick from; ANSI is cropped to 10x6
+       and opened in the editor to look at before saving. */
+    function acceptAvatarFile(file) {
+        avatarNote('Reading ' + String(file.name || 'file') + '...');
+        readFileBytes(file).then(function (bytes) {
+            var name = String(file.name || '');
+            if (/\.bin$/i.test(name) && bytes.length >= AVATAR_BYTES && bytes.length % AVATAR_BYTES === 0) {
+                if (bytes.length === AVATAR_BYTES) {
+                    return avatarWrite('setAvatar&data=' + encodeURIComponent(binToBase64(bytes)), 'Saved. Your next message carries it.');
+                }
+                avatarState.list = [];
+                for (var i = 0; i * AVATAR_BYTES < bytes.length && i < 500; i += 1) {
+                    avatarState.list.push({ label: name + ' #' + (i + 1), data: binToBase64(bytes.subarray(i * AVATAR_BYTES, (i + 1) * AVATAR_BYTES)) });
+                }
+                avatarState.selected = -1;
+                avatarState.fromFile = true;
+                fillCollectionSelect();
+                avatarCollection.value = FILE_COLLECTION;
+                renderAvatarGrid();
+                avatarNote('Pick one from your file, then Use selected.');
+                return null;
+            }
+            if (/\.bin$/i.test(name)) {
+                throw new Error('A .bin avatar is 120 bytes (10x6 cells); that file is ' + bytes.length + '.');
+            }
+            var art = prepareAnsiBitmap(bytes);
+            var cells = [];
+            for (var y = 0; y < AVATAR_ROWS; y += 1) {
+                for (var x = 0; x < AVATAR_COLS; x += 1) {
+                    cells.push(y < art.height && x < art.width ? art.cells[y * art.width + x] : { code: 32, fg: 7, bg: 0 });
+                }
+            }
+            avatarNote('');
+            openAvatarEditor(cells);
+            return null;
+        }).catch(function (error) {
+            avatarNote(String(error.message || error), true);
+        });
+    }
+
+    if (avatarOpen && avatarModal) {
+        avatarOpen.addEventListener('click', openAvatarModal);
+        avatarClose.addEventListener('click', closeAvatarModal);
+        avatarCollection.addEventListener('change', function () {
+            showCollection(avatarCollection.value);
+        });
+        avatarGrid.addEventListener('click', function (event) {
+            var tile = event.target && event.target.closest ? event.target.closest('[data-index]') : null;
+            if (!tile) {
+                return;
+            }
+            avatarState.selected = parseInt(tile.getAttribute('data-index'), 10);
+            Array.prototype.forEach.call(avatarGrid.querySelectorAll('.avatar-chat-avatar-tile'), function (el) {
+                el.classList.toggle('is-selected', el === tile);
+            });
+            avatarUse.disabled = false;
+        });
+        avatarGrid.addEventListener('dblclick', function () {
+            if (!avatarUse.disabled) {
+                avatarUse.click();
+            }
+        });
+        avatarUse.addEventListener('click', function () {
+            var picked = avatarState.list[avatarState.selected];
+            if (!picked) {
+                return;
+            }
+            if (avatarCollection.value === FILE_COLLECTION) {
+                avatarWrite('setAvatar&data=' + encodeURIComponent(picked.data), 'Saved. Your next message carries it.');
+            } else {
+                avatarWrite('setAvatar&collection=' + encodeURIComponent(avatarCollection.value) + '&index=' + String(picked.index), 'Saved. Your next message carries it.');
+            }
+        });
+        avatarDraw.addEventListener('click', function () {
+            openAvatarEditor(avatarBase64ToCells(avatarState.current ? avatarState.current.data : ''));
+        });
+        avatarUpload.addEventListener('click', function () {
+            avatarFile.click();
+        });
+        avatarFile.addEventListener('change', function () {
+            var file = avatarFile.files && avatarFile.files.length ? avatarFile.files[0] : null;
+            avatarFile.value = '';
+            if (file) {
+                acceptAvatarFile(file);
+            }
+        });
+        avatarToggle.addEventListener('click', function () {
+            var cur = avatarState.current;
+            if (!cur) {
+                return;
+            }
+            avatarWrite('avatarEnabled&enabled=' + (cur.disabled ? '1' : '0'),
+                cur.disabled ? 'Enabled.' : 'Disabled: nobody sees an avatar for you until you enable it.');
+        });
+    }
+
+    renderAnsiUploadState();
 
     if (form) {
         form.addEventListener('submit', function (event) {
@@ -3927,7 +4325,7 @@
                 if (response && response.error) {
                     if (pendingUpload) {
                         ansiUploadBusy = false;
-                        ansiUploadMessage = 'Ready to send ' + pendingUpload.fileName + ' (' + pendingUpload.width + 'x' + pendingUpload.height + ').';
+                        ansiUploadMessage = '';
                         ansiUploadMessageType = 'ready';
                         renderAnsiUploadState();
                     }
@@ -3943,7 +4341,7 @@
             }).catch(function () {
                 if (pendingUpload) {
                     ansiUploadBusy = false;
-                    ansiUploadMessage = 'Ready to send ' + pendingUpload.fileName + ' (' + pendingUpload.width + 'x' + pendingUpload.height + ').';
+                    ansiUploadMessage = '';
                     ansiUploadMessageType = 'ready';
                     renderAnsiUploadState();
                 }
@@ -4002,6 +4400,11 @@
         }
         if (event.key === 'Escape' && styleModal && styleModal.classList.contains('is-open')) {
             closeStyleModal();
+            return;
+        }
+        if (event.key === 'Escape' && avatarModal && avatarModal.classList.contains('is-open') &&
+            !(window.AnsiEditorModal && AnsiEditorModal.isOpen)) {
+            closeAvatarModal();
             return;
         }
         if (event.key === 'Escape' && roomModal && roomModal.classList.contains('is-open')) {

@@ -33,6 +33,20 @@ load(settings.web_lib + 'auth.js');
     }
     return out;
   }
+  function firstListed(value) {
+    return trimText(String(value === void 0 || value === null ? "" : value).split(",")[0]);
+  }
+  function requestOrigin(h) {
+    var proto = firstListed(h.forwardedProto).toLowerCase() || firstListed(h.scheme).toLowerCase() || "http";
+    if (proto !== "https")
+      proto = "http";
+    var host = firstListed(h.host) || firstListed(h.forwardedHost) || firstListed(h.vhost) || firstListed(h.fallbackHost) || "localhost";
+    host = host.replace(/[^A-Za-z0-9.\-:\[\]]/g, "").toLowerCase();
+    var m = /^(\[[^\]]*\]|[^:]*):(\d+)$/.exec(host);
+    if (m && (proto === "http" && m[2] === "80" || proto === "https" && m[2] === "443"))
+      host = m[1];
+    return proto + "://" + host;
+  }
 
   // build/lib/config.js
   var DEFAULT_NSFW_KEYWORDS = [
@@ -116,7 +130,8 @@ load(settings.web_lib + 'auth.js');
       uploadTypes: allowed,
       uploadRetentionDays: Math.max(0, parseIntOr(web("web_upload_retention_days", "7"), 7)),
       uploadDir: web("web_upload_dir", ""),
-      uploadUrlBase: web("web_upload_url_base", "").replace(/\/+$/, ""),
+      /* web_upload_url_base is the older name for the same key. */
+      uploadUrlBase: web("web_media_base_url", web("web_upload_url_base", "")).replace(/\/+$/, ""),
       uploadsPerHour: Math.max(0, parseIntOr(web("web_uploads_per_hour", "30"), 30))
     };
   }
@@ -369,9 +384,14 @@ load(settings.web_lib + 'auth.js');
   function publicBase(cfg) {
     if (cfg.uploadUrlBase.length)
       return cfg.uploadUrlBase;
-    var proto = trimText(http_request.header["x-forwarded-proto"]) || http_request.scheme || "http";
-    var host = trimText(http_request.header["x-forwarded-host"]) || trimText(http_request.vhost) || trimText(http_request.header["host"]) || system.inet_addr;
-    return trimText(proto.split(",")[0]) + "://" + trimText(host.split(",")[0]) + "/chatmedia";
+    return requestOrigin({
+      forwardedProto: http_request.header["x-forwarded-proto"],
+      forwardedHost: http_request.header["x-forwarded-host"],
+      host: http_request.header["host"],
+      vhost: http_request.vhost,
+      scheme: http_request.scheme,
+      fallbackHost: system.inet_addr
+    }) + "/chatmedia";
   }
   function today() {
     return strftime("%Y-%m-%d", time());

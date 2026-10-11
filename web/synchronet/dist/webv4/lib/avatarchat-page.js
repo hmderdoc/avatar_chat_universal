@@ -153,7 +153,8 @@ var AvatarChatPage = (function() {
       uploadTypes: allowed,
       uploadRetentionDays: Math.max(0, parseIntOr(web("web_upload_retention_days", "7"), 7)),
       uploadDir: web("web_upload_dir", ""),
-      uploadUrlBase: web("web_upload_url_base", "").replace(/\/+$/, ""),
+      /* web_upload_url_base is the older name for the same key. */
+      uploadUrlBase: web("web_media_base_url", web("web_upload_url_base", "")).replace(/\/+$/, ""),
       uploadsPerHour: Math.max(0, parseIntOr(web("web_uploads_per_hour", "30"), 30))
     };
   }
@@ -214,9 +215,6 @@ var AvatarChatPage = (function() {
       f.close();
     }
   }
-
-  // build/lib/style.js
-  var MAX_TAG = 12;
 
   // build/lib/chat.js
   var MAX_TEXT = 1e3;
@@ -280,7 +278,6 @@ var AvatarChatPage = (function() {
       canUseRealtime: viewer.authed,
       token: viewer.authed ? pageToken(viewer.number) : "",
       maxText: MAX_TEXT,
-      maxTag: MAX_TAG,
       images: cfg.images,
       linkPreviews: cfg.linkPreviews && viewer.authed,
       nsfwKeywords: cfg.nsfwKeywords,

@@ -36,4 +36,4 @@ GO
 GO_BITMAP_FILE="$TMP/bitmap.txt" node "$HERE/mock.js" "$PORT" "$STOCK" &
 PID=$!
 sleep 1
-node "$HERE/check.js" "$PORT" "$TMP/shot.png"
+node "$HERE/check.js" "$PORT" "${SHOTS:-$TMP/shots}"

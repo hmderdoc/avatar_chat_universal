@@ -19,7 +19,9 @@ const state = {
   posts: [],         // every write the page made: { action, headers, body }
   uploads: {},
   stored: {},
-  style: { version: 1, colors: [], tag: { text: "", fg: "", bg: "" } },
+  // a tag another client stored: the page must neither show nor drop it
+  style: { version: 1, colors: [], tag: { text: "mine", fg: "#ffffff", bg: "#aa0000" } },
+  avatar: null,
   sse: [],
   messages: [],
 };
@@ -28,6 +30,9 @@ function msg(sender, text, extra) {
   return Object.assign({ sender: sender, system: "Test BBS", text: text, timestamp: Date.now() - 60000, userNumber: 0, isSelf: false, private: false }, extra || {});
 }
 
+const avatarOf = (ch, attr) => Buffer.from(Array.from({ length: 120 }, (_, i) => (i % 2 ? attr : ch))).toString("base64");
+const COLLECTION = { id: "TESTBBS.faces.bin", title: "Test Faces", author: "Tester", group: "QA", count: 3, previewIndex: 0,
+  avatars: [0, 1, 2].map((i) => ({ index: i, label: "face " + (i + 1), data: avatarOf(0xdb, 0x09 + i) })) };
 const AVATAR = Buffer.from(Array.from({ length: 120 }, (_, i) => (i % 2 ? 0x1e + (i % 7) : 0xdb))).toString("base64");
 const GO_BITMAP = fs.readFileSync(process.env.GO_BITMAP_FILE, "utf8");
 
@@ -63,7 +68,7 @@ function renderXjs(file, ctx) {
 const pageConfig = {
   server: "127.0.0.1:10088", configFound: true, defaultChannel: "main", motdChannel: "motd", canManageMotd: false,
   userAlias: "Tester", userNumber: 77, systemName: "Test BBS", isLoggedIn: true, canUseRealtime: true, token: TOKEN,
-  maxText: 1000, maxTag: 12, images: true, linkPreviews: true, nsfwKeywords: ["nude", "nsfw"],
+  maxText: 1000, images: true, linkPreviews: true, nsfwKeywords: ["nude", "nsfw"],
   uploads: { enabled: true, maxMb: 20, videoMaxMb: 50, types: ["png", "jpg", "gif", "webp", "mp3", "mp4"], retentionDays: 7 },
 };
 
@@ -103,7 +108,10 @@ const server = http.createServer(async (req, res) => {
       pageConfigJson: () => JSON.stringify(pageConfig).replace(/<\//g, "<\\/"),
     });
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    // Stock webv4's own stylesheets: bootstrap's input[type=file] rule is
+    // what showed the hidden file inputs on a real site.
     res.end("<!doctype html><html><head><meta charset=utf-8><title>mock</title>" +
+      '<link href="./bootstrap/css/bootstrap.min.css" rel="stylesheet"><link href="./css/style.css" rel="stylesheet">' +
       '<script src="./js/jquery.min.js"></script><script src="./js/common.js"></script></head><body style="background:#000">' + html + "</body></html>");
     return;
   }
@@ -129,7 +137,8 @@ const server = http.createServer(async (req, res) => {
         return json(res, {
           channel: "main", serverTime: Date.now(),
           channels: [{ name: "main", userCount: 3, lastTimestamp: Date.now(), newCount: 0 }],
-          who: { channel: "main", users: [{ nick: "Carol", system: "Test BBS", userNumber: 0, avatar: AVATAR, style: state.messages[0].style }] },
+          who: { channel: "main", users: [{ nick: "Carol", system: "Test BBS", userNumber: 0, avatar: AVATAR, style: state.messages[0].style },
+            { nick: "Tester", system: "Test BBS", userNumber: 77, avatar: avatarOf(0x41, 0x07) }] },
           history: q.history === "1" ? { channel: "main", messages: state.messages } : undefined,
           private: { threads: [] },
           motd: { previewText: "mock motd", timestamp: Date.now() },
@@ -138,7 +147,8 @@ const server = http.createServer(async (req, res) => {
       case "history":
         return json(res, { channel: "main", messages: state.messages, serverTime: Date.now() });
       case "who":
-        return json(res, { channel: "main", users: [], serverTime: Date.now() });
+        return json(res, { channel: "main", users: [{ nick: "Carol", system: "Test BBS", userNumber: 0, avatar: AVATAR, style: state.messages[0].style },
+          { nick: "Tester", system: "Test BBS", userNumber: 77, avatar: avatarOf(0x41, 0x07) }], serverTime: Date.now() });
       case "channels":
         return json(res, { channels: [{ name: "main", userCount: 3, lastTimestamp: Date.now(), newCount: 0 }], serverTime: Date.now() });
       case "motd":
@@ -147,9 +157,32 @@ const server = http.createServer(async (req, res) => {
         return json(res, { threads: [] });
       case "style":
         return json(res, { ok: true, alias: "Tester", style: state.style });
-      case "saveStyle":
-        state.style = JSON.parse(body);
+      case "saveStyle": {
+        // as api.ts: colours from the page, the stored tag kept
+        const b = JSON.parse(body);
+        state.lastStyleBody = b;
+        state.style = { version: 1, colors: b.colors || [], tag: state.style.tag };
         return json(res, { ok: true, style: state.style });
+      }
+      case "avatar":
+        return json(res, { ok: true, avatar: state.avatar, collections: [Object.assign({}, COLLECTION, { avatars: undefined, preview: COLLECTION.avatars[0].data })] });
+      case "avatarCollection":
+        return q.collection === COLLECTION.id ? json(res, { ok: true, collection: COLLECTION }) : json(res, { error: "no such collection" });
+      case "setAvatar": {
+        let data = q.data;
+        if (!data) {
+          const a = COLLECTION.avatars[parseInt(q.index, 10)];
+          if (q.collection !== COLLECTION.id || !a) return json(res, { error: "no such avatar" });
+          data = a.data;
+        }
+        if (Buffer.from(data, "base64").length !== 120) return json(res, { error: "that is not a 10x6 avatar" });
+        state.avatar = { data: data, disabled: false };
+        return json(res, { ok: true, avatar: state.avatar });
+      }
+      case "avatarEnabled":
+        if (!state.avatar) return json(res, { error: "no avatar saved yet" });
+        state.avatar.disabled = q.enabled !== "1";
+        return json(res, { ok: true, avatar: state.avatar });
       case "preview":
         if (q.url === "https://news.example/story") {
           return json(res, { url: q.url, finalUrl: q.url, kind: "site", title: "Big <News> Story", description: "Something happened.", image: "", siteName: "News Example" });
@@ -185,12 +218,13 @@ const server = http.createServer(async (req, res) => {
       const all = Buffer.concat(up.parts);
       if (all.length !== up.size) return json(res, { ok: false, error: "upload is incomplete" });
       state.stored["/chatmedia/2026-10-11/" + q.id + ".png"] = all;
-      return json(res, { ok: true, url: "http://localhost:" + PORT + "/chatmedia/2026-10-11/" + q.id + ".png", kind: "image", bytes: all.length, expiresDays: 7 });
+      // as upload.ts: the link is built from the browser's own Host header
+      return json(res, { ok: true, url: "http://" + req.headers.host + "/chatmedia/2026-10-11/" + q.id + ".png", kind: "image", bytes: all.length, expiresDays: 7 });
     }
     return json(res, { ok: true });
   }
 
-  if (p === "/__state") return json(res, { posts: state.posts, stored: Object.keys(state.stored).map((k) => [k, state.stored[k].length]), style: state.style });
+  if (p === "/__state") return json(res, { posts: state.posts, stored: Object.keys(state.stored).map((k) => [k, state.stored[k].length]), style: state.style, lastStyleBody: state.lastStyleBody, avatar: state.avatar });
 
   if (state.stored[p]) { res.writeHead(200, { "Content-Type": "image/png" }); res.end(state.stored[p]); return; }
 
@@ -205,7 +239,7 @@ const server = http.createServer(async (req, res) => {
   for (const r of roots) {
     const f = path.join(r, path.normalize(p).replace(/^(\.\.[\/\\])+/, ""));
     if (f.startsWith(r) && fs.existsSync(f) && fs.statSync(f).isFile()) {
-      const types = { ".js": "text/javascript", ".css": "text/css", ".png": "image/png" };
+      const types = { ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".woff": "font/woff", ".ttf": "font/ttf" };
       res.writeHead(200, { "Content-Type": types[path.extname(f)] || "application/octet-stream" });
       res.end(fs.readFileSync(f));
       return;

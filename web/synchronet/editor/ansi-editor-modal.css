@@ -1,0 +1,118 @@
+/* ═══════════════════════════════════════════════════════════
+   ANSI Editor Modal — Draggable / Resizable Window
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Backdrop ── */
+.ae-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10030;
+    background: rgba(0, 0, 0, 0.55);
+}
+
+/* ── Window ── */
+.ae-modal-window {
+    position: fixed;
+    display: flex;
+    flex-direction: column;
+    background: #1a1a2e;
+    border: 1px solid #55FFFF;
+    border-radius: 6px;
+    box-shadow: 0 0 24px rgba(85, 255, 255, 0.25),
+                0 8px 40px rgba(0, 0, 0, 0.6);
+    overflow: hidden;
+    z-index: 10031;
+    min-width: 480px;
+    min-height: 360px;
+}
+
+/* ── Title bar ── */
+.ae-modal-titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 32px;
+    padding: 0 10px;
+    background: linear-gradient(90deg, rgba(85, 255, 255, 0.15), rgba(255, 85, 255, 0.12));
+    border-bottom: 1px solid #55FFFF;
+    cursor: grab;
+    flex-shrink: 0;
+    user-select: none;
+}
+.ae-modal-titlebar:active {
+    cursor: grabbing;
+}
+
+.ae-modal-title {
+    font-family: 'Spleen', ui-monospace, monospace;
+    font-size: 0.82rem;
+    color: #55FFFF;
+    letter-spacing: 0.04em;
+    text-shadow: 0 0 6px rgba(85, 255, 255, 0.4);
+}
+
+.ae-modal-close {
+    background: none;
+    border: 1px solid transparent;
+    color: #AAAAAA;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 3px;
+    line-height: 1;
+}
+.ae-modal-close:hover {
+    color: #FF5555;
+    border-color: #FF5555;
+    background: rgba(255, 85, 85, 0.1);
+}
+
+/* ── Editor body ── */
+.ae-modal-body {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* Make the editor fill the modal body */
+.ae-modal-body .me-editor {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+/* ── Resize handle ── */
+.ae-modal-resize {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 18px;
+    height: 18px;
+    cursor: nwse-resize;
+    z-index: 10;
+}
+.ae-modal-resize::after {
+    content: '';
+    position: absolute;
+    right: 3px;
+    bottom: 3px;
+    width: 8px;
+    height: 8px;
+    border-right: 2px solid #55FFFF;
+    border-bottom: 2px solid #55FFFF;
+    opacity: 0.5;
+}
+.ae-modal-resize:hover::after {
+    opacity: 1;
+}
+
+/* ── Shake animation (clicking backdrop) ── */
+@keyframes ae-shake {
+    0%, 100% { transform: translateX(0); }
+    20%      { transform: translateX(-6px); }
+    40%      { transform: translateX(6px); }
+    60%      { transform: translateX(-4px); }
+    80%      { transform: translateX(4px); }
+}
+.ae-modal-shake {
+    animation: ae-shake 0.3s ease;
+}

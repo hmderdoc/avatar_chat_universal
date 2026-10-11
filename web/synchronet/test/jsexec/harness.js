@@ -62,6 +62,7 @@ var fakeSystem = {
     qwk_id: 'TESTBBS',
     inet_addr: 'localhost',
     data_dir: SANDBOX + 'data/',
+    text_dir: SANDBOX + 'text/',
     ctrl_dir: SANDBOX + 'ctrl/',
     exec_dir: SANDBOX + 'exec/',
     mods_dir: SANDBOX + 'mods/',
@@ -195,14 +196,88 @@ names = (r.channels || []).map(function (c) { return c.name; });
 check(names.indexOf('motd') < 0, 'motd room hidden from non-sysops', names.join(','));
 
 /* ---- handle styles ---- */
-r = api(alice, 'POST', { action: 'saveStyle' }, JSON.stringify({ colors: ['#ff0000', '', '#00FF00', 'bad', '#0000ff', '#123456', '#654321'], tag: { text: 'web|dev', fg: '#ffff55', bg: '#0000aa' } }));
-check(r.ok === true && r.style.tag.text === 'webdev' && r.style.colors[2] === '#00ff00' && r.style.colors[3] === '', 'save a style (normalized)', JSON.stringify(r));
+/* The page edits colours only. A tag the shell or another site stored in
+   the shared record survives a save from here, whatever the request says. */
 var styleFile = SANDBOX + 'data/chat/nickstyle/9001.json';
+mkpath(SANDBOX + 'data/chat/nickstyle/');
+var sfw = new File(styleFile);
+sfw.open('w');
+sfw.write(JSON.stringify({ version: 1, colors: ['#aaaaaa'], tag: { text: 'webdev', fg: '#ffff55', bg: '#0000aa' } }));
+sfw.close();
+r = api(alice, 'POST', { action: 'saveStyle' }, JSON.stringify({ colors: ['#ff0000', '', '#00FF00', 'bad', '#0000ff', '#123456', '#654321'], tag: { text: 'evil', fg: '#000000', bg: '#000000' } }));
+check(r.ok === true && r.style.colors[2] === '#00ff00' && r.style.colors[3] === '', 'save a style (normalized)', JSON.stringify(r));
+check(r.style.tag.text === 'webdev' && r.style.tag.fg === '#ffff55', 'saving colours keeps the stored tag; the request cannot set one', JSON.stringify(r.style.tag));
 check(file_exists(styleFile), 'style stored at data/chat/nickstyle/NNNN.json (the shared record)');
 r = api(alice, 'GET', { action: 'style' });
 check(r.style && r.style.colors.length === 7, 'style reads back', JSON.stringify(r.style));
 r = invoke(apiFn, alice, 'POST', { action: 'saveStyle' }, {}, '{}');
 check(r.error === 'stale page: reload it', 'style save needs the token');
+
+/* ---- avatars (data/user/NNNN.ini [avatar], text/avatars collections) ---- */
+function avatarBin(ch, attr) {
+    var b = '';
+    for (var n = 0; n < 60; n++) b += ch + String.fromCharCode(attr);
+    return b;
+}
+var collDir = SANDBOX + 'text/avatars/';
+mkpath(collDir);
+var coll = new File(collDir + 'TESTBBS.faces.bin');
+coll.open('wb');
+coll.write(avatarBin('A', 0x1f) + avatarBin('B', 0x2e) + avatarBin('C', 0x4b));
+coll.close();
+load({}, 'sauce_lib.js').write(collDir + 'TESTBBS.faces.bin', { title: 'Test Faces', author: 'Tester', group: 'QA',
+    datatype: 5, filetype: 5, cols: 10, tinfo1: 0, tinfo2: 0, tinfo3: 0, tinfo4: 2, tflags: 0, tinfos: '', comment: ['one', 'two', 'three'] });
+var extract = new File(collDir + 'TESTBBS.faces.1.bin');
+extract.open('wb'); extract.write(avatarBin('Z', 0x07)); extract.close();
+
+r = invoke(apiFn, guest, 'GET', { action: 'avatar' }, {});
+check(r.error === 'authentication required', 'guests have no avatar settings');
+r = api(alice, 'GET', { action: 'avatar' });
+check(r.ok === true && r.avatar === null && r.collections.length === 1, 'no avatar yet; one collection (per-avatar extracts skipped)', JSON.stringify(r));
+var cs = r.collections[0];
+check(cs.id === 'TESTBBS.faces.bin' && cs.title === 'Test Faces' && cs.count === 3 && cs.previewIndex === 1 && base64_decode(cs.preview) === avatarBin('B', 0x2e),
+    'collection summary: SAUCE title, count by rows, preview from tinfo4', JSON.stringify(cs));
+r = api(alice, 'GET', { action: 'avatarCollection', collection: 'TESTBBS.faces.bin' });
+check(r.ok && r.collection.avatars.length === 3 && r.collection.avatars[2].label === 'three' && base64_decode(r.collection.avatars[2].data) === avatarBin('C', 0x4b),
+    'collection lists its avatars with SAUCE comments', JSON.stringify(r).substr(0, 200));
+r = api(alice, 'GET', { action: 'avatarCollection', collection: '../../ctrl/main.ini' });
+check(r.error === 'no such collection', 'a path is not a collection id');
+r = invoke(apiFn, alice, 'POST', { action: 'setAvatar', collection: 'TESTBBS.faces.bin', index: 2 }, {});
+check(r.error === 'stale page: reload it', 'setting an avatar needs the token');
+r = api(alice, 'POST', { action: 'setAvatar', collection: 'TESTBBS.faces.bin', index: 2 });
+check(r.ok && base64_decode(r.avatar.data) === avatarBin('C', 0x4b) && r.avatar.disabled === false, 'pick #3 from the collection', JSON.stringify(r));
+var aliceIni = new File(SANDBOX + 'data/user/9001.ini');
+aliceIni.open('r');
+var stored = aliceIni.iniGetValue('avatar', 'data', '');
+aliceIni.close();
+check(base64_decode(stored) === avatarBin('C', 0x4b), "saved in the user's own [avatar] record (sandbox data/user/9001.ini)");
+r = api(alice, 'POST', { action: 'setAvatar', collection: 'TESTBBS.faces.bin', index: 7 });
+check(r.error === 'no such avatar', 'an index past the end is refused');
+
+var drawn = avatarBin('\xdb', 0x0c);
+r = api(alice, 'POST', { action: 'setAvatar', data: base64_encode(drawn) });
+check(r.ok && base64_decode(r.avatar.data) === drawn, 'a drawn 10x6 avatar is saved', JSON.stringify(r));
+r = api(alice, 'POST', { action: 'setAvatar', data: base64_encode(drawn.substr(0, 100)) });
+check(r.error === 'that is not a 10x6 avatar', 'a short avatar is refused');
+r = api(alice, 'POST', { action: 'setAvatar', data: base64_encode(avatarBin('\x1b', 0x07)) });
+check(r.error === 'that is not a 10x6 avatar', 'an avatar with ESC in it is refused');
+r = api(alice, 'POST', { action: 'setAvatar', data: base64_encode(avatarBin('A', 0x8f)) });
+check(r.error === 'that is not a 10x6 avatar', 'a blinking avatar is refused');
+
+r = api(alice, 'POST', { action: 'send', channel: 'main', message: 'new face' });
+r = api(bob, 'GET', { action: 'history', channel: 'main' });
+m = r.messages[r.messages.length - 1];
+check(m.text === 'new face' && base64_decode(m.avatar || '') === drawn, 'the next message carries the new avatar', JSON.stringify(m).substr(0, 160));
+r = api(alice, 'POST', { action: 'avatarEnabled', enabled: '0' });
+check(r.ok && r.avatar.disabled === true && base64_decode(r.avatar.data) === drawn, 'disable keeps the art', JSON.stringify(r));
+r = api(alice, 'POST', { action: 'send', channel: 'main', message: 'faceless' });
+r = api(bob, 'GET', { action: 'history', channel: 'main' });
+m = r.messages[r.messages.length - 1];
+check(m.text === 'faceless' && !m.avatar, 'a disabled avatar is not sent', JSON.stringify(m).substr(0, 160));
+r = api(alice, 'POST', { action: 'avatarEnabled', enabled: '1' });
+check(r.ok && r.avatar.disabled === false, 'enable it again');
+r = api(bob, 'POST', { action: 'avatarEnabled', enabled: '0' });
+check(r.error === 'no avatar saved yet', 'nothing to disable without an avatar');
 
 /* ---- live events + style on the wire ---- */
 var emitted = [];
@@ -335,6 +410,38 @@ r = upload(alice, { action: 'chunk', id: id, seq: 0 }, 'not base64!');
 check(r.ok === false, 'a dropped upload id is gone / bad chunk refused', JSON.stringify(r));
 r = invoke(uploadFn, alice, 'POST', { action: 'begin', size: 10 }, {});
 check(r.ok === false && r.error === 'stale page: reload it', 'upload needs the token');
+
+/* the link carries the port the browser used */
+function uploadVia(headers) {
+    var h = { 'x-avatarchat-token': tokens[alice.number] };
+    for (var k in headers) h[k] = headers[k];
+    var b = invoke(uploadFn, alice, 'POST', { action: 'begin', size: pngBytes }, h);
+    invoke(uploadFn, alice, 'POST', { action: 'chunk', id: b.id, seq: 0 }, h, PNG_B64);
+    return invoke(uploadFn, alice, 'POST', { action: 'finish', id: b.id }, h);
+}
+var today = strftime('%Y-%m-%d', time());
+r = uploadVia({ host: 'bbs.test:4080' });
+check(r.ok && r.url.indexOf('http://bbs.test:4080/chatmedia/' + today + '/') === 0, 'Host bbs.test:4080 gives a :4080 link', r.url);
+r = uploadVia({ host: 'bbs.test:80' });
+check(r.ok && r.url.indexOf('http://bbs.test/chatmedia/') === 0, 'the default port is left off', r.url);
+r = uploadVia({ host: 'bbs.test', 'x-forwarded-proto': 'https' });
+check(r.ok && r.url.indexOf('https://bbs.test/chatmedia/') === 0, 'X-Forwarded-Proto https from a proxy is honoured', r.url);
+
+/* web_media_base_url pins the links for a proxy that rewrites Host */
+var iniPath = SANDBOX + 'xtrn/avatar_chat_universal/avatar_chat.ini';
+var iniBefore = readText(iniPath);
+var iniFile = new File(iniPath);
+iniFile.open('w');
+iniFile.write(iniBefore.replace(/\s*$/, '') + '\nweb_media_base_url = https://media.example.org/files/\n');
+iniFile.close();
+r = uploadVia({ host: 'inside:4080' });
+check(r.ok && r.url.indexOf('https://media.example.org/files/' + today + '/') === 0, 'web_media_base_url overrides the request host', r.url);
+iniFile = new File(iniPath);
+iniFile.open('w');
+iniFile.write(iniBefore);
+iniFile.close();
+r = uploadVia({ host: 'bbs.test:4080' });
+check(r.ok && r.url.indexOf('http://bbs.test:4080/') === 0, 'without it the request host is back', r.url);
 r = invoke(uploadFn, guest, 'POST', { action: 'begin', size: 10 }, {});
 check(r.ok === false && r.error === 'authentication required', 'guests cannot upload');
 

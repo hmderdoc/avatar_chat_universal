@@ -1,0 +1,534 @@
+/* ═══════════════════════════════════════════════════════
+   ANSI Editor — Styles (prefixed with .me- for isolation)
+   ═══════════════════════════════════════════════════════ */
+
+/* ─── Root container ─── */
+.me-editor {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    background: #1e1e2e;
+    color: #cdd6f4;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 12px;
+    outline: none;
+    overflow: hidden;
+    user-select: none;
+    position: relative;
+}
+
+/* ─── Body (sidebar + main) ─── */
+.me-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+/* ─── Sidebar ─── */
+.me-sidebar {
+    width: 48px;
+    background: #181825;
+    border-right: 1px solid #313244;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 6px 4px;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+/* Current FG/BG color display */
+.me-current-colors {
+    position: relative;
+    width: 36px;
+    height: 36px;
+    margin-bottom: 4px;
+}
+.me-color-swatch {
+    position: absolute;
+    border: 2px solid #585b70;
+    cursor: pointer;
+}
+.me-color-swatch:hover {
+    border-color: #cdd6f4;
+}
+.me-color-bg {
+    width: 24px;
+    height: 24px;
+    bottom: 0;
+    right: 0;
+    z-index: 0;
+}
+.me-color-fg {
+    width: 24px;
+    height: 24px;
+    top: 0;
+    left: 0;
+    z-index: 1;
+}
+
+/* Palette grid */
+.me-palette {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 2px;
+    width: 36px;
+}
+.me-pal-cell {
+    width: 16px;
+    height: 16px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: border-color 0.1s;
+}
+.me-pal-cell:hover {
+    border-color: #cdd6f4;
+}
+.me-pal-fg {
+    border-color: #f5e0dc !important;
+    box-shadow: inset 0 0 0 1px #1e1e2e;
+}
+.me-pal-bg {
+    outline: 2px dashed #a6adc8;
+    outline-offset: -1px;
+}
+
+/* Separator */
+.me-sep {
+    width: 32px;
+    height: 1px;
+    background: #313244;
+    margin: 4px 0;
+}
+
+/* Tool buttons */
+.me-tool-btn {
+    width: 32px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #313244;
+    border-radius: 4px;
+    cursor: pointer;
+    color: #bac2de;
+    margin-bottom: 3px;
+    transition: background 0.15s;
+}
+.me-tool-btn svg {
+    width: 16px;
+    height: 16px;
+}
+.me-tool-btn:hover {
+    background: #45475a;
+}
+.me-tool-btn.me-active {
+    background: #89b4fa;
+    color: #1e1e2e;
+}
+
+/* ─── Main area ─── */
+.me-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+/* ─── Toolbar ─── */
+.me-toolbar {
+    height: 44px;
+    background: #181825;
+    border-bottom: 1px solid #313244;
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.me-fkey-nav {
+    cursor: pointer;
+    padding: 2px 4px;
+    color: #6c7086;
+    font-size: 11px;
+}
+.me-fkey-nav:hover {
+    color: #cdd6f4;
+}
+
+.me-fkey-group {
+    display: flex;
+    gap: 2px;
+}
+.me-fkey {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 3px;
+}
+.me-fkey:hover {
+    background: #313244;
+}
+.me-fkey canvas {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+}
+.me-fkey-label {
+    font-size: 8px;
+    color: #6c7086;
+    margin-top: 1px;
+}
+
+.me-toolbar-sep {
+    width: 1px;
+    height: 28px;
+    background: #313244;
+    margin: 0 6px;
+}
+
+.me-brush-modes {
+    display: none;
+    gap: 3px;
+}
+.me-brush-modes.me-visible {
+    display: flex;
+}
+.me-brush-mode {
+    padding: 3px 8px;
+    background: #313244;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 11px;
+    color: #bac2de;
+}
+.me-brush-mode:hover {
+    background: #45475a;
+}
+.me-brush-mode.me-active {
+    background: #a6e3a1;
+    color: #1e1e2e;
+}
+
+/* ─── Viewport ─── */
+.me-viewport {
+    flex: 1;
+    overflow: auto;
+    background: #11111b;
+    cursor: crosshair;
+    position: relative;
+}
+.me-canvas-container {
+    position: relative;
+    display: inline-block;
+}
+.me-canvas {
+    display: block;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+}
+.me-editing-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+}
+.me-cursor-canvas {
+    position: absolute;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+}
+
+/* Cursor blink animation */
+@keyframes me-blink {
+    0%, 50%  { opacity: 1; }
+    51%, 100% { opacity: 0; }
+}
+.me-cursor-blink {
+    animation: me-blink 1s step-end infinite;
+}
+
+/* ─── Status bar ─── */
+.me-statusbar {
+    height: 24px;
+    background: #181825;
+    border-top: 1px solid #313244;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+    gap: 16px;
+    font-size: 11px;
+    color: #6c7086;
+    flex-shrink: 0;
+}
+
+/* ─── Action bar ─── */
+.me-action-bar {
+    height: 40px;
+    background: #181825;
+    border-top: 1px solid #313244;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0 12px;
+    gap: 8px;
+    flex-shrink: 0;
+}
+.me-btn {
+    padding: 5px 16px;
+    border: 1px solid #45475a;
+    border-radius: 4px;
+    background: #313244;
+    color: #cdd6f4;
+    cursor: pointer;
+    font-size: 12px;
+}
+.me-btn:hover {
+    background: #45475a;
+}
+.me-btn-done {
+    background: #89b4fa;
+    color: #1e1e2e;
+    border-color: #89b4fa;
+    font-weight: bold;
+}
+.me-btn-done:hover {
+    background: #74c7ec;
+}
+
+/* ─── Attribute overlay (color picker) ─── */
+.me-backdrop {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 100;
+}
+.me-backdrop.me-visible {
+    display: block;
+}
+.me-attr-overlay {
+    display: none;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: #1e1e2e;
+    border: 1px solid #45475a;
+    border-radius: 8px;
+    padding: 16px;
+    z-index: 101;
+    min-width: 200px;
+}
+.me-attr-overlay.me-visible {
+    display: block;
+}
+.me-attr-overlay h3 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    color: #cdd6f4;
+    text-align: center;
+}
+.me-attr-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 4px;
+    margin-bottom: 12px;
+}
+.me-attr-cell {
+    width: 28px;
+    height: 28px;
+    border: 2px solid transparent;
+    border-radius: 3px;
+    cursor: pointer;
+}
+.me-attr-cell:hover {
+    border-color: #cdd6f4;
+}
+.me-attr-cell.me-selected {
+    border-color: #f5e0dc;
+    box-shadow: 0 0 0 2px #f5e0dc40;
+}
+.me-attr-actions {
+    text-align: center;
+}
+
+/* Utility */
+.me-hidden {
+    display: none !important;
+}
+
+/* ─── Tool list (vertical layout) ─── */
+.me-tool-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 0;
+}
+
+/* ─── Fill toggle (outline/filled for rect/ellipse) ─── */
+.me-fill-toggle {
+    display: none;
+    flex-direction: row;
+    justify-content: center;
+    gap: 2px;
+    padding: 4px 0;
+}
+.me-fill-toggle.me-visible {
+    display: flex;
+}
+.me-fill-opt {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    cursor: pointer;
+    border-radius: 3px;
+    border: 1px solid transparent;
+    color: #6c7086;
+}
+.me-fill-opt:hover {
+    color: #cdd6f4;
+}
+.me-fill-opt.me-active {
+    background: #45475a;
+    color: #cdd6f4;
+    border-color: #585b70;
+}
+
+/* ─── Action bar — left/right sections ─── */
+.me-action-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.me-action-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.me-action-bar {
+    justify-content: space-between;
+}
+
+/* ─── Shape overlay (rubber-band preview) ─── */
+.me-shape-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    z-index: 5;
+}
+
+/* ─── Resize overlay (modal dialog) ─── */
+.me-resize-overlay {
+    display: none;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: #1e1e2e;
+    border: 1px solid #45475a;
+    border-radius: 8px;
+    padding: 16px;
+    z-index: 101;
+    min-width: 240px;
+}
+.me-resize-overlay.me-visible {
+    display: block;
+}
+.me-resize-overlay h3 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    color: #cdd6f4;
+    text-align: center;
+}
+.me-resize-form {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+.me-resize-form label {
+    color: #a6adc8;
+    font-size: 12px;
+}
+.me-resize-input {
+    width: 100%;
+    padding: 4px 8px;
+    background: #313244;
+    border: 1px solid #45475a;
+    border-radius: 3px;
+    color: #cdd6f4;
+    font-size: 13px;
+    box-sizing: border-box;
+}
+.me-resize-input:focus {
+    outline: none;
+    border-color: #89b4fa;
+}
+
+/* ─── Status bar — clickable dimensions ─── */
+.me-status-dim {
+    text-decoration: underline dotted;
+    cursor: pointer;
+    color: #a6adc8;
+}
+.me-status-dim:hover {
+    color: #89b4fa;
+}
+
+/* ─── Mini preview panel ─── */
+.me-preview {
+    width: 220px;
+    background: #181825;
+    border-left: 1px solid #313244;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+.me-preview-label {
+    padding: 6px 10px;
+    font-size: 11px;
+    color: #6c7086;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid #313244;
+}
+.me-preview-wrapper {
+    padding: 10px;
+    overflow: hidden;
+}
+.me-preview-canvas {
+    display: block;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+}
+.me-view-frame {
+    position: absolute;
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    pointer-events: none;
+    box-sizing: border-box;
+}
+
+/* Selection overlay */
+.me-selection-overlay {
+    position: absolute;
+    border: 2px dashed #f5e0dc;
+    background: rgba(205, 214, 244, 0.1);
+    pointer-events: none;
+    z-index: 5;
+    box-sizing: border-box;
+}
+.me-selection-overlay.me-hidden {
+    display: none;
+}

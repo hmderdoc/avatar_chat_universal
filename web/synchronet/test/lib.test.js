@@ -166,3 +166,29 @@ test("picture metadata is cut out, the rest kept byte for byte", () => {
   assert.strictEqual(L.stripPngMetadata(sig + ihdr + idat + iend), null);
   assert.strictEqual(L.stripPngMetadata("GIF89a"), null);
 });
+
+test("upload links keep the port the browser used", () => {
+  const o = L.requestOrigin;
+  assert.strictEqual(o({ host: "example.com:4080", vhost: "example.com", scheme: "http" }), "http://example.com:4080");
+  assert.strictEqual(o({ host: "example.com:80", scheme: "http" }), "http://example.com");
+  assert.strictEqual(o({ host: "example.com:443", forwardedProto: "https", scheme: "http" }), "https://example.com");
+  assert.strictEqual(o({ host: "example.com", forwardedProto: "https, http", scheme: "http" }), "https://example.com");
+  assert.strictEqual(o({ host: "example.com:8443", forwardedProto: "https" }), "https://example.com:8443");
+  // Host wins over X-Forwarded-Host; vhost (no port) and the BBS address are fallbacks.
+  assert.strictEqual(o({ host: "bbs.example:4080", forwardedHost: "evil.example" }), "http://bbs.example:4080");
+  assert.strictEqual(o({ forwardedHost: "pub.example", vhost: "inside" }), "http://pub.example");
+  assert.strictEqual(o({ vhost: "bbs.example" }), "http://bbs.example");
+  assert.strictEqual(o({ fallbackHost: "10.0.0.2" }), "http://10.0.0.2");
+  assert.strictEqual(o({ host: "[::1]:4080" }), "http://[::1]:4080");
+  assert.strictEqual(o({ host: "[::1]:80" }), "http://[::1]");
+  assert.strictEqual(o({ host: "x.example/\"><script>" }), "http://x.examplescript");
+  assert.strictEqual(o({ host: "x.example", forwardedProto: "javascript" }), "http://x.example");
+});
+
+test("web_media_base_url, or the older web_upload_url_base, sets the link base", () => {
+  const cfg = (map) => L.buildConfig((sec, key) => (map[(sec || "") + "." + key] === undefined ? null : map[(sec || "") + "." + key]), "x", true);
+  assert.strictEqual(cfg({ "web.web_media_base_url": "https://m.example/files/" }).uploadUrlBase, "https://m.example/files");
+  assert.strictEqual(cfg({ "web.web_upload_url_base": "https://old.example/c" }).uploadUrlBase, "https://old.example/c");
+  assert.strictEqual(cfg({ "web.web_media_base_url": "https://new.example", "web.web_upload_url_base": "https://old.example" }).uploadUrlBase, "https://new.example");
+  assert.strictEqual(cfg({}).uploadUrlBase, "");
+});

@@ -6,7 +6,6 @@
 import { loadConfig } from '../lib/config';
 import { pageToken } from '../lib/csrf';
 import * as chat from '../lib/chat';
-import { MAX_TAG } from '../lib/style';
 
 export function pageConfig(): { [k: string]: unknown } {
     const cfg = loadConfig();
@@ -25,7 +24,6 @@ export function pageConfig(): { [k: string]: unknown } {
         canUseRealtime: viewer.authed,
         token: viewer.authed ? pageToken(viewer.number) : '',
         maxText: chat.MAX_TEXT,
-        maxTag: MAX_TAG,
         images: cfg.images,
         linkPreviews: cfg.linkPreviews && viewer.authed,
         nsfwKeywords: cfg.nsfwKeywords,

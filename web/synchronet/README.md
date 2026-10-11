@@ -24,13 +24,22 @@ chat server and has no logins.
 - Avatars: the sender's avatar as it travels on the message. Otherwise
   the page looks it up through stock webv4: by account number for your own
   users, and by `alias@QWKID` for remote ones.
+- Your avatar: the **Avatar** button opens your real BBS avatar (the
+  `[avatar]` record in `data/user/NNNN.ini` that the terminal chooser and
+  the door use). Pick one from the sysop's shared collections in
+  `text/avatars/*.bin`, draw or edit one in the 10x6 editor, upload a
+  `.bin` (one avatar, or a collection to pick from) or an `.ans` (cropped
+  to 10x6 and opened in the editor before saving), or disable it. Your
+  next message carries the new one.
 - BITMAP art, the `[BITMAP|...]` messages the door's art editor and the
-  shell send. You can also drop or choose an ANSI file in the browser, and
-  it is sent as BITMAP art.
-- Handle styles: colours for each letter plus a tag, shown for everyone.
-  The Handle Style button edits your own. It saves to the same
+  shell send. The pencil next to the composer opens an 80x25 ANSI editor;
+  Done sends the drawing. An ANSI file attached, dropped or pasted is also
+  sent as BITMAP art, made in the browser, whether uploads are on or not.
+- Handle styles: a colour for each letter, shown for everyone. The Handle
+  Style button edits your own. It saves to the same
   `data/chat/nickstyle/NNNN.json` record the door, the shell and
-  Futureland's site use, so a change shows everywhere.
+  Futureland's site use, so a change shows everywhere. Anything else in
+  that record, written by another client, is kept as it is.
 - Inline pictures (up to three per message), audio and video players for
   media links, and a link card for the first other link. Pictures whose
   link or message matches `nsfw_keywords` are blurred until clicked.
@@ -43,6 +52,12 @@ chat server and has no logins.
 - Uploads (off by default): logged-in users can drop, paste or attach a
   picture, sound or video. The file is stored on this BBS's web server
   and its link is put in the composer.
+
+The composer row is the paperclip (attach a file), the pencil (ANSI
+editor), the message box and Send. Files can also be dropped anywhere on
+the chat or pasted into the box. What an attachment is doing shows in the
+box itself; errors show in the status bar. A waiting ANSI file is posted by
+Send and dropped by Esc.
 
 Guests can read public rooms. They can't post, open private messages,
 upload or ask for link cards, and they get no live stream. This matches
@@ -73,6 +88,7 @@ That adds these files:
 | --- | --- |
 | `pages/avatarchat.xjs` | The page. |
 | `root/avatarchat/app.js`, `app.css` | The browser code and styles. |
+| `root/avatarchat/ansi-editor.js`, `ansi-editor-modal.js`, `ansi-editor-modal.css`, `fonts/` | The ANSI and avatar editor, loaded on first use. |
 | `root/api/avatarchat.ssjs` | The chat API. |
 | `root/api/avatarchat-upload.ssjs` | Uploads. It refuses everything unless `web_uploads = on`. |
 | `lib/events/avatarchat.js` | Live updates, loaded by `root/api/events.ssjs`. |
@@ -128,7 +144,7 @@ web_uploads = on
 ; web_upload_retention_days = 7
 ; web_uploads_per_hour = 30
 ; web_upload_dir = /sbbs/webv4/root/chatmedia
-; web_upload_url_base = https://bbs.example.org/chatmedia
+; web_media_base_url = https://bbs.example.org/chatmedia
 ; web_motd_host_qwkid = MYBBS
 ```
 
@@ -140,10 +156,9 @@ would be invisible to the web page.
 
 Uploads are off until `web_uploads = on`. When they are on:
 
-- The composer gets an **Attach** button. The drop zone also takes
-  pictures, sound and video, and pasting a file into the composer works
-  too. ANSI files still become BITMAP art in the browser and are never
-  stored.
+- The paperclip, a drop on the chat or a paste into the composer also
+  take pictures, sound and video. ANSI files still become BITMAP art in
+  the browser and are never stored.
 - The file goes up in base64 chunks. The Synchronet web server hands
   scripts at most 4 MiB of request body, and each chunk stays under that.
 - When the upload finishes, the server reads the file's first bytes to
@@ -185,9 +200,13 @@ m4a  = audio/mp4
 webm = video/webm
 ```
 
-**Behind a reverse proxy.** The link is built from `X-Forwarded-Proto`
-and `X-Forwarded-Host` when the proxy sends them. Otherwise it uses the
-request's own host. Set `web_upload_url_base` to pin it.
+**The link's address.** It is built from the browser's own `Host` header,
+port included, so a site on `:4080` gets `:4080` links, and a default port
+(80, 443) is left off. `X-Forwarded-Proto: https` from a reverse proxy
+makes it `https`; `X-Forwarded-Host` only counts when no `Host` came. A
+proxy that rewrites `Host` to an inside name needs `web_media_base_url`
+set to the public address of the folder. The older name
+`web_upload_url_base` still works.
 
 **Why files stay on this BBS** rather than going to a door's `upload_url`:
 a stock Synchronet site can already serve static files from its web root,
@@ -251,11 +270,14 @@ over the web directory replaces them.
 Compared with the old bundle:
 
 - Settings come from the door's `avatar_chat.ini`.
-- **New features:** handle styles (shown and editable), inline pictures,
-  media players, link cards with the NSFW veil, mention highlights, and
-  uploads.
+- **New features:** handle styles (shown and editable), your avatar
+  (collections, editor, upload, disable), the ANSI editor, inline
+  pictures, media players, link cards with the NSFW veil, mention
+  highlights, and uploads.
+- **Composer:** one paperclip and one pencil instead of the ANSI file
+  button, drop box and helper text.
 - **Avatars:** remote users' avatars are found by alias and QWK ID.
-- **Composer:** 1,000 characters instead of 500.
+- **Length:** 1,000 characters instead of 500.
 - **Security:**
   - Writes need the session token and a same-site origin. The old bundle
     took any POST from a logged-in browser.
@@ -264,6 +286,16 @@ Compared with the old bundle:
 - **Code:** the server side is TypeScript in `src/`, compiled to ES5
   (rule: Synchronet code is TypeScript). The browser code moved out of the
   page into `root/avatarchat/app.js`.
+
+## The ANSI editor
+
+The editor is Futureland's (its site's `ansi-editor`), vendored in
+`editor/` so a stock site needs nothing else; `build.js` bundles it into
+`root/avatarchat/ansi-editor.js`, loaded only when someone opens it. Its
+code is Futureland's own, same licence as this repository. The font,
+`fonts/CP437.F16`, is the IBM VGA 8x16 font as shipped by Moebius
+(`blocktronics/moebius`), Apache License 2.0; the licence text ships beside
+it as `fonts/LICENSE-moebius.txt`. See `editor/NOTICE.md`.
 
 ## Development
 

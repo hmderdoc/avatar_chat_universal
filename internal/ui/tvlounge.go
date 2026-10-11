@@ -7,6 +7,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
+	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
 	"github.com/hmderdoc/avatar_chat_universal/internal/telnetvision"
 )
 
@@ -391,7 +392,7 @@ func (a *App) drawPopupLines(f *ansi.Frame, bottomY int, p tvPopup) int {
 		// Colorize "nick: " only on the first row, and only if the wrap left
 		// it intact at the start (a pathologically long nick may not).
 		if i == 0 && strings.HasPrefix(ln, prefix) {
-			x := putStr(f, 1, ry, nick, a.nickAttr(nick))
+			x := a.putNick(f, 1, ry, nick, p.msg.Nick, false)
 			x = putStr(f, x, ry, ": ", ansi.LightGray|ansi.BgBlack)
 			putStr(f, x, ry, ln[len(prefix):], ansi.White|ansi.BgBlack)
 		} else {
@@ -422,7 +423,7 @@ func (a *App) drawPopupBubble(f *ansi.Frame, bottomY int, p tvPopup) int {
 	if maxW < 4 {
 		return top - 1
 	}
-	putStr(f, textX, top, nick, a.nickAttr(nick))
+	a.putNick(f, textX, top, nick, p.msg.Nick, true)
 	lines := wrapPlain(p.msg.Str, maxW)
 	for i, ln := range lines {
 		ry := top + 1 + i
@@ -432,6 +433,23 @@ func (a *App) drawPopupBubble(f *ansi.Frame, bottomY int, p tvPopup) int {
 		putStr(f, textX, ry, ln, ansi.White|ansi.BgBlack)
 	}
 	return top - 1
+}
+
+// putNick draws a popup's speaker: their handle style when they sent one
+// (the same painter as the transcript), else the stable hash badge. withTag
+// adds the style's tag; the one-line popup leaves it off so the text after
+// "nick: " stays where the wrap put it. Returns the next x.
+func (a *App) putNick(f *ansi.Frame, x, row int, nick string, n *chat.Nick, withTag bool) int {
+	if n == nil || n.Style.IsEmpty() {
+		return putStr(f, x, row, nick, a.nickAttr(nick))
+	}
+	st := n.Style
+	if !withTag {
+		cp := *st
+		cp.Tag = nickstyle.Tag{}
+		st = &cp
+	}
+	return x + paintHandle(f, x, row, nick, st, ansi.White|ansi.BgBlack, f.W-x, a.tvColorTrue())
 }
 
 // putStr writes s at (x,row) in CP437 bytes (non-ASCII -> '?'), clipped to the

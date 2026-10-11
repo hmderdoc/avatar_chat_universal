@@ -10,6 +10,7 @@ import (
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
+	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chatserver"
 )
 
@@ -238,5 +239,21 @@ func TestDrawPopupLines_ShortMessageSingleRow(t *testing.T) {
 
 	if top := app.drawPopupLines(f, bottomY, p) + 1; top != bottomY {
 		t.Fatalf("short message should occupy exactly one row, got top=%d bottomY=%d", top, bottomY)
+	}
+}
+
+// A sender's handle style colours their name in a lounge popup, as it does in
+// the transcript; the text after "nick: " stays where the wrap put it.
+func TestDrawPopupLines_StyledNick(t *testing.T) {
+	app := &App{TVColor: "16"}
+	f := ansi.NewFrame(0, 0, 40, 12, ansi.White|ansi.BgBlack)
+	st := &nickstyle.Style{Colors: []string{"#ff0000", "#ff0000", "#ff0000"}}
+	p := tvPopup{msg: &chat.Message{Nick: &chat.Nick{Name: "bob", Style: st}, Str: "hi there"}}
+	top := app.drawPopupLines(f, f.H-1, p) + 1
+	if c := f.CellAt(1, top); c.Char != 'b' || c.Attr&0x0F != ansi.LightRed {
+		t.Fatalf("styled nick cell = %+v, want 'b' in light red", c)
+	}
+	if c := f.CellAt(1+len("bob: "), top); c.Char != 'h' {
+		t.Fatalf("text moved: %q at the text column", rune(c.Char))
 	}
 }

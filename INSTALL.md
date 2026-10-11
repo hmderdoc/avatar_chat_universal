@@ -93,9 +93,38 @@ for the session.
 
 ### 4. Reload SCFG and test
 
-`bbs.menu('xtrn_sec')` or whatever menu hosts the door. The door inherits
-its avatar/data path from `-data` (default: `<bin dir>/data`); make sure
-that directory is writable by the user Synchronet runs as.
+`bbs.menu('xtrn_sec')` or whatever menu hosts the door.
+
+### 5. Avatars and handle colours are the user's real BBS ones
+
+On Synchronet the door uses each caller's existing Synchronet avatar, so
+nobody is asked to pick one they already have, and a change made in the door
+(`/avatar`, `/settings`) is their BBS avatar everywhere on the system: the
+avatar menu, message headers, the shell, the website, and the avatar network
+export. Handle colours and the tag from `/settings` are the same record the
+futureland shell and website edit.
+
+| What          | File                                      | Written how                                                          |
+| ------------- | ----------------------------------------- | -------------------------------------------------------------------- |
+| Avatar        | `<data>/user/NNNN.ini`, `[avatar]` section | Only `data`, `disabled` and `updated` are rewritten (`created` added if missing). Every other line and section is kept byte for byte. |
+| Handle style  | `<data>/chat/nickstyle/NNNN.json`          | Same format as `mods/load/chat_style_lib.js`.                        |
+
+This turns on by itself (`avatar_store = auto`) when the drop file is a
+Synchronet DOOR32.SYS with a user number and the data dir resolves: from
+`synchronet_data_dir` or `-sbbs-data` if set, else `$SBBSCTRL/main.ini`
+`[dir] data`, else `$SBBSCTRL/../data/`. If something is missing the door
+writes one line to the node log saying why and falls back to its own store
+under `-data` (default `<bin dir>/data`). Set `avatar_store = synchronet` to
+make that a startup error instead, or `avatar_store = local` to keep the
+door's avatars private to the door. See [CONFIG.md](CONFIG.md#avatar-storage).
+
+The door must run as the user Synchronet runs as, so it can write
+`data/user/` and `data/chat/nickstyle/`. Set `bbs_id` too: on Synchronet the
+drop file's BBS line is the version notice, so without `bbs_id` the door
+falls back to the system name in `main.ini` and logs a warning.
+
+Long-running scripts that cached an avatar before the door changed it (the
+shell's chat avatar cache, for one) show the old one until they re-read.
 
 ---
 
@@ -380,6 +409,7 @@ A short checklist after first launch:
 | `-charset cp437\|utf8`    | (config value)                | Override `output_charset`.                                                              |
 | `-cols <n>`               | auto                          | Force terminal width. 0 = autodetect via CPR probe + drop-file fallback to 80.          |
 | `-rows <n>`               | auto                          | Same for height.                                                                        |
+| `-sbbs-data <dir>`        | (config value)                | Synchronet data dir for board-wide avatars and handle styles. Overrides `synchronet_data_dir` and detection. |
 | `-select`                 | `false`                       | Always show the avatar selector at launch, even if the user already picked one.         |
 | `-user <name>`            | (`$USER` or "guest")          | **Standalone mode only.** Username if no drop file.                                     |
 | `-bbs <name>`             | (`$HOSTNAME` or "standalone") | **Standalone mode only.** System name if no drop file.                                  |

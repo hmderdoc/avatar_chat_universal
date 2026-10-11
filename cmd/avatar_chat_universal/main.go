@@ -15,6 +15,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
 	"github.com/hmderdoc/avatar_chat_universal/internal/config"
 	"github.com/hmderdoc/avatar_chat_universal/internal/dropfile"
+	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
 	"github.com/hmderdoc/avatar_chat_universal/internal/termio"
 	"github.com/hmderdoc/avatar_chat_universal/internal/theme"
 	"github.com/hmderdoc/avatar_chat_universal/internal/ui"
@@ -42,6 +43,7 @@ func run() error {
 		rowsFlag       = flag.Int("rows", 0, "screen rows; 0 = auto-detect via terminal query, fall back to 24")
 		userFlag       = flag.String("user", "", "username (standalone mode only; defaults to $USER)")
 		bbsFlag        = flag.String("bbs", "", "BBS / system name to advertise (standalone mode only; defaults to hostname)")
+		sbbsDataFlag   = flag.String("sbbs-data", "", "Synchronet data dir for board-wide avatars and handle styles (overrides synchronet_data_dir and detection)")
 	)
 	flag.Parse()
 
@@ -126,7 +128,21 @@ func run() error {
 	input := ansi.NewInput(inputSrc)
 
 	bbsID := resolveBBSID(*bbsFlag, cfg, user)
-	store := &avatar.Store{Root: *dataDir, BBSID: bbsID}
+
+	// Where the avatar and handle style live: on Synchronet, the user's
+	// real board-wide records; elsewhere, the door's own store.
+	sbbsDir := *sbbsDataFlag
+	if sbbsDir == "" {
+		sbbsDir = cfg.SynchronetDataDir
+	}
+	store, boardWide, err := selectBackend(cfg.AvatarStore, sbbsDir, user,
+		&avatar.Store{Root: *dataDir, BBSID: bbsID})
+	if err != nil {
+		return err
+	}
+	if boardWide && *bbsFlag == "" && cfg.BBSID == "" {
+		bbsID = synchronetBBSID(user)
+	}
 
 	// Stdio + local console = sysop running the door from a shell
 	// (standalone OR local-test with -dropfile). Modern desktop
@@ -172,13 +188,19 @@ func run() error {
 		fmt.Fprintf(conn, "warning: could not read avatar: %v\r\n", err)
 	}
 
-	needsSelect := *forceSelect || rec == nil || rec.Avatar == nil || rec.Disabled
+	// A stored "no avatar" (disabled) is a settled choice too; only a user
+	// who has never chosen gets the picker (or anyone, with -select).
+	needsSelect := *forceSelect || rec == nil || (rec.Avatar == nil && !rec.Disabled)
 	if needsSelect {
 		fmt.Fprintf(conn, "\r\nNo avatar yet -- let's pick one. Press any key to continue...\r\n")
+		if boardWide {
+			fmt.Fprintf(conn, "This becomes your BBS avatar, everywhere on this system.\r\n")
+		}
 		_, _, _ = input.Next(30 * time.Second)
 
 		sel := avatar.NewSelector(collections, conn, input, cols, rows)
 		sel.Charset = charset
+		sel.BoardWide = boardWide
 		action, picked, err := sel.Run()
 		if err != nil {
 			return fmt.Errorf("selector: %v", err)
@@ -200,7 +222,7 @@ func run() error {
 				rec = &avatar.Record{Avatar: a.Clone()}
 			}
 		case avatar.SelectorEditor:
-			a, eerr := runAvatarEditor(conn, input, cols, rows, charset, collections, nil)
+			a, eerr := runAvatarEditor(conn, input, cols, rows, charset, collections, nil, boardWide)
 			if eerr != nil || a == nil {
 				ansi.Reset(conn)
 				ansi.ClearScreen(conn)
@@ -225,6 +247,11 @@ func run() error {
 		}
 	}
 
+	style, err := store.ReadStyle(user.DisplayName())
+	if err != nil {
+		fmt.Fprintf(conn, "warning: could not read handle style: %v\r\n", err)
+	}
+
 	ansi.Reset(conn)
 	ansi.ClearScreen(conn)
 
@@ -240,6 +267,9 @@ func run() error {
 		Name:   user.DisplayName(),
 		Host:   bbsID,
 		Avatar: avatarB64,
+	}
+	if !style.IsEmpty() {
+		self.Style = style
 	}
 
 	client := chat.NewClient(addr)
@@ -311,6 +341,10 @@ func run() error {
 			app.ApplyTheme(t)
 		}
 	}
+	app.BoardWide = boardWide
+	app.OnStyleSave = func(st *nickstyle.Style) error {
+		return store.WriteStyle(user.DisplayName(), st)
+	}
 	app.OnAvatarSet = func(b64 string) error {
 		a, err := avatar.FromBase64(b64)
 		if err != nil {
@@ -324,6 +358,7 @@ func run() error {
 	app.OnAvatarPick = func() (string, string, error) {
 		sel := avatar.NewSelector(collections, conn, input, cols, rows)
 		sel.Charset = charset
+		sel.BoardWide = boardWide
 		action, picked, err := sel.Run()
 		if err != nil {
 			return "", "", err
@@ -359,7 +394,7 @@ func run() error {
 		if rec, _ := store.Read(user.DisplayName()); rec != nil && len(rec.Avatar) == avatar.Bytes {
 			baseline = rec.Avatar.Clone()
 		}
-		a, err := runAvatarEditor(conn, input, cols, rows, charset, collections, baseline)
+		a, err := runAvatarEditor(conn, input, cols, rows, charset, collections, baseline, boardWide)
 		if err != nil {
 			return "", err
 		}
@@ -436,9 +471,10 @@ func runAvatarUpload(conn termio.Conn, input *ansi.Input) (avatar.Avatar, error)
 // (pass nil for a blank canvas). Returns the saved avatar on EditorSaved,
 // or (nil, nil) if the user cancelled without saving. Used by both the
 // pre-chat selector and the in-chat /avatar (manager) flow.
-func runAvatarEditor(conn termio.Conn, input *ansi.Input, cols, rows int, charset ansi.Charset, collections []*avatar.Collection, baseline avatar.Avatar) (avatar.Avatar, error) {
+func runAvatarEditor(conn termio.Conn, input *ansi.Input, cols, rows int, charset ansi.Charset, collections []*avatar.Collection, baseline avatar.Avatar, boardWide bool) (avatar.Avatar, error) {
 	ed := avatar.NewEditor(conn, input, cols, rows, baseline, collections)
 	ed.Charset = charset
+	ed.BoardWide = boardWide
 	action, result, err := ed.Run()
 	if err != nil {
 		return nil, err

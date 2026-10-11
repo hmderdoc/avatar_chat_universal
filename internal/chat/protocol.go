@@ -16,7 +16,11 @@
 //    "location":...,"oper":...,"data":...}
 package chat
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
+)
 
 // Lock values (json-client.js:36-38).
 const (
@@ -43,11 +47,16 @@ type Packet struct {
 // Nick identifies a chat sender. The Avatar field is the base64-encoded
 // 120-byte avatar payload — the universal door always populates this so the
 // JS door's avatar_chat renders our messages with a portrait.
+//
+// Style is the sender's handle style ({colors, tag}), carried verbatim the
+// way the Synchronet shell and website send it; nil when the sender has none.
+// Decoding normalizes it, so a malformed style never drops the message.
 type Nick struct {
-	Name   string `json:"name"`
-	Host   string `json:"host,omitempty"`
-	IP     string `json:"ip,omitempty"`
-	Avatar string `json:"avatar,omitempty"`
+	Name   string           `json:"name"`
+	Host   string           `json:"host,omitempty"`
+	IP     string           `json:"ip,omitempty"`
+	Avatar string           `json:"avatar,omitempty"`
+	Style  *nickstyle.Style `json:"style,omitempty"`
 }
 
 // Message is the chat envelope. Time is unix milliseconds.

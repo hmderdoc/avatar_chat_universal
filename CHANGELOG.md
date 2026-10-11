@@ -7,6 +7,35 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ## [Unreleased]
 
+### Added
+
+- **Synchronet users keep their own avatar.** On Synchronet the door now
+  reads and writes the caller's real BBS avatar (`data/user/NNNN.ini`), so
+  nobody is asked to pick an avatar they already have, and a change made in
+  the door is their avatar everywhere on the system and in the network
+  export. Only the avatar lines are rewritten; the rest of the file is kept
+  byte for byte. Turns on by itself (`avatar_store = auto`); see
+  `avatar_store`, `synchronet_data_dir` and `-sbbs-data`. Mystic, ENiGMA and
+  standalone keep the door's own store.
+- **Handle styles.** Names now show in their owner's colours (one per
+  letter) with an optional tag, the same `nick.style` the futureland shell
+  and website send. 16-colour terminals get each colour's perceptually
+  nearest CGA colour; truecolor terminals get it exactly. The door sends
+  your own style on every message.
+- **`/settings` panel** (`/prefs`, `/options`, and a pill in the top bar):
+  avatar actions plus a handle editor with per-letter colours, Solid /
+  Gradient / Rainbow / Clear presets and a tag. On Synchronet it edits the
+  shared `data/chat/nickstyle/NNNN.json` record.
+
+### Changed
+
+- A disabled avatar ("no avatar") is now a settled choice: the picker no
+  longer opens at every launch for it. `-select` still forces it.
+- In Synchronet mode without `bbs_id`, the host label is the system name
+  from `main.ini` instead of Synchronet's version string, with a warning.
+- The top action bar shows `/settings` in place of `/avatar` (which still
+  works when typed).
+
 ## [0.2.2] - 2026-05-28
 
 ### Fixed

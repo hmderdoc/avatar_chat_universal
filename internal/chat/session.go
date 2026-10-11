@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/bitmap"
+	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
 )
 
 // BitmapEntry is one received-image record. Stored separately from the
@@ -40,6 +41,7 @@ type Session struct {
 	messages    []*Message
 	avatarCache map[string]string // lowercase nick -> base64 avatar
 	hostCache   map[string]string // lowercase nick -> bbs/system name
+	styleCache  map[string]*nickstyle.Style // lowercase nick -> last handle style seen
 	nickNames   map[string]string // lowercase nick -> original casing
 
 	bitmapQueue    []*BitmapEntry
@@ -61,6 +63,7 @@ func NewSession(client *Client, self *Nick, channel string) *Session {
 		MaxBuffer:      500,
 		avatarCache:    map[string]string{},
 		hostCache:      map[string]string{},
+		styleCache:     map[string]*nickstyle.Style{},
 		nickNames:      map[string]string{},
 		bitmapMaxQueue: 20,
 	}
@@ -283,7 +286,21 @@ func (s *Session) rememberNick(n *Nick) {
 	if n.Host != "" {
 		s.hostCache[key] = n.Host
 	}
+	// Every message carries the sender's current style (or none), so the
+	// latest one wins, including a style that was cleared.
+	s.styleCache[key] = n.Style
 	s.mu.Unlock()
+}
+
+// StyleFor returns the handle style last seen on a message from nick (our
+// own from Self), or nil. Used by the roster modal.
+func (s *Session) StyleFor(nick string) *nickstyle.Style {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Self != nil && strings.EqualFold(nick, s.Self.Name) {
+		return s.Self.Style
+	}
+	return s.styleCache[strings.ToLower(nick)]
 }
 
 // Connect dials the server, subscribes to the configured channel, and loads

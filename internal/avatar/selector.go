@@ -39,6 +39,10 @@ type Selector struct {
 
 	Charset ansi.Charset // emitted via the underlying Frame at Run time
 
+	// BoardWide says the pick is the user's real BBS avatar (Synchronet
+	// mode), not one private to this door; the title bar says so.
+	BoardWide bool
+
 	collIdx int // selected collection
 	avIdx   int // avatar index within selected collection
 
@@ -269,8 +273,12 @@ func (s *Selector) draw() {
 	// Row 0: title bar (full width). Combines product name + collection
 	// summary so the active collection is unambiguously visible.
 	fillRow(s.frame, 0, s.width, titleAttr)
-	title := fmt.Sprintf(" Avatar Chat   collection: %s  (%d avatars)  page %d/%d  #%d ",
-		col.Name, len(col.Avatars), page+1, totalPages, s.avIdx+1)
+	product := "Avatar Chat"
+	if s.BoardWide {
+		product = "Your BBS avatar (board-wide)"
+	}
+	title := fmt.Sprintf(" %s   collection: %s  (%d avatars)  page %d/%d  #%d ",
+		product, col.Name, len(col.Avatars), page+1, totalPages, s.avIdx+1)
 	if len(title) > s.width-2 {
 		title = title[:s.width-2]
 	}

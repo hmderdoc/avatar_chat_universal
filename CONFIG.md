@@ -70,9 +70,23 @@ changes.
 
 ## BBS identity (avatar persistence)
 
-Per-user avatar INIs are stored under
+With the door's own store, per-user avatar INIs are stored under
 `<data-dir>/users/<bbs_id>/<username-lowercased>.ini`. Set `bbs_id` to a
 stable slug so avatar files don't move when the BBS is renamed.
+
+---
+
+## Avatar storage
+
+| Key                   | Default | Notes |
+| --------------------- | ------- | ----- |
+| `avatar_store`        | `auto`  | `auto`: on Synchronet (DOOR32.SYS from Synchronet with a user number, data dir found) use the caller's real Synchronet avatar and handle style; anywhere else use the door's own store. Falls back to the door's store with a one-line log message if detection fails. `synchronet`: always use Synchronet's records; failing to find them is a startup error. `local`: always use the door's own store. |
+| `synchronet_data_dir` | (empty) | Synchronet's data dir. Empty means detect it from `$SBBSCTRL/main.ini` `[dir] data`, then `$SBBSCTRL/../data/`. The `-sbbs-data` flag overrides this. |
+
+In Synchronet mode the avatar is the `[avatar]` section of
+`<data>/user/NNNN.ini` and the handle style is
+`<data>/chat/nickstyle/NNNN.json`, both shared with the rest of the BBS. See
+[AVATARS.md](AVATARS.md#storage).
 
 ---
 
@@ -172,6 +186,7 @@ also the on-screen action bars and `/help`.
 | `/avatar set <base64>`        | Power-user: set your avatar from a base64 120-byte payload.                   |
 | `/avatar off`                 | Disable your avatar without losing it (re-enable by picking again).           |
 | `/avatar pick`                | Open the selector directly.                                                   |
+| `/settings` / `/prefs` / `/options` | Settings panel: avatar (pick, draw, upload, disable) and handle style (a colour per letter, presets, a tag). On Synchronet these are the user's BBS-wide records. |
 
 ---
 
@@ -197,9 +212,12 @@ pills along the bottom of the selector.
 <data-dir>/                                     -- override with -data
 ├── users/
 │   └── <bbs_id>/
-│       └── <username>.ini                      -- per-user avatar
+│       └── <username>.ini                      -- per-user [avatar] and [style]
 └── (currently nothing else; future: history caches, prefs)
 ```
+
+In Synchronet mode (`avatar_store`) the door writes nothing here; it uses
+`<sbbs data>/user/NNNN.ini` and `<sbbs data>/chat/nickstyle/NNNN.json`.
 
 `<bbs_id>` is the resolved BBS slug — config `bbs_id` if set, else
 drop-file BBSID, else `slug(SystemName-Sysop)`.

@@ -65,6 +65,33 @@ For our purposes we just want the boundary, not the metadata.
 
 ## Storage
 
+The door has two backends, picked by `avatar_store` (see
+[CONFIG.md](CONFIG.md#avatar-storage)).
+
+### Synchronet: the user's real avatar
+
+On Synchronet the avatar is the user's own BBS avatar, in the `[avatar]`
+section of `<data>/user/NNNN.ini` (the file `avatar_lib.js` uses; `NNNN` is
+the user number from DOOR32.SYS). The door reads it at launch, so a user who
+already has an avatar goes straight to chat. When they change it in the door,
+only the `data`, `disabled` and `updated` lines are rewritten (and `created`
+added if it was missing), keeping each line's own style; everything else in
+the file, including `export_count`, `last_exported` and other mods'
+sections, is kept byte for byte. `updated` is written in Synchronet's own
+format and local time, so the avatar exporter sees the change and sends it
+to the network. The write is a temp file plus rename.
+
+Synchronet's avatar exporter also writes this file (it updates
+`export_count` and `last_exported` in place). If it writes in the same
+instant the door replaces the file, one of the two changes is lost. That is
+rare and harmless: the next avatar change, or the next export, corrects it.
+
+The handle style (per-letter colours and a tag) is
+`<data>/chat/nickstyle/NNNN.json`, shared with the futureland shell and
+website through `mods/load/chat_style_lib.js`.
+
+### Everywhere else: the door's own store
+
 Per-user avatars live in:
 
 ```
@@ -83,7 +110,20 @@ updated  = 2026-05-04T12:34:56Z
 
 `disabled = true` keeps the data around but tells the door not to attach
 the avatar to outgoing messages. Use this for the `/avatar off` flow so
-the user can re-enable later by picking again.
+the user can re-enable later by picking again. A disabled avatar is a
+settled choice: the door no longer opens the picker at launch for it
+(`-select` still does). `data` may be empty when the user chose "no avatar"
+without ever picking one.
+
+Once a handle style is set the same file gains a `[style]` section:
+
+```ini
+[style]
+colors   = #ff4747,,#00ff00
+tag_text = sysop
+tag_fg   = #ffff55
+tag_bg   =
+```
 
 ---
 
@@ -137,7 +177,8 @@ twice (once "bundled", once with your filename).
 
 ## How a user picks an avatar
 
-Three paths in the door:
+Three paths in the door, all reachable from `/avatar` or from the
+`/settings` panel (which also edits the handle colours and tag):
 
 ### 1. Library picker (`/avatar`)
 

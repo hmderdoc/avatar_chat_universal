@@ -7,6 +7,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
+	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
 )
 
 // rosterEntry holds the data we need to render one user in the roster
@@ -16,6 +17,7 @@ type rosterEntry struct {
 	Name   string
 	Host   string
 	Avatar avatar.Avatar
+	Style  *nickstyle.Style
 }
 
 // RosterModal is the "Who's Here" overlay. List of users on the left, the
@@ -27,6 +29,9 @@ type RosterModal struct {
 	entries  []rosterEntry
 	selected int
 	closed   bool
+
+	// Truecolor paints handle styles in 24-bit (else nearest of 16).
+	Truecolor bool
 }
 
 // NewRosterModal builds a modal from the WHO results plus the session's
@@ -66,6 +71,7 @@ func NewRosterModal(frame *ansi.Frame, names []string, sess *chat.Session) *Rost
 			Name:   n,
 			Host:   sess.HostFor(n),
 			Avatar: a,
+			Style:  sess.StyleFor(n),
 		})
 	}
 	return &RosterModal{Frame: frame, entries: entries}
@@ -163,10 +169,14 @@ func (m *RosterModal) Render() {
 			attr = selAttr
 			marker = ">"
 		}
-		// Pad full row width so highlight extends.
+		// Pad full row width so highlight extends, then paint the name in
+		// its handle style (the selected row keeps the highlight colours).
 		line := marker + " " + truncate(entry.Name, listW-4)
 		line = padRight(line, listW)
 		f.PrintAt(1, row, []byte(line), attr)
+		if idx != m.selected {
+			paintHandle(f, 3, row, truncate(entry.Name, listW-4), entry.Style, attr, listW-3, m.Truecolor)
+		}
 	}
 
 	// Vertical separator.
@@ -187,7 +197,8 @@ func (m *RosterModal) Render() {
 		if labelW < 4 {
 			labelW = 4
 		}
-		writeClipped(f, nameX, 2, "Nick: ", entry.Name, labelAttr, ansi.White|ansi.BgBlack, labelW)
+		writeClipped(f, nameX, 2, "Nick: ", "", labelAttr, ansi.White|ansi.BgBlack, labelW)
+		paintHandle(f, nameX+6, 2, entry.Name, entry.Style, ansi.White|ansi.BgBlack, labelW-6, m.Truecolor)
 		if entry.Host != "" {
 			writeClipped(f, nameX, 4, "BBS:  ", entry.Host, labelAttr, ansi.White|ansi.BgBlack, labelW)
 		}

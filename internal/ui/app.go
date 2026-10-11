@@ -14,6 +14,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
 	"github.com/hmderdoc/avatar_chat_universal/internal/idle"
+	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
 	"github.com/hmderdoc/avatar_chat_universal/internal/telnetvision"
 	"github.com/hmderdoc/avatar_chat_universal/internal/theme"
 )
@@ -50,6 +51,17 @@ type App struct {
 	// OnAvatarEditor opens the in-door drawing UI. Returns the new
 	// avatar's base64 on save; empty string + nil error on cancel.
 	OnAvatarEditor func() (b64 string, err error)
+	// OnStyleSave persists the user's handle style from /settings (an
+	// empty style clears it). On success the App puts it on Session.Self
+	// so it rides on the next message.
+	OnStyleSave func(style *nickstyle.Style) error
+
+	// BoardWide is set when avatars and handle styles are the user's real
+	// BBS records (Synchronet mode); /settings and /avatar help say so.
+	BoardWide bool
+	// pendingStyle carries unsaved /settings handle edits across an avatar
+	// action (picker, editor, upload) and back into the panel.
+	pendingStyle *nickstyle.Style
 
 	// PollInterval is how often we drain the session and re-render. 25ms
 	// matches the JS door's poll_delay_ms default.
@@ -886,6 +898,9 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 	case "/avatar":
 		a.handleAvatarCmd(parts)
 		return false, true
+	case "/settings", "/prefs", "/options":
+		a.openSettings()
+		return false, true
 	case "/tvtuner":
 		a.handleTunerCmd(parts)
 		return false, true
@@ -922,7 +937,12 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		a.toggleTVColor()
 		return false, true
 	case "/help", "/?":
-		a.Session.Notice("/me /msg /r /join /part /who /img /channels /clear /avatar /quit")
+		a.Session.Notice("/me /msg /r /join /part /who /img /channels /clear /avatar /settings /quit")
+		if a.BoardWide {
+			a.Session.Notice("/avatar and /settings change your BBS avatar and handle style everywhere on this system")
+		} else {
+			a.Session.Notice("/settings (/prefs): avatar, handle colours and tag in one panel")
+		}
 		a.Session.Notice("TV: /tvtuner <host> <port> <channel> | /tvtuner off | /tvon | /tvoff")
 		a.Session.Notice("TV: PgUp=history (PgDn/Down or 30s closes) | /tvcolor or Ctrl-T = truecolor/16")
 		return false, true
@@ -1084,11 +1104,17 @@ func (a *App) tryReconnect(ctx context.Context, st *reconnectState) {
 // conn for the duration; we route the user's choice to the appropriate
 // store mutation and then force a full redraw.
 func (a *App) openAvatarManager() {
-	if a.OnAvatarPick == nil {
+	a.applyAvatarAction(a.OnAvatarPick)
+}
+
+// applyAvatarAction runs pick (the selector, or a fixed action from
+// /settings) and carries out what it returns.
+func (a *App) applyAvatarAction(pick func() (string, string, error)) {
+	if pick == nil {
 		a.Session.Notice("/avatar: not wired")
 		return
 	}
-	b64, action, err := a.OnAvatarPick()
+	b64, action, err := pick()
 	a.forceFullRedraw()
 	if err != nil {
 		a.Session.Notice(fmt.Sprintf("/avatar: %v", err))
@@ -1195,6 +1221,13 @@ func (a *App) confirmUpload() bool {
 		{"", 0},
 		{" [Enter] start upload     [Esc] cancel", ansi.Yellow | ansi.BgBlue},
 	}
+	if a.BoardWide {
+		// The spare row above the keys: say what the upload changes.
+		lines[8] = struct {
+			text string
+			attr ansi.Attr
+		}{" It becomes your BBS avatar, everywhere here.", ansi.LightGreen | ansi.BgBlue}
+	}
 	for i, ln := range lines {
 		if ln.text == "" {
 			continue
@@ -1235,6 +1268,7 @@ func (a *App) openRoster(users []string) {
 	a.modalFrame = ansi.NewFrame(0, 0, a.Width, usable, ansi.LightGray|ansi.BgBlack)
 	a.modalFrame.Charset = a.Charset
 	a.modal = NewRosterModal(a.modalFrame, users, a.Session)
+	a.modal.Truecolor = a.tvColorTrue()
 	_ = ansi.ClearScreen(a.Conn)
 	a.dirty = true
 }
@@ -1384,6 +1418,7 @@ func (a *App) draw() {
 		// Always render the transcript: the bg-anim layer shows through any
 		// transparent cells in the transcript (gutters between bubbles), so
 		// chat stays visible while idle animations play behind it.
+		a.transcript.Truecolor = a.tvColorTrue()
 		a.transcript.Render(a.Session.Messages())
 		a.bottomActionBar.Render()
 	}
@@ -1441,7 +1476,8 @@ func (a *App) refreshActionBar() {
 		{Label: "/who"},
 		imgBtn,
 		{Label: "/channels"},
-		{Label: "/avatar"},
+		// /settings covers the avatar too; /avatar still works typed.
+		{Label: "/settings"},
 		{Label: "/help"},
 		{Label: "Tab user"},
 		{Label: "Esc exit"},

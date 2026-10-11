@@ -8,6 +8,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
+	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
 	"github.com/hmderdoc/avatar_chat_universal/internal/theme"
 )
 
@@ -28,6 +29,10 @@ type Transcript struct {
 	// Theme drives bubble + header colors. Required; the App fills this
 	// from its loaded theme.
 	Theme *theme.Theme
+
+	// Truecolor paints handle styles in 24-bit; otherwise each colour is
+	// mapped to its nearest of the 16. The App sets it from the probe.
+	Truecolor bool
 }
 
 func NewTranscript(f *ansi.Frame, selfName string) *Transcript {
@@ -53,6 +58,7 @@ type block struct {
 	private bool // PM — render with red bubble background
 	left    bool // own message → right; others → left
 	speaker string
+	style   *nickstyle.Style // speaker's handle style (nil = theme colour)
 	stamp   string
 	host    string   // BBS / system name from Nick.Host, rendered after stamp
 	rows    []string // wrapped lines of text
@@ -178,6 +184,7 @@ func (t *Transcript) buildBlocks(messages []*chat.Message, bubbleW int) []*block
 		if n := len(out); n > 0 && !out[n-1].notice && out[n-1].left == left && out[n-1].private == msg.Private && strings.EqualFold(out[n-1].speaker, msg.Nick.Name) {
 			prev := out[n-1]
 			prev.stamp = stamp
+			prev.style = msg.Nick.Style
 			prev.rows = append(prev.rows, "")
 			prev.rows = append(prev.rows, wrapText(msg.Str, bubbleW)...)
 			continue
@@ -187,6 +194,7 @@ func (t *Transcript) buildBlocks(messages []*chat.Message, bubbleW int) []*block
 			left:    left,
 			private: msg.Private,
 			speaker: msg.Nick.Name,
+			style:   msg.Nick.Style,
 			stamp:   stamp,
 			host:    msg.Nick.Host,
 			rows:    wrapText(msg.Str, bubbleW),
@@ -239,9 +247,8 @@ func (t *Transcript) renderBlock(b *block, y int) {
 	if !b.left {
 		speakerAttr = th.SpeakerSelf
 	}
-	header := []byte(b.speaker)
-	t.Frame.PrintAt(bubbleX, y, header, speakerAttr)
-	stampX := bubbleX + len(header) + 1
+	headerW := paintHandle(t.Frame, bubbleX, y, b.speaker, b.style, speakerAttr, t.Frame.W-bubbleX, t.Truecolor)
+	stampX := bubbleX + headerW + 1
 	t.Frame.PrintAt(stampX, y, []byte(b.stamp), timeAttr)
 	if b.host != "" {
 		hostX := stampX + len(b.stamp) + 2

@@ -33,6 +33,10 @@ type Editor struct {
 	width, height int
 	Charset       ansi.Charset
 
+	// BoardWide says saving changes the user's real BBS avatar
+	// (Synchronet mode); the tip line says so.
+	BoardWide bool
+
 	// canvas is the 120-byte avatar being edited.
 	canvas Avatar
 
@@ -226,6 +230,9 @@ func (e *Editor) draw() {
 	// Honesty: this editor is rough. Most folks will have a better time
 	// drawing in Moebius / Pablo Draw and using /avatar -> Upload.
 	tip := "tip: Moebius/Pablo Draw + Upload may be smoother"
+	if e.BoardWide {
+		tip = "saving changes your BBS avatar everywhere on this system"
+	}
 	if len(tip) < e.frame.W-4 {
 		e.frame.PrintAt(2, 1, []byte(tip), ansi.Yellow|ansi.BgBlack)
 	}

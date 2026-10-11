@@ -9,6 +9,14 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Added
 
+- **Ignore list in the door.** `/ignore <name>` hides someone's lines,
+  art, private messages and join/leave notices (live, from history and in
+  other joined rooms' unread counts) and stops them ringing; `/ignore`
+  lists, `/unignore` undoes. Kept per user in the door's prefs. On
+  Synchronet, `shared_ignore_file` also honours a shell's ignore list
+  read-only, so people ignored in the futureland shell or website are
+  hidden in the door too. Matching follows the shell: case-insensitive,
+  everywhere or local-chat entries, bridge-relayed `<name>` lines.
 - **Web chat in `avatar_chat_server`.** One listener (`web_addr`; the
   older `ws_addr` still works) serves the standalone page from
   `web/standalone`, the WebSocket at `/chat`, `/config.json`, `/img` and

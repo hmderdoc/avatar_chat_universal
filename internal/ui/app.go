@@ -16,6 +16,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/canvas"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
 	"github.com/hmderdoc/avatar_chat_universal/internal/idle"
+	"github.com/hmderdoc/avatar_chat_universal/internal/ignore"
 	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
 	"github.com/hmderdoc/avatar_chat_universal/internal/telnetvision"
 	"github.com/hmderdoc/avatar_chat_universal/internal/theme"
@@ -65,6 +66,10 @@ type App struct {
 	// empty style clears it). On success the App puts it on Session.Self
 	// so it rides on the next message.
 	OnStyleSave func(style *nickstyle.Style) error
+
+	// Ignores is the user's ignore list (/ignore, ignore.go); the Session's
+	// Ignore hook should use it too. Nil disables the commands.
+	Ignores *ignore.List
 
 	// Mouse asks the terminal for mouse reports when Run starts (see
 	// mouse.go); OnMouseSave stores a user's /mouse choice. ResizeEvery is
@@ -337,7 +342,7 @@ func (a *App) layout() {
 		if a.loungeActive() {
 			a.addPopup(m)
 		}
-		if a.fromOther(m) {
+		if a.fromOther(m) && !a.muted(m) {
 			if m.Private {
 				a.unreadPM++
 				a.ring()
@@ -350,7 +355,7 @@ func (a *App) layout() {
 	// /channels badge; a mention there still rings.
 	a.Session.OnBackground = func(_ string, m *chat.Message) {
 		a.dirty = true
-		if chat.MentionsName(m.Str, a.selfName()) {
+		if chat.MentionsName(m.Str, a.selfName()) && !a.muted(m) {
 			a.ring()
 		}
 	}
@@ -1064,6 +1069,12 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 	case "/mouse":
 		a.handleMouseCmd(parts[1:])
 		return false, true
+	case "/ignore":
+		a.handleIgnore(parts[1:])
+		return false, true
+	case "/unignore":
+		a.handleUnignore(parts[1:])
+		return false, true
 	case "/theme", "/themes":
 		a.handleTheme(parts[1:])
 		return false, true
@@ -1145,11 +1156,12 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		a.handleDraw(parts[1:])
 		return false, true
 	case "/help", "/?":
-		a.Session.Notice("/me /msg /r /join /part /who /img /channels /clear /avatar /settings /theme /draw /quit")
+		a.Session.Notice("/me /msg /r /join /part /who /img /channels /clear /avatar /settings /theme /draw /ignore /quit")
 		if a.UserThemes {
 			a.Session.Notice("/theme lists the colour themes; /theme <name> switches and remembers it")
 		}
 		a.Session.Notice("/mouse on|off: wheel scrolls; click pills, names, pictures and /play lines")
+		a.Session.Notice("/ignore <name> hides someone's lines; /ignore lists; /unignore <name> undoes it")
 		a.Session.Notice("/join keeps the old channel joined (unread counts in /channels); /part leaves it")
 		if a.BoardWide {
 			a.Session.Notice("/avatar and /settings change your BBS avatar and handle style everywhere on this system")

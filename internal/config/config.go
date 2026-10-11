@@ -107,6 +107,10 @@ type Config struct {
 	AvatarStore       string // "auto" (default), "synchronet" or "local"
 	SynchronetDataDir string // explicit Synchronet data dir; overrides detection
 
+	// SharedIgnoreFile is a shell's per-user prefs JSON whose ignore lists
+	// the door also honours, read-only (Synchronet only). See CONFIG.md.
+	SharedIgnoreFile string
+
 	Raw map[string]string
 }
 
@@ -319,6 +323,8 @@ func Load(path string) (*Config, error) {
 			}
 		case "synchronet_data_dir":
 			cfg.SynchronetDataDir = val
+		case "shared_ignore_file":
+			cfg.SharedIgnoreFile = val
 		}
 	}
 	if err := scanner.Err(); err != nil {

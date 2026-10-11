@@ -19,6 +19,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/chatmedia"
 	"github.com/hmderdoc/avatar_chat_universal/internal/config"
 	"github.com/hmderdoc/avatar_chat_universal/internal/dropfile"
+	"github.com/hmderdoc/avatar_chat_universal/internal/ignore"
 	"github.com/hmderdoc/avatar_chat_universal/internal/inlineimg"
 	"github.com/hmderdoc/avatar_chat_universal/internal/linkprev"
 	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
@@ -306,6 +307,16 @@ func run() error {
 	if cfg.MotdChannel != "" {
 		session.MotdChannel = cfg.MotdChannel
 	}
+	userPrefs := &prefs.Store{Root: *dataDir, BBSID: bbsID}
+	ignores := &ignore.List{
+		Load: func() string { return userPrefs.Get(user.DisplayName(), "ignore") },
+		Save: func(v string) error { return userPrefs.Set(user.DisplayName(), "ignore", v) },
+	}
+	if boardWide && cfg.SharedIgnoreFile != "" && user.UserRecord > 0 {
+		ignores.SharedPath = cfg.SharedIgnoreFile
+		ignores.SharedUser = fmt.Sprintf("user-%d", user.UserRecord)
+	}
+	session.Ignore = ignores.Hidden
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -389,7 +400,7 @@ func run() error {
 	app.SysopTheme = sysTheme
 	app.UserThemes = cfg.UserThemes
 	app.ApplyTheme(sysTheme)
-	userPrefs := &prefs.Store{Root: *dataDir, BBSID: bbsID}
+	app.Ignores = ignores
 	if cfg.UserThemes {
 		if pick := userPrefs.Get(user.DisplayName(), "theme"); pick != "" && pick != sysTheme.Name {
 			// A theme the sysop has since removed just leaves the default.

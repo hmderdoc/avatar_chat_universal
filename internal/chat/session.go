@@ -40,6 +40,10 @@ type Session struct {
 	// other than the one being viewed. The message is counted as unread for
 	// that channel and is NOT added to the transcript.
 	OnBackground func(channel string, m *Message)
+	// Ignore, when set, reports whether a line from sender (with body
+	// text) is from someone the user ignores. Such lines, their art and
+	// their join/leave notices are dropped, live and from history.
+	Ignore func(sender, text string) bool
 
 	mu          sync.Mutex
 	messages    []*Message
@@ -80,6 +84,37 @@ func NewSession(client *Client, self *Nick, channel string) *Session {
 		joined:         []string{channel},
 		unread:         map[string]int{},
 	}
+}
+
+// ignored reports whether m is from someone the user ignores.
+func (s *Session) ignored(m *Message) bool {
+	if s.Ignore == nil || m == nil || m.Nick == nil || s.isSelfName(m.Nick.Name) {
+		return false
+	}
+	return s.Ignore(m.Nick.Name, m.Str)
+}
+
+// Refilter drops already-shown lines from anyone now ignored, after the
+// list changed.
+func (s *Session) Refilter() {
+	if s.Ignore == nil {
+		return
+	}
+	s.mu.Lock()
+	kept := s.messages[:0]
+	for _, m := range s.messages {
+		if m.Nick != nil && !s.isSelfName(m.Nick.Name) && s.Ignore(m.Nick.Name, m.Str) {
+			continue
+		}
+		kept = append(kept, m)
+	}
+	s.messages = kept
+	s.mu.Unlock()
+}
+
+// ignoredName is ignored for a bare handle (join/leave notices).
+func (s *Session) ignoredName(name string) bool {
+	return s.Ignore != nil && s.Ignore(name, "")
 }
 
 // HasActiveEffect reports whether any recent notice has a sweep effect
@@ -346,6 +381,9 @@ func (s *Session) Connect(ctx context.Context, historyCount int) error {
 					continue
 				}
 				s.rememberNick(m.Nick)
+				if s.ignored(m) {
+					continue
+				}
 				// A tuner marker in history sets the room's current TV state
 				// quietly (last one wins), so joining a tuned room enters the
 				// lounge without replaying old tune/off notices.
@@ -632,6 +670,9 @@ func (s *Session) handleUpdate(pkt *Packet) {
 			}
 		}
 		s.rememberNick(msg.Nick)
+		if s.ignored(&msg) {
+			return
+		}
 
 		// TVTUNER control markers: apply (enter/exit lounge) + notice, and
 		// suppress the raw marker from the transcript.
@@ -676,7 +717,9 @@ func (s *Session) handleUpdate(pkt *Packet) {
 		if info.Nick != "" && !s.isSelfName(info.Nick) {
 			// \x02j marks this notice for the green-glow L→R sweep
 			// effect that the transcript renderer animates for ~2s.
-			s.appendNotice("\x02j" + info.Nick + " is here.")
+			if !s.ignoredName(info.Nick) {
+				s.appendNotice("\x02j" + info.Nick + " is here.")
+			}
 			s.mu.Lock()
 			s.userCount++
 			s.mu.Unlock()
@@ -686,7 +729,9 @@ func (s *Session) handleUpdate(pkt *Packet) {
 		_ = json.Unmarshal(pkt.Data, &info)
 		if info.Nick != "" && !s.isSelfName(info.Nick) {
 			// \x02l marks this for the red-glow R→L sweep effect.
-			s.appendNotice("\x02l" + info.Nick + " has left.")
+			if !s.ignoredName(info.Nick) {
+				s.appendNotice("\x02l" + info.Nick + " has left.")
+			}
 			s.mu.Lock()
 			if s.userCount > 0 {
 				s.userCount--
@@ -808,6 +853,9 @@ func (s *Session) JoinChannel(channel string, historyCount int) error {
 					continue
 				}
 				s.rememberNick(m.Nick)
+				if s.ignored(m) {
+					continue
+				}
 				if s.maybeTuner(m, false) {
 					continue
 				}
@@ -986,6 +1034,9 @@ func (s *Session) handleBackground(channel, leaf string, pkt *Packet) {
 		return
 	}
 	s.rememberNick(msg.Nick)
+	if s.ignored(&msg) {
+		return
+	}
 	s.mu.Lock()
 	s.unread[strings.ToLower(name)]++
 	s.mu.Unlock()

@@ -87,6 +87,7 @@ stable slug so avatar files don't move when the BBS is renamed.
 | --------------------- | ------- | ----- |
 | `avatar_store`        | `auto`  | `auto`: on Synchronet (DOOR32.SYS from Synchronet with a user number, data dir found) use the caller's real Synchronet avatar and handle style; anywhere else use the door's own store. Falls back to the door's store with a one-line log message if detection fails. `synchronet`: always use Synchronet's records; failing to find them is a startup error. `local`: always use the door's own store. |
 | `synchronet_data_dir` | (empty) | Synchronet's data dir. Empty means detect it from `$SBBSCTRL/main.ini` `[dir] data`, then `$SBBSCTRL/../data/`. The `-sbbs-data` flag overrides this. |
+| `shared_ignore_file`  | (empty) | Synchronet only. A shell's per-user prefs JSON (`users["user-N"].notifications.ignored`, the futureland shell's `shell_prefs.json`) whose ignore entries the door also honours, read-only: entries for everywhere or for the shell's `local` chat apply, MRC/IRC ones don't, and a notifications-only entry still shows the line but never rings. Re-read when the file changes. Use an absolute path. |
 
 In Synchronet mode the avatar is the `[avatar]` section of
 `<data>/user/NNNN.ini` and the handle style is
@@ -194,6 +195,7 @@ also the on-screen action bars and `/help`.
 | `/avatar off`                 | Disable your avatar without losing it (re-enable by picking again).           |
 | `/avatar pick`                | Open the selector directly.                                                   |
 | `/settings` / `/prefs` / `/options` | Settings panel: avatar (pick, draw, upload, disable) and handle style (a colour per letter, presets). On Synchronet these are the user's BBS-wide records. |
+| `/ignore [name]` / `/unignore <name>` | `/ignore` lists who you ignore; `/ignore <name>` hides their lines, art, private messages and join/leave notices, live and in history, and they never ring; `/unignore` undoes it. Kept per user in the door's prefs (`<data>/prefs/`). Names compare without case, and a bridge-relayed `<name> text` line counts. With `shared_ignore_file` set, people ignored in the shell are hidden too (change those there). |
 | `/theme [name\|default]`      | List the colour themes, switch (remembered per user), or go back to the sysop's. See THEMING.md. |
 | `/mouse [on\|off]`            | Turn mouse reporting on or off for yourself (remembered). See "Mouse". |
 | `/draw [WxH]` / `/art`        | ANSI art editor (default 80x25, up to 80x40). Ctrl-Y posts the art as a `[BITMAP]` message every client draws; see "Art editor". |

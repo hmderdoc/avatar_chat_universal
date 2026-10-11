@@ -139,7 +139,7 @@ Shipped inside the binary via `go:embed`, found at
 | `danger`                        | Misc.                                                                            |
 | `DIGDIST.startrek`              | Star Trek faces from DIGDIST.                                                    |
 | `ECBBS.animals` / `.emoji` / `.gaming` | ECBBS-curated sets.                                                       |
-| `FUTURELD.cyberpunks` / `.Eighties` / `.glitched` / `.misc` | futureland.today contributions.                       |
+| `FUTURELD.cyberpunks` / `.Eighties` / `.Nineties` / `.glitched` / `.misc` / `.humanoids` / `.other` | futureland.today contributions. |
 
 Updates: drop new `.bin` files into `internal/avatar/assets/avatars/`,
 rebuild the binary. They get embedded automatically at build time.

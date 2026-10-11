@@ -8,6 +8,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
 	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
+	"github.com/hmderdoc/avatar_chat_universal/internal/theme"
 )
 
 // rosterEntry holds the data we need to render one user in the roster
@@ -32,6 +33,8 @@ type RosterModal struct {
 
 	// Truecolor paints handle styles in 24-bit (else nearest of 16).
 	Truecolor bool
+
+	Theme *theme.Theme
 }
 
 // NewRosterModal builds a modal from the WHO results plus the session's
@@ -125,11 +128,13 @@ func (m *RosterModal) Render() {
 	f.Clear()
 
 	// Outer border.
-	titleAttr := ansi.Yellow | ansi.BgBlue
-	bgAttr := ansi.LightGray | ansi.BgBlack
-	listAttr := ansi.LightGray | ansi.BgBlack
-	selAttr := ansi.Black | ansi.BgCyan
-	labelAttr := ansi.LightCyan | ansi.BgBlack
+	th := orDefault(m.Theme)
+	titleAttr := th.ModalTitle
+	bgAttr := th.ModalBg
+	listAttr := th.ModalBg
+	selAttr := th.ModalSelect
+	labelAttr := th.ModalLabel
+	textAttr := th.ModalText
 
 	// Title row.
 	for x := 0; x < f.W; x++ {
@@ -197,10 +202,10 @@ func (m *RosterModal) Render() {
 		if labelW < 4 {
 			labelW = 4
 		}
-		writeClipped(f, nameX, 2, "Nick: ", "", labelAttr, ansi.White|ansi.BgBlack, labelW)
-		paintHandle(f, nameX+6, 2, entry.Name, entry.Style, ansi.White|ansi.BgBlack, labelW-6, m.Truecolor)
+		writeClipped(f, nameX, 2, "Nick: ", "", labelAttr, textAttr, labelW)
+		paintHandle(f, nameX+6, 2, entry.Name, entry.Style, textAttr, labelW-6, m.Truecolor)
 		if entry.Host != "" {
-			writeClipped(f, nameX, 4, "BBS:  ", entry.Host, labelAttr, ansi.White|ansi.BgBlack, labelW)
+			writeClipped(f, nameX, 4, "BBS:  ", entry.Host, labelAttr, textAttr, labelW)
 		}
 	}
 
@@ -210,7 +215,7 @@ func (m *RosterModal) Render() {
 	if hx < 1 {
 		hx = 1
 	}
-	f.PrintAt(hx, f.H-1, []byte(help), ansi.Yellow|ansi.BgBlack)
+	f.PrintAt(hx, f.H-1, []byte(help), th.ModalHint)
 }
 
 func truncate(s string, w int) string {

@@ -7,6 +7,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
+	"github.com/hmderdoc/avatar_chat_universal/internal/theme"
 )
 
 // The /settings panel: the user's avatar (routed to the existing selector,
@@ -82,6 +83,11 @@ type settingsPanel struct {
 	cursor  int
 	status  string
 	changed bool
+
+	// theme is the pick shown (and previewed in the panel's own colours);
+	// it is applied and stored only on S.
+	theme        *theme.Theme
+	themeChanged bool
 }
 
 func newSettingsPanel(name string, style *nickstyle.Style) *settingsPanel {
@@ -133,11 +139,19 @@ func (a *App) runSettings() settingsResult {
 			av = b
 		}
 	}
-	if a.pendingStyle != nil {
+	carried := a.pendingStyle != nil
+	if carried {
 		current = a.pendingStyle
 	}
 	p := newSettingsPanel(name, current)
-	defer func() { a.pendingStyle = nil }()
+	p.changed = carried
+	p.theme = a.theme()
+	if a.pendingTheme != nil {
+		p.theme = a.pendingTheme
+		p.themeChanged = p.theme.Name != a.themeName()
+	}
+	// Consumed here; keepAndGo sets them again on the way out.
+	a.pendingStyle, a.pendingTheme = nil, nil
 
 	for {
 		a.drawSettings(p, av)
@@ -174,6 +188,9 @@ func (a *App) runSettings() settingsResult {
 		keepAndGo := func(r settingsResult) settingsResult {
 			if p.changed {
 				a.pendingStyle = p.style()
+			}
+			if p.themeChanged {
+				a.pendingTheme = p.theme
 			}
 			return r
 		}
@@ -234,8 +251,32 @@ func (a *App) runSettings() settingsResult {
 				p.tag.Bg = cycleColor(p.tag.Bg, dir)
 				p.changed = true
 			}
+		case 'c', 'C':
+			if a.UserThemes {
+				dir := 1
+				if k.Rune == 'C' {
+					dir = -1
+				}
+				name := a.cycleTheme(p.theme.Name, dir)
+				if t, err := theme.LoadNamed(a.ThemeDir, name); err == nil {
+					p.theme = t
+					p.themeChanged = p.theme.Name != a.themeName()
+					p.status = ""
+				} else {
+					p.status = err.Error()
+				}
+			}
 		case 's', 'S':
-			a.saveStyle(p)
+			if p.changed {
+				a.saveStyle(p)
+			}
+			if p.themeChanged {
+				if err := a.SetUserTheme(p.theme.Name, true); err != nil {
+					a.Session.Notice(fmt.Sprintf("/settings: %v", err))
+				} else {
+					a.Session.Notice(fmt.Sprintf("\x01Gtheme: %s\x01n", a.themeName()))
+				}
+			}
 			return settingsClosed
 		}
 	}
@@ -324,28 +365,33 @@ func (a *App) drawSettings(p *settingsPanel, av avatar.Avatar) {
 	if y < 0 {
 		y = 0
 	}
-	bg := ansi.LightGray | ansi.BgBlack
-	hot := ansi.White | ansi.BgBlack
-	head := ansi.LightCyan | ansi.BgBlack
+	th := p.theme
+	if th == nil {
+		th = a.theme()
+	}
+	bg := th.ModalBg
+	hot := th.ModalText
+	head := th.ModalLabel
 	f := p.frame
 	if f == nil || f.X != x || f.Y != y || f.W != w || f.H != h {
 		f = ansi.NewFrame(x, y, w, h, bg)
 		f.Charset = a.Charset
 		p.frame = f
 	}
+	f.SetFill(bg)
 	f.Clear()
 	truecolor := a.tvColorTrue()
 
 	for i := 0; i < w; i++ {
-		f.SetCell(i, 0, ' ', ansi.Yellow|ansi.BgBlue)
+		f.SetCell(i, 0, ' ', th.ModalTitle)
 	}
-	f.PrintAt(1, 0, []byte(" Settings"), ansi.Yellow|ansi.BgBlue)
+	f.PrintAt(1, 0, []byte(" Settings"), th.ModalTitle)
 	closeHint := "[Esc] close "
-	f.PrintAt(w-len(closeHint), 0, []byte(closeHint), ansi.White|ansi.BgBlue)
+	f.PrintAt(w-len(closeHint), 0, []byte(closeHint), th.ModalClose)
 
 	rule := func(row int, label string) {
 		for i := 1; i < w-1; i++ {
-			f.SetCell(i, row, 0xC4, ansi.DarkGray|ansi.BgBlack) // CP437 ─
+			f.SetCell(i, row, 0xC4, th.ModalRule) // CP437 ─
 		}
 		if label != "" {
 			f.PrintAt(2, row, []byte(" "+label+" "), head)
@@ -356,7 +402,7 @@ func (a *App) drawSettings(p *settingsPanel, av avatar.Avatar) {
 	if av != nil {
 		av.RenderTo(f, 3, 2)
 	} else {
-		f.PrintAt(3, 4, []byte("(none)"), ansi.DarkGray|ansi.BgBlack)
+		f.PrintAt(3, 4, []byte("(none)"), th.ModalRule)
 	}
 	actions := [][2]string{
 		{"P", "Pick from library"},
@@ -376,7 +422,7 @@ func (a *App) drawSettings(p *settingsPanel, av avatar.Avatar) {
 		ch := p.name[i]
 		paintHandle(f, col, 9, string(ch), &nickstyle.Style{Colors: []string{p.colors[i]}}, bg, 1, truecolor)
 		if i == p.cursor {
-			f.SetCell(col, 10, '^', ansi.Yellow|ansi.BgBlack)
+			f.SetCell(col, 10, '^', th.ModalHint)
 		}
 		col += 2
 	}
@@ -385,7 +431,7 @@ func (a *App) drawSettings(p *settingsPanel, av avatar.Avatar) {
 		f.PrintAt(3, 11, []byte(truncate(info, w-4)), bg)
 	}
 	f.PrintAt(3, 12, []byte("Preview: "), bg)
-	paintHandle(f, 12, 12, p.name, p.style(), ansi.Yellow|ansi.BgBlack, w-14, truecolor)
+	paintHandle(f, 12, 12, p.name, p.style(), th.ModalHint, w-14, truecolor)
 	f.PrintAt(3, 13, []byte("Preset: "), bg)
 	presets := []string{"1 Solid", "2 Gradient (first->last)", "3 Rainbow", "4 Clear"}
 	px := 11
@@ -404,17 +450,22 @@ func (a *App) drawSettings(p *settingsPanel, av avatar.Avatar) {
 	tagLine := fmt.Sprintf("Tag: %-12s  T text  g/G fg %s  b/B bg %s", tagText, colorLabel(p.tag.Fg), colorLabel(p.tag.Bg))
 	f.PrintAt(3, 14, []byte(truncate(tagLine, w-4)), bg)
 
-	rule(15, "")
+	rule(15, "Theme")
+	themeLine := fmt.Sprintf("Theme: %-16s (set by the sysop)", th.Name)
+	if a.UserThemes {
+		themeLine = fmt.Sprintf("Theme: %-16s c/C change (this panel previews it)", th.Name)
+	}
+	f.PrintAt(3, 16, []byte(truncate(themeLine, w-4)), bg)
 	note := "Changes apply in this chat."
 	if a.BoardWide {
-		note = "These are your BBS-wide avatar and handle style."
+		note = "Avatar and handle style are BBS-wide; the theme is this door's."
 	}
-	f.PrintAt(3, 16, []byte(truncate(note, w-4)), ansi.LightGreen|ansi.BgBlack)
+	f.PrintAt(3, 17, []byte(truncate(note, w-4)), th.ModalOK)
 	if p.status != "" {
-		f.PrintAt(3, 17, []byte(truncate(p.status, w-4)), ansi.Yellow|ansi.BgBlack)
+		f.PrintAt(3, 18, []byte(truncate(p.status, w-4)), th.ModalHint)
 	}
 	keys := "S save   Esc cancel"
-	if p.changed {
+	if p.changed || p.themeChanged {
 		keys = "S save   Esc cancel (unsaved changes)"
 	}
 	f.PrintAt(3, h-1, []byte(truncate(keys, w-4)), hot)

@@ -23,6 +23,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/linkprev"
 	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
 	"github.com/hmderdoc/avatar_chat_universal/internal/termio"
+	"github.com/hmderdoc/avatar_chat_universal/internal/prefs"
 	"github.com/hmderdoc/avatar_chat_universal/internal/theme"
 	"github.com/hmderdoc/avatar_chat_universal/internal/ui"
 	"github.com/hmderdoc/avatar_chat_universal/internal/upload"
@@ -364,19 +365,40 @@ func run() error {
 
 	// Theme overlay. Main config sets the baseline; theme can override
 	// any color or screensaver field. Missing theme files are not fatal --
-	// the door always works in "futurewave" defaults.
+	// the door always works in "futurewave" defaults. The sysop's theme is
+	// the default; a user's /theme pick (door prefs) goes on top of it.
+	themeDir := "themes"
+	if wd, werr := os.Getwd(); werr == nil {
+		themeDir = filepath.Join(wd, themeDir)
+	}
+	sysTheme := theme.Default()
 	if cfg.Theme != "" {
-		themePath := cfg.Theme
-		if !strings.HasSuffix(strings.ToLower(themePath), ".ini") {
-			themePath = filepath.Join("themes", themePath+".ini")
-		}
-		if !filepath.IsAbs(themePath) {
-			if wd, werr := os.Getwd(); werr == nil {
-				themePath = filepath.Join(wd, themePath)
+		if strings.HasSuffix(strings.ToLower(cfg.Theme), ".ini") {
+			themePath := cfg.Theme
+			if !filepath.IsAbs(themePath) {
+				if wd, werr := os.Getwd(); werr == nil {
+					themePath = filepath.Join(wd, themePath)
+				}
 			}
+			if t, terr := theme.Load(themePath); terr == nil && t != nil {
+				sysTheme = t
+			}
+		} else if t, terr := theme.LoadNamed(themeDir, cfg.Theme); terr == nil {
+			sysTheme = t
 		}
-		if t, terr := theme.Load(themePath); terr == nil && t != nil {
-			app.ApplyTheme(t)
+	}
+	app.ThemeDir = themeDir
+	app.SysopTheme = sysTheme
+	app.UserThemes = cfg.UserThemes
+	app.ApplyTheme(sysTheme)
+	userPrefs := &prefs.Store{Root: *dataDir, BBSID: bbsID}
+	if cfg.UserThemes {
+		if pick := userPrefs.Get(user.DisplayName(), "theme"); pick != "" && pick != sysTheme.Name {
+			// A theme the sysop has since removed just leaves the default.
+			_ = app.SetUserTheme(pick, false)
+		}
+		app.OnThemeSave = func(name string) error {
+			return userPrefs.Set(user.DisplayName(), "theme", name)
 		}
 	}
 	app.BoardWide = boardWide

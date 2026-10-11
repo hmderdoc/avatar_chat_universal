@@ -66,12 +66,25 @@ type App struct {
 	// so it rides on the next message.
 	OnStyleSave func(style *nickstyle.Style) error
 
+	// Per-user themes. ThemeDir holds the themes/<name>.ini files /theme
+	// offers; SysopTheme is the board's own (what "default" goes back to);
+	// UserThemes lets users pick; OnThemeSave stores a pick ("" = back to
+	// the sysop's) for the next session.
+	ThemeDir    string
+	SysopTheme  *theme.Theme
+	UserThemes  bool
+	OnThemeSave func(name string) error
+	// idleBase is the main config's screensaver profile, captured on the
+	// first ApplyTheme so switching themes doesn't stack their overrides.
+	idleBase *themeIdle
+
 	// BoardWide is set when avatars and handle styles are the user's real
 	// BBS records (Synchronet mode); /settings and /avatar help say so.
 	BoardWide bool
 	// pendingStyle carries unsaved /settings handle edits across an avatar
 	// action (picker, editor, upload) and back into the panel.
 	pendingStyle *nickstyle.Style
+	pendingTheme *theme.Theme // likewise for an unsaved /settings theme pick
 
 	// PollInterval is how often we drain the session and re-render. 25ms
 	// matches the JS door's poll_delay_ms default.
@@ -263,7 +276,7 @@ func (a *App) layout() {
 	a.transcriptComp = ansi.NewCompositor(a.bgAnimFrame, a.transcriptFrame, a.fgAnimFrame)
 	a.transcriptComp.Charset = a.Charset
 	a.bottomActionFrame = ansi.NewFrame(0, usable-2, a.Width, 1, th.BottomActionBar)
-	a.inputFrame = ansi.NewFrame(0, usable-1, a.Width, 1, ansi.LightGray|ansi.BgBlack)
+	a.inputFrame = ansi.NewFrame(0, usable-1, a.Width, 1, th.InputBg)
 	for _, f := range []*ansi.Frame{a.headerFrame, a.actionFrame, a.bgAnimFrame, a.transcriptFrame, a.fgAnimFrame, a.bottomActionFrame, a.inputFrame} {
 		f.Charset = a.Charset
 	}
@@ -1031,6 +1044,9 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 	case "/avatar":
 		a.handleAvatarCmd(parts)
 		return false, true
+	case "/theme", "/themes":
+		a.handleTheme(parts[1:])
+		return false, true
 	case "/settings", "/prefs", "/options":
 		a.openSettings()
 		return false, true
@@ -1109,7 +1125,10 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		a.handleDraw(parts[1:])
 		return false, true
 	case "/help", "/?":
-		a.Session.Notice("/me /msg /r /join /part /who /img /channels /clear /avatar /settings /draw /quit")
+		a.Session.Notice("/me /msg /r /join /part /who /img /channels /clear /avatar /settings /theme /draw /quit")
+		if a.UserThemes {
+			a.Session.Notice("/theme lists the colour themes; /theme <name> switches and remembers it")
+		}
 		a.Session.Notice("/join keeps the old channel joined (unread counts in /channels); /part leaves it")
 		if a.BoardWide {
 			a.Session.Notice("/avatar and /settings change your BBS avatar and handle style everywhere on this system")
@@ -1484,31 +1503,32 @@ func (a *App) confirmUpload() bool {
 		y = 0
 	}
 
-	frame := ansi.NewFrame(x, y, w, h, ansi.White|ansi.BgBlue)
+	th := a.theme()
+	frame := ansi.NewFrame(x, y, w, h, th.DialogBg)
 	frame.Charset = a.Charset
-	frame.PrintAt(2, 0, []byte(" Avatar Upload "), ansi.LightCyan|ansi.BgMagenta)
+	frame.PrintAt(2, 0, []byte(" Avatar Upload "), th.DialogTitle)
 
 	lines := []struct {
 		text string
 		attr ansi.Attr
 	}{
-		{"Create your 10x6 avatar:", ansi.LightCyan | ansi.BgBlue},
+		{"Create your 10x6 avatar:", th.DialogHead},
 		{"", 0},
-		{" 1. Open an ANSI editor (Moebius, Pablo Draw,", ansi.White | ansi.BgBlue},
-		{"    or any tool that exports CP437 .bin).", ansi.White | ansi.BgBlue},
-		{" 2. Draw inside a 10-wide x 6-tall canvas.", ansi.White | ansi.BgBlue},
-		{" 3. Save as a .bin file.", ansi.White | ansi.BgBlue},
-		{" 4. Press Enter below, then send via Zmodem", ansi.White | ansi.BgBlue},
-		{"    (Alt-U in SyncTERM).", ansi.White | ansi.BgBlue},
+		{" 1. Open an ANSI editor (Moebius, Pablo Draw,", th.DialogBg},
+		{"    or any tool that exports CP437 .bin).", th.DialogBg},
+		{" 2. Draw inside a 10-wide x 6-tall canvas.", th.DialogBg},
+		{" 3. Save as a .bin file.", th.DialogBg},
+		{" 4. Press Enter below, then send via Zmodem", th.DialogBg},
+		{"    (Alt-U in SyncTERM).", th.DialogBg},
 		{"", 0},
-		{" [Enter] start upload     [Esc] cancel", ansi.Yellow | ansi.BgBlue},
+		{" [Enter] start upload     [Esc] cancel", th.DialogHint},
 	}
 	if a.BoardWide {
 		// The spare row above the keys: say what the upload changes.
 		lines[8] = struct {
 			text string
 			attr ansi.Attr
-		}{" It becomes your BBS avatar, everywhere here.", ansi.LightGreen | ansi.BgBlue}
+		}{" It becomes your BBS avatar, everywhere here.", th.DialogOK}
 	}
 	for i, ln := range lines {
 		if ln.text == "" {
@@ -1547,10 +1567,11 @@ func (a *App) openRoster(users []string) {
 	if usable < 12 {
 		usable = a.Height
 	}
-	a.modalFrame = ansi.NewFrame(0, 0, a.Width, usable, ansi.LightGray|ansi.BgBlack)
+	a.modalFrame = ansi.NewFrame(0, 0, a.Width, usable, a.theme().ModalBg)
 	a.modalFrame.Charset = a.Charset
 	roster := NewRosterModal(a.modalFrame, users, a.Session)
 	roster.Truecolor = a.tvColorTrue()
+	roster.Theme = a.theme()
 	a.modal = roster
 	_ = ansi.ClearScreen(a.Conn)
 	a.dirty = true
@@ -1563,9 +1584,11 @@ func (a *App) openChannels() {
 	if usable < 12 {
 		usable = a.Height
 	}
-	a.modalFrame = ansi.NewFrame(0, 0, a.Width, usable, ansi.LightGray|ansi.BgBlack)
+	a.modalFrame = ansi.NewFrame(0, 0, a.Width, usable, a.theme().ModalBg)
 	a.modalFrame.Charset = a.Charset
-	a.modal = NewChannelsModal(a.modalFrame, a.Session.Rooms())
+	cm := NewChannelsModal(a.modalFrame, a.Session.Rooms())
+	cm.Theme = a.theme()
+	a.modal = cm
 	_ = ansi.ClearScreen(a.Conn)
 	a.dirty = true
 }
@@ -1586,6 +1609,7 @@ func (a *App) openImageViewer() {
 		usable = a.Height
 	}
 	a.imageViewer = NewImageViewer(images, a.Width, usable)
+	a.imageViewer.Theme = a.theme()
 	if rasters := a.rasterItems(); len(rasters) > 0 {
 		a.imageViewer.WithRasters(rasters, a.zoomPicture)
 		a.imageViewer.Charset = a.Charset
@@ -1635,12 +1659,20 @@ func (a *App) ApplyTheme(t *theme.Theme) {
 	a.inputLine.PromptAttr = t.InputPrompt
 	a.inputLine.TextAttr = t.InputText
 	a.inputLine.CursorAttr = t.InputCursor
+	if a.inputFrame != nil {
+		a.inputFrame.SetFill(t.InputBg)
+	}
 
 	// Transcript reads from .Theme on every render.
 	a.transcript.Theme = t
 
 	// Screensaver profile overrides. nil/empty = inherit whatever the
 	// main config set.
+	if a.idleBase == nil {
+		a.idleBase = &themeIdle{random: a.IdleRandom, sequence: a.IdleSequence, disable: a.IdleDisable}
+	} else {
+		a.IdleRandom, a.IdleSequence, a.IdleDisable = a.idleBase.random, a.idleBase.sequence, a.idleBase.disable
+	}
 	if t.IdleRandom != nil {
 		a.IdleRandom = *t.IdleRandom
 	}
@@ -1652,6 +1684,23 @@ func (a *App) ApplyTheme(t *theme.Theme) {
 	}
 
 	a.forceFullRedraw()
+}
+
+// theme is the active theme, never nil.
+func (a *App) theme() *theme.Theme {
+	if a.Theme == nil {
+		a.Theme = theme.Default()
+	}
+	return a.Theme
+}
+
+// orDefault lets a component built outside the App draw before a theme is
+// assigned.
+func orDefault(t *theme.Theme) *theme.Theme {
+	if t == nil {
+		return theme.Default()
+	}
+	return t
 }
 
 // forceFullRedraw clears the screen and marks every frame for repaint.

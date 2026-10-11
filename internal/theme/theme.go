@@ -14,6 +14,9 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
@@ -42,6 +45,7 @@ type Theme struct {
 	InputPrompt ansi.Attr
 	InputText   ansi.Attr
 	InputCursor ansi.Attr
+	InputBg     ansi.Attr // fill of the rest of the input row
 
 	// Message bubbles.
 	BubbleLeft    ansi.Attr // others' messages
@@ -66,13 +70,36 @@ type Theme struct {
 	// "* Users in main: ...").
 	NoticeDefault ansi.Attr
 
-	// Modal frames (roster, image viewer, avatar selector chrome).
-	ModalBg    ansi.Attr
-	ModalTitle ansi.Attr
+	// Modal frames (/who roster, /channels, /settings, image viewer).
+	ModalBg     ansi.Attr // fill and plain list text
+	ModalTitle  ansi.Attr // title bar
+	ModalClose  ansi.Attr // "[Esc] close" on the title bar
+	ModalText   ansi.Attr // bright text: values, key letters
+	ModalLabel  ansi.Attr // section headings and field labels
+	ModalSelect ansi.Attr // the highlighted list row
+	ModalHint   ansi.Attr // key help along the bottom, markers
+	ModalUnread ansi.Attr // unread counts in /channels
+	ModalRule   ansi.Attr // divider lines and "(none)"
+	ModalOK     ansi.Attr // confirmation and info lines
+	ViewerBar   ansi.Attr // image viewer header and footer rows
+
+	// Dialogs drawn over the chat (the avatar upload instructions).
+	DialogBg    ansi.Attr
+	DialogTitle ansi.Attr
+	DialogHead  ansi.Attr
+	DialogHint  ansi.Attr
+	DialogOK    ansi.Attr
+
+	// NSFW veil: shade noise in two attrs plus the reveal label.
+	VeilDark  ansi.Attr
+	VeilLight ansi.Attr
+	VeilLabel ansi.Attr
 
 	// TV lounge caption bar -- the live-subtitle strip painted across the
 	// bottom action row while a channel is tuned to a telnetvision feed.
 	TVCaption ansi.Attr
+	TVChat    ansi.Attr // chat lines over the picture
+	TVChatDim ansi.Attr // the band behind them and the ": " separator
 
 	// Screensaver / idle profile. nil/empty means "inherit from main config".
 	IdleRandom   *bool
@@ -100,6 +127,7 @@ func Default() *Theme {
 		InputPrompt: ansi.Yellow,
 		InputText:   ansi.LightGreen,
 		InputCursor: ansi.LightGray | ansi.BgLightGray,
+		InputBg:     ansi.LightGray | ansi.BgBlack,
 
 		BubbleLeft:    ansi.Black | ansi.BgCyan,
 		BubbleSelf:    ansi.White | ansi.BgBlue,
@@ -117,10 +145,31 @@ func Default() *Theme {
 
 		NoticeDefault: ansi.DarkGray,
 
-		ModalBg:    ansi.LightGray | ansi.BgBlack,
-		ModalTitle: ansi.Yellow | ansi.BgBlue,
+		ModalBg:     ansi.LightGray | ansi.BgBlack,
+		ModalTitle:  ansi.Yellow | ansi.BgBlue,
+		ModalClose:  ansi.White | ansi.BgBlue,
+		ModalText:   ansi.White | ansi.BgBlack,
+		ModalLabel:  ansi.LightCyan | ansi.BgBlack,
+		ModalSelect: ansi.Black | ansi.BgCyan,
+		ModalHint:   ansi.Yellow | ansi.BgBlack,
+		ModalUnread: ansi.Yellow | ansi.BgBlack,
+		ModalRule:   ansi.DarkGray | ansi.BgBlack,
+		ModalOK:     ansi.LightGreen | ansi.BgBlack,
+		ViewerBar:   ansi.White | ansi.BgBlue,
+
+		DialogBg:    ansi.White | ansi.BgBlue,
+		DialogTitle: ansi.LightCyan | ansi.BgMagenta,
+		DialogHead:  ansi.LightCyan | ansi.BgBlue,
+		DialogHint:  ansi.Yellow | ansi.BgBlue,
+		DialogOK:    ansi.LightGreen | ansi.BgBlue,
+
+		VeilDark:  ansi.DarkGray | ansi.BgBlack,
+		VeilLight: ansi.LightGray | ansi.BgBlack,
+		VeilLabel: ansi.White | ansi.BgMagenta,
 
 		TVCaption: ansi.White | ansi.BgBlue,
+		TVChat:    ansi.White | ansi.BgBlack,
+		TVChatDim: ansi.LightGray | ansi.BgBlack,
 	}
 }
 
@@ -211,6 +260,8 @@ func colorSlot(t *Theme, key string) *ansi.Attr {
 		return &t.InputText
 	case "input_cursor":
 		return &t.InputCursor
+	case "input_bg":
+		return &t.InputBg
 	case "bubble_left":
 		return &t.BubbleLeft
 	case "bubble_self":
@@ -241,8 +292,46 @@ func colorSlot(t *Theme, key string) *ansi.Attr {
 		return &t.ModalBg
 	case "modal_title":
 		return &t.ModalTitle
+	case "modal_close":
+		return &t.ModalClose
+	case "modal_text":
+		return &t.ModalText
+	case "modal_label":
+		return &t.ModalLabel
+	case "modal_select":
+		return &t.ModalSelect
+	case "modal_hint":
+		return &t.ModalHint
+	case "modal_unread":
+		return &t.ModalUnread
+	case "modal_rule":
+		return &t.ModalRule
+	case "modal_ok":
+		return &t.ModalOK
+	case "viewer_bar":
+		return &t.ViewerBar
+	case "dialog_bg":
+		return &t.DialogBg
+	case "dialog_title":
+		return &t.DialogTitle
+	case "dialog_head":
+		return &t.DialogHead
+	case "dialog_hint":
+		return &t.DialogHint
+	case "dialog_ok":
+		return &t.DialogOK
+	case "veil_dark":
+		return &t.VeilDark
+	case "veil_light":
+		return &t.VeilLight
+	case "veil_label":
+		return &t.VeilLabel
 	case "tv_caption":
 		return &t.TVCaption
+	case "tv_chat":
+		return &t.TVChat
+	case "tv_chat_dim":
+		return &t.TVChatDim
 	}
 	return nil
 }
@@ -318,4 +407,133 @@ func splitCSV(s string) []string {
 		return nil
 	}
 	return out
+}
+
+// validName is what a theme name may look like: it becomes a file name
+// under the themes directory, so nothing that can climb out of it.
+var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+
+// ValidName reports whether name is usable as a theme name.
+func ValidName(name string) bool { return validName.MatchString(name) }
+
+// List returns the theme names available in dir (themes/<name>.ini),
+// sorted. A name that isn't ValidName is skipped. The built-in default is
+// always included, file or not.
+func List(dir string) []string {
+	seen := map[string]bool{Default().Name: true}
+	out := []string{Default().Name}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		n := e.Name()
+		if e.IsDir() || !strings.HasSuffix(strings.ToLower(n), ".ini") {
+			continue
+		}
+		n = strings.ToLower(strings.TrimSuffix(n, n[len(n)-4:]))
+		if ValidName(n) && !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// LoadNamed loads themes/<name>.ini from dir. Unlike Load, a name that
+// isn't ValidName or has no file is an error (except the built-in
+// default), since a user picked it from a list.
+func LoadNamed(dir, name string) (*Theme, error) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if !ValidName(name) {
+		return nil, fmt.Errorf("theme: bad name %q", name)
+	}
+	path := findFile(dir, name)
+	if path == "" {
+		if name == Default().Name {
+			return Default(), nil
+		}
+		return nil, fmt.Errorf("theme: no theme called %q", name)
+	}
+	t, err := Load(path)
+	if err != nil {
+		return nil, err
+	}
+	// The file name is the theme's identity for per-user choice; a name
+	// key inside the file is only a label.
+	t.Name = name
+	return t, nil
+}
+
+// findFile returns dir's <name>.ini matched without regard to case, as
+// List names them, or "".
+func findFile(dir, name string) string {
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if !e.IsDir() && strings.EqualFold(e.Name(), name+".ini") {
+			return filepath.Join(dir, e.Name())
+		}
+	}
+	return ""
+}
+
+// Keys returns every color key a theme file may set, in file order.
+func Keys() []string { return append([]string(nil), colorKeys...) }
+
+var colorKeys = []string{
+	"header_stats", "header_motd",
+	"top_action_bar", "top_action_pill", "top_action_highlight",
+	"bottom_action_bar", "bottom_action_pill", "bottom_action_highlight",
+	"input_prompt", "input_text", "input_cursor", "input_bg",
+	"bubble_left", "bubble_self", "bubble_private", "bubble_mention", "mention_edge",
+	"card_site", "card_title", "card_edge",
+	"speaker_left", "speaker_self", "timestamp", "host",
+	"notice_default",
+	"modal_bg", "modal_title", "modal_close", "modal_text", "modal_label",
+	"modal_select", "modal_hint", "modal_unread", "modal_rule", "modal_ok", "viewer_bar",
+	"dialog_bg", "dialog_title", "dialog_head", "dialog_hint", "dialog_ok",
+	"veil_dark", "veil_light", "veil_label",
+	"tv_caption", "tv_chat", "tv_chat_dim",
+}
+
+// Lint reports every line of a theme file that Load would ignore: an
+// unknown key, a color it can't parse, or a foreground the same as its
+// background (text that can't be seen).
+func Lint(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	var out []string
+	sc := bufio.NewScanner(f)
+	for n := 1; sc.Scan(); n++ {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "[") {
+			continue
+		}
+		eq := strings.IndexByte(line, '=')
+		if eq < 0 {
+			out = append(out, fmt.Sprintf("line %d: no '='", n))
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(line[:eq]))
+		val := strings.TrimSpace(line[eq+1:])
+		switch key {
+		case "name", "idle_random", "idle_sequence", "idle_disable":
+			continue
+		}
+		var probe Theme
+		if colorSlot(&probe, key) == nil {
+			out = append(out, fmt.Sprintf("line %d: unknown key %q", n, key))
+			continue
+		}
+		a, ok := ParseColor(val)
+		if !ok {
+			out = append(out, fmt.Sprintf("line %d: %s: bad color %q", n, key, val))
+			continue
+		}
+		if strings.Contains(val, "|") && a&0x0F == (a>>4)&0x07 && key != "input_cursor" {
+			out = append(out, fmt.Sprintf("line %d: %s: text same colour as its background", n, key))
+		}
+	}
+	return out, sc.Err()
 }

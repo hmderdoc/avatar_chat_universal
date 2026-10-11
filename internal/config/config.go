@@ -45,7 +45,8 @@ type Config struct {
 	AnsiGalleryDir       string // directory of .ans/.bin files for the ansi_gallery idle animation; empty = disable
 	IdleInterleaveAnsi   bool   // insert a single piece of gallery art between every procedural idle animation
 
-	Theme string // theme name (resolved to themes/<name>.ini) or full .ini path
+	Theme      string // theme name (resolved to themes/<name>.ini) or full .ini path
+	UserThemes bool   // users may pick another themes/<name>.ini with /theme (default on)
 
 	// TV lounge mode (telnetvision). See internal/ui/tvlounge.go.
 	TVColor      string // "auto" (default: ask the terminal), "truecolor" or "16"
@@ -128,6 +129,7 @@ func Default() *Config {
 		OutputCharset:        "cp437",
 		SplashTimeoutSeconds: 5,
 		Theme:                "futurewave",
+		UserThemes:           true,
 		TVColor:              "auto",
 		TVAudio:              "auto",
 		AudioLinks:           "auto",
@@ -237,6 +239,8 @@ func Load(path string) (*Config, error) {
 			cfg.IdleInterleaveAnsi = parseBool(val, cfg.IdleInterleaveAnsi)
 		case "theme":
 			cfg.Theme = val
+		case "user_themes":
+			cfg.UserThemes = parseBool(val, cfg.UserThemes)
 		case "tv_color":
 			cfg.TVColor = val
 		case "tv_audio":

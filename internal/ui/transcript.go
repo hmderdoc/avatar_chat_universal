@@ -318,7 +318,7 @@ func (t *Transcript) paintPictures(b *block, textX, bodyY int) {
 	for _, s := range b.pics {
 		y0 := bodyY + s.row
 		if s.veiled {
-			paintVeil(t.Frame, textX, y0, s.cols, s.rows)
+			paintVeil(t.Frame, t.Theme, textX, y0, s.cols, s.rows)
 			continue
 		}
 		for r := 0; r < s.pic.Rows; r++ {
@@ -424,7 +424,7 @@ func (t *Transcript) paintCards(b *block, textX, bodyY int, bubbleAttr ansi.Attr
 			case 't':
 				attr = bg | (th.CardTitle & 0x0F)
 			case 'v':
-				attr = ansi.White | ansi.BgMagenta
+				attr = th.VeilLabel
 			}
 			t.Frame.PrintAt(x, y0+i, []byte(ln.text), attr)
 		}
@@ -433,23 +433,24 @@ func (t *Transcript) paintCards(b *block, textX, bodyY int, bubbleAttr ansi.Attr
 
 // paintVeil fills a box with shade noise and a reveal hint, the shell's
 // NSFW veil: frame cells only, so it needs no fetch.
-func paintVeil(f *ansi.Frame, x, y, cols, rows int) {
+func paintVeil(f *ansi.Frame, th *theme.Theme, x, y, cols, rows int) {
+	th = orDefault(th)
 	shades := [3]byte{0xB0, 0xB1, 0xB2}
 	seed := uint32(y*31 + x)
 	for r := 0; r < rows; r++ {
 		for c := 0; c < cols; c++ {
 			seed = seed*1103515245 + 12345
 			pick := (seed >> 8) % 3
-			attr := ansi.DarkGray | ansi.BgBlack
+			attr := th.VeilDark
 			if pick == 1 {
-				attr = ansi.LightGray | ansi.BgBlack
+				attr = th.VeilLight
 			}
 			f.SetCell(x+c, y+r, shades[pick], attr)
 		}
 	}
 	label := " NSFW - /nsfw to show "
 	if cols >= len(label) && rows >= 2 {
-		f.PrintAt(x+(cols-len(label))/2, y+rows/2, []byte(label), ansi.White|ansi.BgMagenta)
+		f.PrintAt(x+(cols-len(label))/2, y+rows/2, []byte(label), th.VeilLabel)
 	}
 }
 

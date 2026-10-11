@@ -275,7 +275,7 @@ func (a *App) drawLounge() {
 		if a.videoPlaying() {
 			msg = "Starting " + a.videos.player.Title + " ..."
 		}
-		bg.PrintAt((bg.W-len(msg))/2, bg.H/2, []byte(msg), ansi.White|ansi.BgBlack)
+		bg.PrintAt((bg.W-len(msg))/2, bg.H/2, []byte(msg), a.theme().TVChat)
 	}
 
 	// Middle layer: the transcript, only when the user has pulled it up.
@@ -451,7 +451,8 @@ func (a *App) drawPopupLines(f *ansi.Frame, bottomY int, p tvPopup) int {
 		lines = lines[len(lines)-bottomY:]
 	}
 	top := bottomY - len(lines) + 1
-	band := ansi.LightGray | ansi.BgBlack
+	th := a.theme()
+	band := th.TVChatDim
 	for ry := top; ry <= bottomY; ry++ {
 		for x := 0; x < f.W; x++ {
 			f.SetCell(x, ry, ' ', band)
@@ -463,10 +464,10 @@ func (a *App) drawPopupLines(f *ansi.Frame, bottomY int, p tvPopup) int {
 		// it intact at the start (a pathologically long nick may not).
 		if i == 0 && strings.HasPrefix(ln, prefix) {
 			x := a.putNick(f, 1, ry, nick, p.msg.Nick, false)
-			x = putStr(f, x, ry, ": ", ansi.LightGray|ansi.BgBlack)
-			putStr(f, x, ry, ln[len(prefix):], ansi.White|ansi.BgBlack)
+			x = putStr(f, x, ry, ": ", th.TVChatDim)
+			putStr(f, x, ry, ln[len(prefix):], th.TVChat)
 		} else {
-			putStr(f, 1, ry, ln, ansi.White|ansi.BgBlack)
+			putStr(f, 1, ry, ln, th.TVChat)
 		}
 	}
 	return top - 1
@@ -500,7 +501,7 @@ func (a *App) drawPopupBubble(f *ansi.Frame, bottomY int, p tvPopup) int {
 		if ry > bottomY {
 			break
 		}
-		putStr(f, textX, ry, ln, ansi.White|ansi.BgBlack)
+		putStr(f, textX, ry, ln, a.theme().TVChat)
 	}
 	return top - 1
 }
@@ -519,7 +520,7 @@ func (a *App) putNick(f *ansi.Frame, x, row int, nick string, n *chat.Nick, with
 		cp.Tag = nickstyle.Tag{}
 		st = &cp
 	}
-	return x + paintHandle(f, x, row, nick, st, ansi.White|ansi.BgBlack, f.W-x, a.tvColorTrue())
+	return x + paintHandle(f, x, row, nick, st, a.theme().TVChat, f.W-x, a.tvColorTrue())
 }
 
 // putStr writes s at (x,row) in CP437 bytes (non-ASCII -> '?'), clipped to the

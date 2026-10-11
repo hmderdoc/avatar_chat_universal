@@ -27,6 +27,31 @@ it to `themes/myname.ini`, change what you want, set
 
 ---
 
+## Per-user themes
+
+Every theme in `themes/` is on offer to users unless `avatar_chat.ini`
+sets `user_themes = off`:
+
+- `/theme` lists them (the active one highlighted).
+- `/theme <name>` switches at once and remembers the pick for next time.
+- `/theme default` goes back to the sysop's `theme`.
+- `/settings` has a Theme row: `c` / `C` step through the themes, the
+  panel redraws in the picked theme's colours as a preview, and `S`
+  applies and saves it.
+
+The sysop's `theme` stays the default for anyone who hasn't picked. A
+pick is a door preference, stored in `<data>/prefs/<bbs>/<user>.ini`,
+never in the BBS's user records (in Synchronet mode the avatar and handle
+style are board-wide; the theme is only this door's). If a sysop removes
+a theme someone picked, that user quietly gets the default.
+
+A theme's name is its file name, lowercase letters, digits, `-` and `_`
+(the `name =` key inside is ignored for this). Anything else in `themes/`
+isn't offered. Switching themes resets the screensaver profile to the
+main config's before applying the new theme's, so profiles don't stack.
+
+---
+
 ## Color value syntax
 
 Each color is a pipe-separated combination of CGA tokens:
@@ -132,14 +157,57 @@ status lines.
 | ---------------- | ----------- |
 | `notice_default` | `darkgray`  |
 
-### Modals
+### Input row fill
 
-The roster, image viewer, and avatar selector chrome.
+| Key        | Default              | Used for                                   |
+| ---------- | -------------------- | ------------------------------------------ |
+| `input_bg` | `lightgray\|bgblack` | The rest of the input row, past the text   |
 
-| Key           | Default                | Used for                              |
-| ------------- | ---------------------- | ------------------------------------- |
-| `modal_bg`    | `lightgray\|bgblack`   | Default fill of any modal frame       |
-| `modal_title` | `yellow\|bgblue`       | The title bar at the top of a modal   |
+### Pickers and panels
+
+`/who`, `/channels`, `/settings` and the `/img` viewer.
+
+| Key            | Default                | Used for                                        |
+| -------------- | ---------------------- | ----------------------------------------------- |
+| `modal_bg`     | `lightgray\|bgblack`   | Fill and plain list text                        |
+| `modal_title`  | `yellow\|bgblue`       | The title bar                                   |
+| `modal_close`  | `white\|bgblue`        | "[Esc] close" on the title bar                  |
+| `modal_text`   | `white\|bgblack`       | Values and key letters                          |
+| `modal_label`  | `lightcyan\|bgblack`   | Section headings and field labels               |
+| `modal_select` | `black\|bgcyan`        | The highlighted row                             |
+| `modal_hint`   | `yellow\|bgblack`      | Key help along the bottom, the letter marker    |
+| `modal_unread` | `yellow\|bgblack`      | Rooms with unread lines in `/channels`          |
+| `modal_rule`   | `darkgray\|bgblack`    | Divider lines, "(none)"                         |
+| `modal_ok`     | `lightgreen\|bgblack`  | Info line in `/settings`                        |
+| `viewer_bar`   | `white\|bgblue`        | `/img` header and footer rows                   |
+
+### Dialogs
+
+The avatar-upload instructions box drawn over the chat.
+
+| Key            | Default                 |
+| -------------- | ----------------------- |
+| `dialog_bg`    | `white\|bgblue`         |
+| `dialog_title` | `lightcyan\|bgmagenta`  |
+| `dialog_head`  | `lightcyan\|bgblue`     |
+| `dialog_hint`  | `yellow\|bgblue`        |
+| `dialog_ok`    | `lightgreen\|bgblue`    |
+
+### NSFW veil
+
+| Key          | Default               | Used for                       |
+| ------------ | --------------------- | ------------------------------ |
+| `veil_dark`  | `darkgray\|bgblack`   | Darker shade-noise cells       |
+| `veil_light` | `lightgray\|bgblack`  | Lighter shade-noise cells      |
+| `veil_label` | `white\|bgmagenta`    | "NSFW - /nsfw to show"         |
+
+### TV lounge
+
+| Key           | Default               | Used for                                  |
+| ------------- | --------------------- | ----------------------------------------- |
+| `tv_caption`  | `white\|bgblue`       | Live-subtitle bar across the bottom row   |
+| `tv_chat`     | `white\|bgblack`      | Chat lines shown over the picture         |
+| `tv_chat_dim` | `lightgray\|bgblack`  | The band behind them, the ": " separator  |
 
 ---
 
@@ -228,26 +296,16 @@ theme = forest
 
 ---
 
-## Slot list — what's covered, what's not
+## Shipped themes
 
-Currently themed:
+`futurewave` (the default, and the built-in values), `green`, `midnight`,
+`amber`, `forest` and `sunset`. Each sets every key, so any of them is a
+complete template; a test in the repo lints them for unknown keys, bad
+colours and text the same colour as its background.
 
-✓ Header bar (stats + MOTD)
-✓ Top + bottom action bars (bg, pill, highlight)
-✓ Input line (prompt, text, cursor)
-✓ Chat bubbles (left, self, private)
-✓ Bubble header (speaker, timestamp, host)
-✓ Notices (default color)
-✓ Modal chrome (bg, title)
+## Not themable
 
-Not yet themed (uses hardcoded colors, easy follow-up if you need them):
-
-- The avatar editor's title bar (LightCyan|BgMagenta).
-- The "ESC cancel" pill in modals (LightCyan|BgMagenta).
-- The animation-specific palettes (each idle anim has its own; not
-  swappable via theme).
-- The splash screen RGB strobe (uses fixed CGA red/green/blue).
-- Sweep glow effect on join/leave notices (uses a fixed gradient).
-
-If you want any of these themable, file an issue with the slot name and
-I'll add it.
+- The avatar editor and `/draw` editor chrome.
+- Each screensaver animation's own palette.
+- The splash screen strobe and the join/leave sweep glow.
+- Handle styles: those are each user's own colours.

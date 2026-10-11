@@ -149,6 +149,7 @@ full catalog. Quick list:
 | Key      | Default       | Notes                                                                                  |
 | -------- | ------------- | -------------------------------------------------------------------------------------- |
 | `theme`  | `futurewave`  | Theme name resolved to `themes/<name>.ini`. Anything the theme doesn't override falls through to the built-in palette. See [THEMING.md](THEMING.md). |
+| `user_themes` | `on`     | Users may pick another `themes/<name>.ini` with `/theme` or in `/settings`; the pick is saved per user under `<data>/prefs/` and `theme` stays the default. `off` pins everyone to `theme`. |
 
 ---
 

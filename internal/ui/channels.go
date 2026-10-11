@@ -6,6 +6,7 @@ import (
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
+	"github.com/hmderdoc/avatar_chat_universal/internal/theme"
 )
 
 // modalView is a full-screen overlay that owns input until it closes: the
@@ -29,6 +30,8 @@ type ChannelsModal struct {
 	// on Enter / L. Both empty means it was just dismissed.
 	Join  string
 	Leave string
+
+	Theme *theme.Theme
 }
 
 func NewChannelsModal(frame *ansi.Frame, rooms []chat.RoomInfo) *ChannelsModal {
@@ -90,11 +93,12 @@ func (m *ChannelsModal) current() (chat.RoomInfo, bool) {
 func (m *ChannelsModal) Render() {
 	f := m.Frame
 	f.Clear()
-	titleAttr := ansi.Yellow | ansi.BgBlue
-	headAttr := ansi.LightCyan | ansi.BgBlack
-	listAttr := ansi.LightGray | ansi.BgBlack
-	selAttr := ansi.Black | ansi.BgCyan
-	unreadAttr := ansi.Yellow | ansi.BgBlack
+	th := orDefault(m.Theme)
+	titleAttr := th.ModalTitle
+	headAttr := th.ModalLabel
+	listAttr := th.ModalBg
+	selAttr := th.ModalSelect
+	unreadAttr := th.ModalUnread
 
 	for x := 0; x < f.W; x++ {
 		f.SetCell(x, 0, ' ', titleAttr)
@@ -160,7 +164,7 @@ func (m *ChannelsModal) Render() {
 	if hx < 1 {
 		hx = 1
 	}
-	f.PrintAt(hx, f.H-1, []byte(truncate(help, f.W-2)), ansi.Yellow|ansi.BgBlack)
+	f.PrintAt(hx, f.H-1, []byte(truncate(help, f.W-2)), th.ModalHint)
 }
 
 // applyChannelChoice acts on what the user picked in the /channels list.

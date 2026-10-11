@@ -8,6 +8,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
 	"github.com/hmderdoc/avatar_chat_universal/internal/inlineimg"
+	"github.com/hmderdoc/avatar_chat_universal/internal/theme"
 )
 
 // ImageViewer is a full-screen modal for viewing received bitmap messages.
@@ -24,6 +25,7 @@ type ImageViewer struct {
 	// zoom lays a raster out for a cols x rows box.
 	zoom    func(e *imageEntry, cols, rows int) *inlineimg.Picture
 	Charset ansi.Charset
+	Theme   *theme.Theme
 	index   int
 	scrollY int
 	width   int
@@ -206,7 +208,8 @@ func (v *ImageViewer) Render(w io.Writer) error {
 
 // renderRaster paints one downloaded picture full screen.
 func (v *ImageViewer) renderRaster(w io.Writer, e *imageEntry) error {
-	f := ansi.NewFrame(0, 0, v.width, v.height, ansi.LightGray|ansi.BgBlack)
+	th := orDefault(v.Theme)
+	f := ansi.NewFrame(0, 0, v.width, v.height, th.ModalBg)
 	f.Charset = v.Charset
 	bodyH := v.height - 2
 	if bodyH < 1 {
@@ -215,7 +218,7 @@ func (v *ImageViewer) renderRaster(w io.Writer, e *imageEntry) error {
 	pic := v.zoom(e, v.width, bodyH)
 	b := e.img.Bounds()
 	header := fmt.Sprintf(" Image %d/%d | %s | %dx%d | %s ", v.index+1, v.count(), e.from, b.Dx(), b.Dy(), e.url)
-	f.PrintAt(0, 0, []byte(padOrTrim(header, v.width)), ansi.White|ansi.BgBlue)
+	f.PrintAt(0, 0, []byte(padOrTrim(header, v.width)), th.ViewerBar)
 	x0 := 0
 	if pic != nil {
 		x0 = (v.width - pic.Cols) / 2
@@ -231,7 +234,7 @@ func (v *ImageViewer) renderRaster(w io.Writer, e *imageEntry) error {
 		}
 	}
 	footer := " Esc close   <-/-> prev/next   Home/End first/last "
-	f.PrintAt(0, v.height-1, []byte(padOrTrim(footer, v.width)), ansi.White|ansi.BgBlue)
+	f.PrintAt(0, v.height-1, []byte(padOrTrim(footer, v.width)), th.ViewerBar)
 	var buf bytes.Buffer
 	buf.WriteString("\x1b[2J")
 	if err := f.Render(&buf); err != nil {

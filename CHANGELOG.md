@@ -9,6 +9,21 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Added
 
+- **Per-user themes.** `/theme` lists the sysop's `themes/*.ini`, `/theme
+  <name>` switches live and remembers it (door prefs under `<data>/prefs/`,
+  kept out of the BBS's own user records), `/theme default` goes back to
+  the sysop's; `/settings` has a Theme row (`c`/`C`) that previews in the
+  panel's own colours. `user_themes = off` pins everyone to `theme`.
+  Switching themes no longer stacks screensaver profiles.
+- **More theme keys** (27 to 47): `input_bg`; `modal_close`, `modal_text`,
+  `modal_label`, `modal_select`, `modal_hint`, `modal_unread`, `modal_rule`,
+  `modal_ok`, `viewer_bar` for /who, /channels, /settings and /img;
+  `dialog_*` for the upload box; `veil_*` for the NSFW veil; `tv_chat`,
+  `tv_chat_dim` for chat over the TV picture. Defaults are the old
+  hard-coded colours, so nothing changes until a theme sets them.
+- **Four more themes**: midnight, amber, forest, sunset. Every shipped
+  theme now sets every key, and a test lints them.
+
 - **Video links.** With ffmpeg/ffprobe on the host, `.mp4 .m4v .webm .mov
   .mkv` links and pages announcing `og:video` get a `► /play` card and play
   full screen on the TV-lounge renderer (truecolor or 16-colour shade
@@ -98,6 +113,10 @@ versioning follows loose [SemVer](https://semver.org/) (see
   the input line to send. See MEDIA.md.
 
 ### Fixed
+
+- `/settings`: unsaved handle edits were lost on a trip to the avatar
+  picker, editor or uploader and back.
+- `themes/green.ini`: highlight pills were green on green; now red.
 
 - SyncTERM's upload key is Alt-U; the avatar upload hints said Alt-S.
 

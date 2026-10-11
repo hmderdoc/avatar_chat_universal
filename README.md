@@ -22,8 +22,8 @@ Single static binary per platform. No runtime dependencies.
   relative timestamps ("5m ago", "2h ago") and BBS hostname.
 - **Idle screensaver** with 15+ procedural animations plus an **ANSI gallery**
   that scrolls SAUCE-tagged `.ans`/`.bin` art from a sysop-managed directory.
-- Sysop **theming** via `themes/<name>.ini` — color palette + screensaver
-  profile per theme.
+- **Theming** via `themes/<name>.ini` — color palette + screensaver
+  profile per theme; six ship, and users can pick their own with `/theme`.
 - Optional **splash screen** with an RGB strobe effect on entry.
 - **Self-hostable** companion server speaks the same JSON-RPC protocol as the
   public futureland server.

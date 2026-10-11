@@ -9,6 +9,12 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Added
 
+- **WebSocket listener in `avatar_chat_server`** for browser clients.
+  `-ws-addr` (`ws_addr`) turns it on; the same packets as TCP, one per
+  frame, sharing channels with the doors. `ws_origins` limits which web
+  pages may connect (default any); 30 s pings drop dead peers; the deny
+  list applies. WEB.md covers it and the framing a page needs to also
+  work through Synchronet's `websocketservice.js`.
 - **Mouse.** The door asks for xterm mouse reports (SGR, with X10
   fallback): the wheel scrolls the chat and lists, pills run their
   commands, a name starts `/msg`, a picture opens in `/img`, a `/play`

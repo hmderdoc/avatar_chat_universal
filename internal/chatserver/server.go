@@ -2,6 +2,7 @@ package chatserver
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -39,6 +40,14 @@ type Server struct {
 	// Deny, when set, refuses connections from listed addresses before
 	// anything is read from them. A nil list denies nobody.
 	Deny *denylist.List
+	// WSAddr, when set, is a second listener taking the same packets over
+	// WebSocket, one per text frame, for browser clients (see ws.go).
+	WSAddr string
+	// WSOrigins limits which web pages may open a WebSocket: full origins
+	// ("https://bbs.example.org") or bare host names. Empty allows any.
+	WSOrigins []string
+
+	wsPing, wsWait time.Duration // keepalive overrides for tests
 
 	store *store
 
@@ -90,12 +99,13 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}
 }
 
-// conn wraps a single TCP connection. Writes are serialized through writeMu.
+// conn is one client, over TCP or WebSocket. Both share the packet loop,
+// the subscription registry and the nick handling; only the wire differs.
+// Writes are serialized through writeMu.
 type conn struct {
 	server  *Server
-	tcp     net.Conn
+	wire    wire
 	writeMu sync.Mutex
-	writer  *bufio.Writer
 
 	id     string // remote addr, used in logs and as a default nick
 	nick   string
@@ -103,53 +113,93 @@ type conn struct {
 
 	subs map[string]bool
 
-	closed bool
+	closed  bool
 	closeMu sync.Mutex
 }
+
+// wire carries whole packets: a CRLF-terminated line on TCP, one text
+// frame on WebSocket.
+type wire interface {
+	writePacket(body []byte) error
+	Close() error
+}
+
+type tcpWire struct {
+	c net.Conn
+	w *bufio.Writer
+}
+
+func (t *tcpWire) writePacket(body []byte) error {
+	_ = t.c.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	if _, err := t.w.Write(body); err != nil {
+		return err
+	}
+	if _, err := t.w.WriteString("\r\n"); err != nil {
+		return err
+	}
+	return t.w.Flush()
+}
+
+func (t *tcpWire) Close() error { return t.c.Close() }
 
 func (s *Server) handleConn(ctx context.Context, tcp net.Conn) {
 	c := &conn{
 		server: s,
-		tcp:    tcp,
-		writer: bufio.NewWriter(tcp),
+		wire:   &tcpWire{c: tcp, w: bufio.NewWriter(tcp)},
 		id:     tcp.RemoteAddr().String(),
 		subs:   map[string]bool{},
 	}
+	r := bufio.NewReaderSize(tcp, MaxPacket)
+	s.serve(ctx, c, func() ([]byte, error) { return r.ReadBytes('\n') })
+}
+
+// serve runs one connection's packet loop until next fails or ctx ends.
+// next returns the next chunk off the wire: a line on TCP, a frame on
+// WebSocket. A chunk may hold several newline-separated packets.
+func (s *Server) serve(ctx context.Context, c *conn, next func() ([]byte, error)) {
 	s.mu.Lock()
 	s.connections[c] = true
 	s.mu.Unlock()
 
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = c.wire.Close() // unblocks next
+		case <-done:
+		}
+	}()
 	defer func() {
-		_ = tcp.Close()
+		close(done)
+		_ = c.wire.Close()
 		s.dropAllSubs(c)
 		s.mu.Lock()
 		delete(s.connections, c)
 		s.mu.Unlock()
 	}()
 
-	r := bufio.NewReaderSize(tcp, MaxPacket)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
-		line, err := r.ReadBytes('\n')
+		chunk, err := next()
 		if err != nil {
 			return
 		}
-		for len(line) > 0 && (line[len(line)-1] == '\n' || line[len(line)-1] == '\r') {
-			line = line[:len(line)-1]
+		for _, line := range bytes.Split(chunk, []byte{'\n'}) {
+			line = bytes.TrimRight(line, "\r")
+			if len(line) == 0 {
+				continue
+			}
+			var pkt packet
+			if err := json.Unmarshal(line, &pkt); err != nil {
+				s.sendError(c, "malformed JSON")
+				continue
+			}
+			s.dispatch(c, &pkt)
 		}
-		if len(line) == 0 {
-			continue
-		}
-		var pkt packet
-		if err := json.Unmarshal(line, &pkt); err != nil {
-			s.sendError(c, "malformed JSON")
-			continue
-		}
-		s.dispatch(c, &pkt)
 	}
 }
 
@@ -358,24 +408,18 @@ func (c *conn) send(pkt *packet) {
 	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	if _, err := c.writer.Write(body); err != nil {
-		c.markClosed()
-		return
-	}
-	if _, err := c.writer.WriteString("\r\n"); err != nil {
-		c.markClosed()
-		return
-	}
-	if err := c.writer.Flush(); err != nil {
+	if err := c.wire.writePacket(body); err != nil {
 		c.markClosed()
 	}
-	_ = c.tcp.SetWriteDeadline(time.Now().Add(10 * time.Second))
 }
 
+// markClosed stops further writes and drops the connection, so its read
+// loop ends and its subscriptions go.
 func (c *conn) markClosed() {
 	c.closeMu.Lock()
 	c.closed = true
 	c.closeMu.Unlock()
+	_ = c.wire.Close()
 }
 
 // helpers used by tests

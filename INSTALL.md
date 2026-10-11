@@ -317,6 +317,10 @@ The same binary can also store chat attachments for `/upload`
 (`-media-addr :10089 -media-dir ...`, then `upload_url` in the door's
 config). See MEDIA.md.
 
+For browser clients, `-ws-addr :10090` adds a WebSocket listener carrying
+the same packets. See WEB.md, which also covers the Synchronet route
+(`websocketservice.js` in front of `json-service.js`).
+
 ---
 
 ## Running a bridge as a systemd service

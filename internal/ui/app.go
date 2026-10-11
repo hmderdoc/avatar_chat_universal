@@ -128,6 +128,12 @@ type App struct {
 	// unreadPM counts PMs received since the user last sent a line; shown
 	// as a flashing /r pill.
 	unreadPM int
+	// images is the inline picture pipeline (nil = image links stay text).
+	images *imageManager
+	// sixelSig identifies the sixel pictures on screen after the last
+	// frame (URL@x,y each); "" when none are.
+	sixelSig string
+
 	// flashPhase is the last 500 ms on/off phase drawn for flashing pills;
 	// a phase change re-dirties the screen so the flash actually animates.
 	flashPhase int64
@@ -248,6 +254,7 @@ func (a *App) layout() {
 	}
 	a.transcript = NewTranscript(a.transcriptFrame, selfName)
 	a.transcript.Theme = th
+	a.transcript.Images = a.images
 	a.inputLine = NewInputLine(a.inputFrame, "> ")
 	a.inputLine.PromptAttr = th.InputPrompt
 	a.inputLine.TextAttr = th.InputText
@@ -679,6 +686,9 @@ func (a *App) Run(ctx context.Context) error {
 
 		// Drain any chat updates first.
 		a.Session.Cycle()
+		if a.images != nil && a.images.drain() {
+			a.dirty = true
+		}
 
 		// Maybe-reconnect: if the chat connection died, try to bring it
 		// back up with exponential backoff (1s, 2s, 4s, ... capped at 30s).
@@ -1016,6 +1026,19 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 			a.showLoungeHistory()
 		}
 		return false, true
+	case "/nsfw":
+		if a.images == nil {
+			a.Session.Notice("/nsfw: inline images are off on this system")
+			return false, true
+		}
+		shown, n := a.images.toggleReveal()
+		if shown {
+			a.Session.Notice(fmt.Sprintf("showing pictures the NSFW rule veiled (%d so far); /nsfw hides them again", n))
+		} else {
+			a.Session.Notice("NSFW pictures veiled again (/nsfw to show)")
+		}
+		a.forceFullRedraw()
+		return false, true
 	case "/tvcolor":
 		a.toggleTVColor()
 		return false, true
@@ -1026,6 +1049,9 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 			a.Session.Notice("/avatar and /settings change your BBS avatar and handle style everywhere on this system")
 		} else {
 			a.Session.Notice("/settings (/prefs): avatar, handle colours and tag in one panel")
+		}
+		if a.images != nil {
+			a.Session.Notice("image links show inline; /img zooms them; /nsfw shows or hides veiled ones")
 		}
 		a.Session.Notice("TV: /tvtuner <host> <port> <channel> | /tvtuner off | /tvon | /tvoff")
 		a.Session.Notice("TV: PgUp=history (PgDn/Down or 30s closes) | /tvcolor or Ctrl-T = truecolor/16")
@@ -1388,6 +1414,10 @@ func (a *App) openImageViewer() {
 		usable = a.Height
 	}
 	a.imageViewer = NewImageViewer(images, a.Width, usable)
+	if rasters := a.rasterItems(); len(rasters) > 0 {
+		a.imageViewer.WithRasters(rasters, a.zoomPicture)
+		a.imageViewer.Charset = a.Charset
+	}
 	if len(images) > 0 {
 		a.Session.MarkBitmapViewed(a.imageViewer.CurrentIndex())
 	}
@@ -1563,6 +1593,11 @@ func (a *App) refreshActionBar() {
 		imgN = len(a.Session.Bitmaps())
 		unread = a.Session.UnviewedBitmaps()
 	}
+	if a.images != nil {
+		// Downloaded pictures page in /img too; they're already on screen
+		// inline, so they count but never flash.
+		imgN += a.images.readyCount()
+	}
 	imgLabel := "/img"
 	if imgN > 0 {
 		imgLabel = fmt.Sprintf("/img [%d]", imgN)
@@ -1637,6 +1672,14 @@ func (a *App) composeInto(w io.Writer) error {
 	if err := a.actionFrame.Render(w); err != nil {
 		return err
 	}
+	// Sixel pictures live outside the cell model. When the set on screen
+	// changes, repaint every transcript cell first (wiping stale pixels)
+	// and land the current ones on top; see blitSixels.
+	sixelForced := false
+	if sig := sixelSignature(a.sixelRegions()); sig != a.sixelSig && a.sixelSig != "" {
+		a.transcriptComp.ForceRedraw()
+		sixelForced = true
+	}
 	if err := a.transcriptComp.Render(w); err != nil {
 		return err
 	}
@@ -1644,6 +1687,9 @@ func (a *App) composeInto(w io.Writer) error {
 		return err
 	}
 	if err := a.inputFrame.Render(w); err != nil {
+		return err
+	}
+	if err := a.blitSixels(w, sixelForced); err != nil {
 		return err
 	}
 	// Park the terminal cursor at the end of the input buffer. If the user's

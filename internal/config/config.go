@@ -56,6 +56,15 @@ type Config struct {
 	// at most once every few seconds. Default on.
 	Bell bool
 
+	// Inline images from links in chat. See CONFIG.md "Inline images".
+	Images          bool     // images = on (default) | off
+	ImageSixel      string   // "auto" (default: ask the terminal), "on", "off"
+	ImageMaxMB      int      // per-download cap, default 5
+	ImageCacheDir   string   // default <data>/imagecache
+	ImageCacheMB    int      // disk cache cap, default 50; 0 keeps nothing
+	NSFWKeywords    []string // words that veil a picture until /nsfw
+	NSFWKeywordsSet bool     // nsfw_keywords was given (an empty list disables the veil)
+
 	// Avatar and handle-style storage. See CONFIG.md "Avatar storage".
 	AvatarStore       string // "auto" (default), "synchronet" or "local"
 	SynchronetDataDir string // explicit Synchronet data dir; overrides detection
@@ -89,6 +98,10 @@ func Default() *Config {
 		TVPopupSecs:          10,
 		AvatarStore:          "auto",
 		Bell:                 true,
+		Images:               true,
+		ImageSixel:           "auto",
+		ImageMaxMB:           5,
+		ImageCacheMB:         50,
 		Raw:                  map[string]string{},
 	}
 }
@@ -185,6 +198,23 @@ func Load(path string) (*Config, error) {
 			cfg.TVAvatars = parseBool(val, cfg.TVAvatars)
 		case "bell":
 			cfg.Bell = parseBool(val, cfg.Bell)
+		case "images":
+			cfg.Images = parseBool(val, cfg.Images)
+		case "image_sixel":
+			cfg.ImageSixel = strings.ToLower(val)
+		case "image_max_mb":
+			cfg.ImageMaxMB = atoiOr(val, cfg.ImageMaxMB)
+		case "image_cache_dir":
+			cfg.ImageCacheDir = val
+		case "image_cache_mb":
+			cfg.ImageCacheMB = atoiOr(val, cfg.ImageCacheMB)
+		case "nsfw_keywords":
+			cfg.NSFWKeywordsSet = true
+			if strings.EqualFold(val, "none") {
+				cfg.NSFWKeywords = nil
+			} else {
+				cfg.NSFWKeywords = splitCSV(val)
+			}
 		case "avatar_store":
 			if val != "" {
 				cfg.AvatarStore = strings.ToLower(val)

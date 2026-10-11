@@ -181,12 +181,50 @@ also the on-screen action bars and `/help`.
 | `/join <channel>` / `/j`      | Switch to another channel. The one you leave stays joined: its new messages count as unread (top-bar `/channels [N]`). |
 | `/part` / `/p`                | Leave the current channel and go back to the one you were in before; parting the last one exits the door. |
 | `/clear`                      | Clear the local transcript view.                                              |
-| `/img`                        | Open the image (BITMAP) viewer modal for any inline images received.          |
+| `/img`                        | Full-screen viewer: BITMAP art first, then pictures from image links (zoomed to the screen). |
+| `/nsfw`                       | Show (or veil again) pictures the NSFW keyword rule hid, for this session.    |
 | `/avatar`                     | Open the avatar manager (selector with Upload/Disable/Editor pills).          |
 | `/avatar set <base64>`        | Power-user: set your avatar from a base64 120-byte payload.                   |
 | `/avatar off`                 | Disable your avatar without losing it (re-enable by picking again).           |
 | `/avatar pick`                | Open the selector directly.                                                   |
 | `/settings` / `/prefs` / `/options` | Settings panel: avatar (pick, draw, upload, disable) and handle style (a colour per letter, presets, a tag). On Synchronet these are the user's BBS-wide records. |
+
+---
+
+## Inline images
+
+Image links in chat (`.png`, `.jpg`/`.jpeg`, `.gif` first frame, `.webp`,
+`.bmp`, recognised by the extension, up to 3 per message) show as pictures
+inside the bubble, at most 10 rows tall and as wide as the bubble. The
+renderer follows the terminal, using the same probe as `tv_color = auto`:
+
+1. **Sixel** when the terminal says it draws it: SyncTERM 1.207+ reporting
+   pixel operations, or an xterm-family DA1 listing sixel. The encoder is
+   built in; no `img2sixel` or ImageMagick needed.
+2. **24-bit half blocks** when the terminal is truecolor.
+3. **16 colours** otherwise (NetRunner, the Linux console, anything that
+   answers nothing): each cell is the shade glyph (`░ ▒ ▓`), half block or
+   space with the 16-colour pair nearest its two pixels (shadecell, the
+   same matcher as the shell and the TV lounge).
+
+A link shows `[loading image...]` while it downloads. Downloads run in the
+background with these guards: http/https only, ports 80 and 443, every
+address the host resolves to must be public (no loopback, private,
+link-local, CGNAT or similar ranges), re-checked on each of at most 3
+redirects, a size cap and a 10 s timeout. No environment proxy is used.
+
+Pictures whose link or line contains an NSFW keyword (whole word; the
+shell's list by default) are not downloaded; a shaded veil shows instead
+until the user types `/nsfw`.
+
+| Key               | Default             | Meaning |
+| ----------------- | ------------------- | ------- |
+| `images`          | `true`              | Turn inline pictures on or off. |
+| `image_sixel`     | `auto`              | `auto` asks the terminal; `on` / `off` force it. |
+| `image_max_mb`    | `5`                 | Largest download, in MB. |
+| `image_cache_dir` | `<data>/imagecache` | Where downloads are kept between sessions. |
+| `image_cache_mb`  | `50`                | Cache size cap, in MB; oldest-used files go first. |
+| `nsfw_keywords`   | the shell's list    | Comma-separated words that veil a picture; `none` turns the veil off. |
 
 ---
 

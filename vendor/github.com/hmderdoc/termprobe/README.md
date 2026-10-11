@@ -37,6 +37,23 @@ default has to be the classic palette. Only a positive answer raises it.
 The DECRQSS echo outranks a terminal name: a terminal that quantized the
 24-bit SGR renders 256 colors whatever it calls itself.
 
+## Sixel and cell size
+
+The same probe says whether the terminal draws DEC sixel (`Result.Sixel`,
+with `Result.SixelReason`):
+
+- **xterm family:** DA1 (`CSI ? level ; attrs c`) lists attribute `4`.
+- **CTerm / SyncTERM:** version 1.207 or later answers CTerm Device
+  Attributes (`CSI < c`) with attribute `4`, pixel operations. That is the
+  check Synchronet's `cterm_lib.js` `supports_sixel()` makes; a text-mode
+  SyncTERM build answers without it. Older CTerm is never sent sixel.
+
+Only when one of those looks possible does a second, short burst go out:
+`CSI < c` (CTerm only), then `CSI 16 t`, `CSI 14 t`, `CSI 18 t` for the cell
+size in pixels, ended early by another `CSI c`. A sane answer lands in
+`Result.CellW` / `Result.CellH`; otherwise they stay 0 and a door should
+assume 8x16. Plain terminals see exactly the first burst and nothing more.
+
 ## Readers
 
 The probe reads through a `TimedReader`, a read that gives up after a

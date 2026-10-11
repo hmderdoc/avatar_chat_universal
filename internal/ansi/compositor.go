@@ -29,9 +29,19 @@ type Compositor struct {
 	// Charset selects byte encoding for cell chars; matches Frame.Charset.
 	Charset Charset
 
+	// Spans lists the cells the last Render rewrote, one entry per row it
+	// touched. Raw output written over the composited area afterwards (a
+	// sixel picture) uses it to tell whether that output was just painted
+	// over.
+	Spans []Span
+
 	last        [][]Cell
 	initialized bool
 }
+
+// Span is one row's rewritten run, in layer-0 frame coordinates: columns
+// First..Last inclusive of row Row.
+type Span struct{ Row, First, Last int }
 
 // NewCompositor builds a compositor for layers that share dimensions. All
 // layers are expected to have the same X, Y, W, H — only layer 0's coords
@@ -79,6 +89,7 @@ func (c *Compositor) Render(w io.Writer) error {
 
 	var buf bytes.Buffer
 	scratch := make([]byte, 0, 4)
+	c.Spans = c.Spans[:0]
 
 	for r := 0; r < H; r++ {
 		// Compose this row and find the changed span.
@@ -97,6 +108,7 @@ func (c *Compositor) Render(w io.Writer) error {
 		if firstChange < 0 {
 			continue
 		}
+		c.Spans = append(c.Spans, Span{Row: r, First: firstChange, Last: lastChange})
 
 		// Emit cursor move + cells.
 		fmt.Fprintf(&buf, "\x1b[%d;%dH", base.Y+r+1, base.X+firstChange+1)

@@ -8,6 +8,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
+	"github.com/hmderdoc/avatar_chat_universal/internal/inlineimg"
 	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
 	"github.com/hmderdoc/avatar_chat_universal/internal/theme"
 )
@@ -33,6 +34,21 @@ type Transcript struct {
 	// Truecolor paints handle styles in 24-bit; otherwise each colour is
 	// mapped to its nearest of the 16. The App sets it from the probe.
 	Truecolor bool
+
+	// Images, when set, turns image links into inline pictures inside the
+	// bubble (nil = links stay text only).
+	Images *imageManager
+	// SixelRegions lists, after Render, the fully visible pictures that
+	// carry a sixel version, in frame coordinates, for the App to blit
+	// over their cells.
+	SixelRegions []sixelRegion
+}
+
+// sixelRegion is a picture's cell box in the transcript frame.
+type sixelRegion struct {
+	X, Y int
+	Pic  *inlineimg.Picture
+	URL  string
 }
 
 func NewTranscript(f *ansi.Frame, selfName string) *Transcript {
@@ -62,6 +78,9 @@ type block struct {
 	stamp   string
 	host    string   // BBS / system name from Nick.Host, rendered after stamp
 	rows    []string // wrapped lines of text
+	// pics are inline pictures; each owns blank rows of the bubble starting
+	// at its row index.
+	pics []picSlot
 	// mention[i] marks rows[i] as part of a message from someone else that
 	// says our name (chat.MentionsName); those rows get the mention colours
 	// and a bar down the left edge. nil when no row is a mention.
@@ -96,6 +115,7 @@ func (b *block) height() int {
 // Render paints the visible bubbles into the transcript frame, bottom-aligned.
 func (t *Transcript) Render(messages []*chat.Message) {
 	t.Frame.Clear()
+	t.SixelRegions = t.SixelRegions[:0]
 	if len(messages) == 0 {
 		return
 	}
@@ -191,6 +211,7 @@ func (t *Transcript) buildBlocks(messages []*chat.Message, bubbleW int) []*block
 			prev.style = msg.Nick.Style
 			prev.addRows([]string{""}, false)
 			prev.addRows(wrapText(msg.Str, bubbleW), left && chat.MentionsName(msg.Str, t.SelfName))
+			t.addPictures(prev, msg)
 			continue
 		}
 
@@ -204,6 +225,7 @@ func (t *Transcript) buildBlocks(messages []*chat.Message, bubbleW int) []*block
 			width:   bubbleW,
 		}
 		b.addRows(wrapText(msg.Str, bubbleW), left && chat.MentionsName(msg.Str, t.SelfName))
+		t.addPictures(b, msg)
 		if msg.Nick.Avatar != "" {
 			if a, err := avatar.FromBase64(msg.Nick.Avatar); err == nil {
 				b.avatar = a
@@ -230,6 +252,100 @@ func (b *block) addRows(rows []string, mention bool) {
 		for range rows {
 			b.mention = append(b.mention, mention)
 		}
+	}
+}
+
+// picSlot is one inline picture (or its veil) inside a bubble.
+type picSlot struct {
+	row    int // index into block.rows of its first row
+	url    string
+	pic    *inlineimg.Picture
+	veiled bool
+	cols   int
+	rows   int
+}
+
+const (
+	veilRows = 4
+	veilCols = 40
+)
+
+// addPictures reserves bubble rows under msg's text for each image link in
+// it: the picture once downloaded, a one-line placeholder while it loads,
+// a shaded veil while the NSFW rule hides it, nothing if it failed.
+func (t *Transcript) addPictures(b *block, msg *chat.Message) {
+	if t.Images == nil {
+		return
+	}
+	for _, u := range inlineimg.FindImageURLs(msg.Str) {
+		v, ok := t.Images.lookup(u, msg.Str, msg.Nick.Name, b.width, t.Truecolor)
+		if !ok {
+			continue
+		}
+		switch {
+		case v.pending:
+			b.addRows([]string{"[loading image...]"}, false)
+		case v.veiled:
+			slot := picSlot{row: len(b.rows), url: u, veiled: true, cols: minInt(veilCols, b.width), rows: veilRows}
+			b.addRows(make([]string, veilRows), false)
+			b.pics = append(b.pics, slot)
+		case v.pic != nil:
+			slot := picSlot{row: len(b.rows), url: u, pic: v.pic, cols: v.pic.Cols, rows: v.pic.Rows}
+			b.addRows(make([]string, v.pic.Rows), false)
+			b.pics = append(b.pics, slot)
+		}
+	}
+}
+
+// paintPictures draws a bubble's pictures with their top-left at the
+// bubble's text column, and records the sixel ones that are wholly inside
+// the frame.
+func (t *Transcript) paintPictures(b *block, textX, bodyY int) {
+	for _, s := range b.pics {
+		y0 := bodyY + s.row
+		if s.veiled {
+			paintVeil(t.Frame, textX, y0, s.cols, s.rows)
+			continue
+		}
+		for r := 0; r < s.pic.Rows; r++ {
+			y := y0 + r
+			if y < 0 || y >= t.Frame.H {
+				continue
+			}
+			for c := 0; c < s.pic.Cols; c++ {
+				cell := s.pic.Cells[r*s.pic.Cols+c]
+				if cell.True {
+					t.Frame.SetCellTrue(textX+c, y, cell.Char, cell.Fg, cell.Bg)
+				} else {
+					t.Frame.SetCell(textX+c, y, cell.Char, cell.Attr)
+				}
+			}
+		}
+		if s.pic.Sixel != nil && y0 >= 0 && y0+s.pic.Rows <= t.Frame.H {
+			t.SixelRegions = append(t.SixelRegions, sixelRegion{X: textX, Y: y0, Pic: s.pic, URL: s.url})
+		}
+	}
+}
+
+// paintVeil fills a box with shade noise and a reveal hint, the shell's
+// NSFW veil: frame cells only, so it needs no fetch.
+func paintVeil(f *ansi.Frame, x, y, cols, rows int) {
+	shades := [3]byte{0xB0, 0xB1, 0xB2}
+	seed := uint32(y*31 + x)
+	for r := 0; r < rows; r++ {
+		for c := 0; c < cols; c++ {
+			seed = seed*1103515245 + 12345
+			pick := (seed >> 8) % 3
+			attr := ansi.DarkGray | ansi.BgBlack
+			if pick == 1 {
+				attr = ansi.LightGray | ansi.BgBlack
+			}
+			f.SetCell(x+c, y+r, shades[pick], attr)
+		}
+	}
+	label := " NSFW - /nsfw to show "
+	if cols >= len(label) && rows >= 2 {
+		f.PrintAt(x+(cols-len(label))/2, y+rows/2, []byte(label), ansi.White|ansi.BgMagenta)
 	}
 }
 
@@ -319,6 +435,7 @@ func (t *Transcript) renderBlock(b *block, y int) {
 			t.Frame.SetCell(bubbleX, row, mentionEdge, (attr&^0x0F)|(th.MentionEdge&0x0F))
 		}
 	}
+	t.paintPictures(b, bubbleX+1, y+1)
 
 	// Avatar (drawn last so it's on top of any overlap).
 	if b.avatar != nil {

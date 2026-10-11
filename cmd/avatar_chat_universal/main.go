@@ -15,6 +15,7 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
 	"github.com/hmderdoc/avatar_chat_universal/internal/config"
 	"github.com/hmderdoc/avatar_chat_universal/internal/dropfile"
+	"github.com/hmderdoc/avatar_chat_universal/internal/inlineimg"
 	"github.com/hmderdoc/avatar_chat_universal/internal/nickstyle"
 	"github.com/hmderdoc/avatar_chat_universal/internal/termio"
 	"github.com/hmderdoc/avatar_chat_universal/internal/theme"
@@ -112,13 +113,20 @@ func run() error {
 	// (NetRunner, the Linux console) is a 16-color one. Same ordering rule as
 	// the size probe: before the input pump starts reading. Keystrokes typed
 	// during the probe are replayed ahead of the connection.
+	// The same probe says whether the terminal draws sixel, which inline
+	// images use, so it also runs when tv_color is pinned but images are on.
 	var inputSrc io.Reader = conn
-	if v := strings.ToLower(strings.TrimSpace(cfg.TVColor)); v == "" || v == "auto" {
+	var probe *termprobe.Result
+	autoColor := strings.ToLower(strings.TrimSpace(cfg.TVColor))
+	if autoColor == "" || autoColor == "auto" || cfg.Images {
 		res := termprobe.ColorDepth(conn, termprobe.DeadlineReader(conn), 400*time.Millisecond)
-		if res.Depth == termprobe.DepthTrue {
-			cfg.TVColor = "truecolor"
-		} else {
-			cfg.TVColor = "16"
+		probe = &res
+		if autoColor == "" || autoColor == "auto" {
+			if res.Depth == termprobe.DepthTrue {
+				cfg.TVColor = "truecolor"
+			} else {
+				cfg.TVColor = "16"
+			}
 		}
 		if len(res.Leftover) > 0 {
 			inputSrc = &replayConn{Conn: conn, pending: res.Leftover}
@@ -324,6 +332,9 @@ func run() error {
 	}
 	app.TVAvatars = cfg.TVAvatars
 	app.Bell = cfg.Bell
+	if cfg.Images {
+		app.EnableImages(imageConfig(cfg, *dataDir, probe))
+	}
 
 	// Theme overlay. Main config sets the baseline; theme can override
 	// any color or screensaver field. Missing theme files are not fatal --
@@ -783,3 +794,34 @@ func standaloneUser(userOverride, bbsOverride string) *dropfile.User {
 // legacy ConHost (older Win10 builds, Server 2016, VT-disabled environments)
 // rejects with ERROR_INVALID_PARAMETER -- killing standalone mode for
 // users whose Windows can't speak VT input.
+
+// imageConfig builds the inline-picture settings: fetch limits and cache
+// from the config, sixel and cell size from the terminal probe.
+func imageConfig(cfg *config.Config, dataDir string, probe *termprobe.Result) ui.ImageConfig {
+	cacheDir := cfg.ImageCacheDir
+	if cacheDir == "" {
+		cacheDir = filepath.Join(dataDir, "imagecache")
+	}
+	f := inlineimg.NewFetcher(cacheDir)
+	if cfg.ImageMaxMB > 0 {
+		f.MaxBytes = int64(cfg.ImageMaxMB) << 20
+	}
+	if cfg.ImageCacheMB >= 0 {
+		f.CacheMax = int64(cfg.ImageCacheMB) << 20
+	}
+	ic := ui.ImageConfig{Fetcher: f, NSFWKeywords: inlineimg.DefaultNSFWKeywords}
+	if cfg.NSFWKeywordsSet {
+		ic.NSFWKeywords = cfg.NSFWKeywords
+	}
+	switch strings.ToLower(cfg.ImageSixel) {
+	case "on", "true", "yes":
+		ic.Sixel = true
+	case "off", "false", "no":
+	default:
+		ic.Sixel = probe != nil && probe.Sixel
+	}
+	if probe != nil {
+		ic.CellW, ic.CellH = probe.CellW, probe.CellH
+	}
+	return ic
+}

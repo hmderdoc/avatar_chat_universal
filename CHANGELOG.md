@@ -36,8 +36,22 @@ versioning follows loose [SemVer](https://semver.org/) (see
   channel joined, counting its messages on a flashing `/channels [N]` pill,
   and the header shows how many channels you're in.
 
+- **Inline images.** Image links (png, jpeg, gif first frame, webp, bmp)
+  show inside the bubble, up to 10 rows: sixel on terminals that report it
+  (SyncTERM 1.207+ pixel operations, xterm DA1), 24-bit half blocks on
+  truecolor terminals, and 16-colour shadecell cells everywhere else. The
+  sixel encoder is pure Go. Downloads are guarded (public addresses only,
+  ports 80/443, 3 redirects, size cap, timeout) and cached under the data
+  dir. NSFW-keyword links are veiled and not fetched until `/nsfw`. `/img`
+  now also zooms these pictures to the full screen. New keys: `images`,
+  `image_sixel`, `image_max_mb`, `image_cache_dir`, `image_cache_mb`,
+  `nsfw_keywords`.
+
 ### Changed
 
+- The terminal probe now also runs when `tv_color` is pinned but images are
+  on, to learn about sixel; it uses termprobe's new sixel and cell-size
+  report.
 - `/part` leaves the current channel for the previous one instead of
   exiting; it still exits when it's the last channel.
 

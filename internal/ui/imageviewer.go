@@ -7,14 +7,23 @@ import (
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
+	"github.com/hmderdoc/avatar_chat_universal/internal/inlineimg"
 )
 
 // ImageViewer is a full-screen modal for viewing received bitmap messages.
 // Unlike the roster modal it bypasses the Frame system and writes directly
 // to conn, because image cells use 256-color (bytes 0-255) values that
 // don't fit ansi.Attr's CGA palette.
+//
+// After the bitmaps it also pages through the pictures downloaded from
+// image links (rasters), each laid out to fill the screen: sixel when the
+// terminal draws it, otherwise 24-bit or 16-colour shade cells.
 type ImageViewer struct {
 	images  []*chat.BitmapEntry
+	rasters []*imageEntry
+	// zoom lays a raster out for a cols x rows box.
+	zoom    func(e *imageEntry, cols, rows int) *inlineimg.Picture
+	Charset ansi.Charset
 	index   int
 	scrollY int
 	width   int
@@ -38,6 +47,19 @@ func NewImageViewer(images []*chat.BitmapEntry, width, height int) *ImageViewer 
 	return v
 }
 
+// WithRasters adds downloaded pictures after the bitmaps and opens on the
+// newest item.
+func (v *ImageViewer) WithRasters(rasters []*imageEntry, zoom func(e *imageEntry, cols, rows int) *inlineimg.Picture) *ImageViewer {
+	v.rasters = rasters
+	v.zoom = zoom
+	if n := v.count(); n > 0 {
+		v.index = n - 1
+	}
+	return v
+}
+
+func (v *ImageViewer) count() int { return len(v.images) + len(v.rasters) }
+
 // HandleKey routes navigation. Returns true when the modal should close.
 func (v *ImageViewer) HandleKey(k ansi.Key) bool {
 	switch k.Type {
@@ -50,7 +72,7 @@ func (v *ImageViewer) HandleKey(k ansi.Key) bool {
 			v.scrollY = 0
 		}
 	case ansi.KeyRight, ansi.KeyPgDn:
-		if v.index < len(v.images)-1 {
+		if v.index < v.count()-1 {
 			v.index++
 			v.scrollY = 0
 		}
@@ -58,7 +80,7 @@ func (v *ImageViewer) HandleKey(k ansi.Key) bool {
 		v.index = 0
 		v.scrollY = 0
 	case ansi.KeyEnd:
-		v.index = len(v.images) - 1
+		v.index = v.count() - 1
 		v.scrollY = 0
 	case ansi.KeyUp:
 		if v.scrollY > 0 {
@@ -73,7 +95,7 @@ func (v *ImageViewer) HandleKey(k ansi.Key) bool {
 			v.closed = true
 			return true
 		case 'n', 'N', ' ':
-			if v.index < len(v.images)-1 {
+			if v.index < v.count()-1 {
 				v.index++
 				v.scrollY = 0
 			}
@@ -98,9 +120,12 @@ func (v *ImageViewer) CurrentIndex() int { return v.index }
 // 256-color SGR sequences so the original bitmap colors come through on
 // any terminal that supports them (SyncTERM does, modern xterms do).
 func (v *ImageViewer) Render(w io.Writer) error {
+	if v.index >= len(v.images) && v.index < v.count() {
+		return v.renderRaster(w, v.rasters[v.index-len(v.images)])
+	}
 	var buf bytes.Buffer
 	buf.WriteString("\x1b[2J\x1b[H")
-	if len(v.images) == 0 {
+	if v.count() == 0 {
 		buf.WriteString("\x1b[1;1H")
 		buf.WriteString("\x1b[1;33;44m No images yet \x1b[0m")
 		buf.WriteString("\x1b[3;1HType /img after someone shares a bitmap.")
@@ -131,7 +156,7 @@ func (v *ImageViewer) Render(w io.Writer) error {
 
 	// Header.
 	header := fmt.Sprintf(" Image %d/%d | %s | %dx%d | row %d-%d ",
-		v.index+1, len(v.images), entry.Sender, img.Width, img.Height,
+		v.index+1, v.count(), entry.Sender, img.Width, img.Height,
 		v.scrollY+1, minInt(v.scrollY+visibleH, imgH))
 	buf.WriteString("\x1b[1;1H\x1b[1;37;44m")
 	buf.WriteString(padOrTrim(header, v.width))
@@ -175,6 +200,47 @@ func (v *ImageViewer) Render(w io.Writer) error {
 	buf.WriteString(padOrTrim(footer, v.width))
 	buf.WriteString("\x1b[0m")
 
+	_, err := w.Write(buf.Bytes())
+	return err
+}
+
+// renderRaster paints one downloaded picture full screen.
+func (v *ImageViewer) renderRaster(w io.Writer, e *imageEntry) error {
+	f := ansi.NewFrame(0, 0, v.width, v.height, ansi.LightGray|ansi.BgBlack)
+	f.Charset = v.Charset
+	bodyH := v.height - 2
+	if bodyH < 1 {
+		bodyH = 1
+	}
+	pic := v.zoom(e, v.width, bodyH)
+	b := e.img.Bounds()
+	header := fmt.Sprintf(" Image %d/%d | %s | %dx%d | %s ", v.index+1, v.count(), e.from, b.Dx(), b.Dy(), e.url)
+	f.PrintAt(0, 0, []byte(padOrTrim(header, v.width)), ansi.White|ansi.BgBlue)
+	x0 := 0
+	if pic != nil {
+		x0 = (v.width - pic.Cols) / 2
+		for r := 0; r < pic.Rows; r++ {
+			for c := 0; c < pic.Cols; c++ {
+				cell := pic.Cells[r*pic.Cols+c]
+				if cell.True {
+					f.SetCellTrue(x0+c, 1+r, cell.Char, cell.Fg, cell.Bg)
+				} else {
+					f.SetCell(x0+c, 1+r, cell.Char, cell.Attr)
+				}
+			}
+		}
+	}
+	footer := " Esc close   <-/-> prev/next   Home/End first/last "
+	f.PrintAt(0, v.height-1, []byte(padOrTrim(footer, v.width)), ansi.White|ansi.BgBlue)
+	var buf bytes.Buffer
+	buf.WriteString("\x1b[2J")
+	if err := f.Render(&buf); err != nil {
+		return err
+	}
+	if pic != nil && pic.Sixel != nil {
+		fmt.Fprintf(&buf, "\x1b[2;%dH", x0+1)
+		buf.Write(pic.Sixel)
+	}
 	_, err := w.Write(buf.Bytes())
 	return err
 }

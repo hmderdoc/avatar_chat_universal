@@ -7,7 +7,7 @@ github.com/gorilla/websocket
 # github.com/hmderdoc/shadecell v0.1.0
 ## explicit; go 1.25
 github.com/hmderdoc/shadecell
-# github.com/hmderdoc/termprobe v0.1.0
+# github.com/hmderdoc/termprobe v0.1.0 => ../termprobe
 ## explicit; go 1.25
 github.com/hmderdoc/termprobe
 # github.com/mattn/go-colorable v0.1.14
@@ -24,11 +24,16 @@ golang.org/x/crypto/poly1305
 golang.org/x/crypto/salsa20/salsa
 # golang.org/x/image v0.40.0
 ## explicit; go 1.25.0
+golang.org/x/image/bmp
 golang.org/x/image/draw
 golang.org/x/image/font
 golang.org/x/image/font/basicfont
 golang.org/x/image/math/f64
 golang.org/x/image/math/fixed
+golang.org/x/image/riff
+golang.org/x/image/vp8
+golang.org/x/image/vp8l
+golang.org/x/image/webp
 # golang.org/x/sys v0.43.0
 ## explicit; go 1.25.0
 golang.org/x/sys/cpu
@@ -38,3 +43,4 @@ golang.org/x/sys/windows
 # golang.org/x/term v0.42.0
 ## explicit; go 1.25.0
 golang.org/x/term
+# github.com/hmderdoc/termprobe => ../termprobe

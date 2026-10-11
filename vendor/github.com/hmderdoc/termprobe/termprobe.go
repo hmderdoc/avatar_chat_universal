@@ -20,6 +20,14 @@
 // 16-color and 24-bit SGR turns into mush on them. Only a positive answer
 // raises the depth.
 //
+// Sixel is decided from the same replies: an xterm-family DA1 that lists
+// attribute 4, or, for CTerm/SyncTERM 1.207 and later, a CTerm Device
+// Attributes reply (CSI < c) that lists pixel operations (4), the test
+// Synchronet's cterm_lib.js supports_sixel() uses. When either kind of
+// terminal is detected a short second burst asks for that CTDA and for the
+// character cell's pixel size (XTWINOPS CSI 16 t / 14 t / 18 t), again ended
+// early by a DA reply. A terminal that answers neither is not sent sixel.
+//
 // Call ColorDepth before any goroutine that reads terminal input is started,
 // otherwise that goroutine will eat the replies as keystrokes. Bytes that
 // arrive during the probe and are not part of a reply (a caller typing ahead)
@@ -84,6 +92,14 @@ type Result struct {
 	CTerm string
 	// Replies is the number of recognised replies, for diagnostics.
 	Replies int
+
+	// Sixel reports that the terminal said it draws DEC sixel graphics;
+	// SixelReason says which reply decided it either way.
+	Sixel       bool
+	SixelReason string
+	// CellW / CellH are the character cell's size in pixels, when the
+	// terminal reported it (0 otherwise). Only asked of sixel candidates.
+	CellW, CellH int
 }
 
 // Queries is the exact byte burst ColorDepth writes, exported so a door can
@@ -97,6 +113,19 @@ const Queries = "\x1b[>q" +
 	"\x1b[?2;1S" +
 	"\x1b[c"
 
+// cellQueries asks for the cell size in pixels (CSI 16 t), the text area in
+// pixels (CSI 14 t) and in characters (CSI 18 t). Sent only in the second
+// burst, to terminals that look sixel-capable.
+const cellQueries = "\x1b[16t\x1b[14t\x1b[18t"
+
+// ctdaQuery is CTerm's own Device Attributes request; SyncTERM answers
+// CSI < attrs c, where attribute 4 means pixel operations (sixel).
+const ctdaQuery = "\x1b[<c"
+
+// ctermVersionCTDA is the first CTerm version that answers CSI < c
+// (cterm_lib.js cterm_version_supports_ctda), as major*1000+minor.
+const ctermVersionCTDA = 1207
+
 // ColorDepth writes the query burst to w, reads replies from r for at most
 // timeout, and returns the decision. 300-500 ms is a sensible timeout for a
 // BBS caller; the wait ends as soon as a Device Attributes reply arrives.
@@ -104,15 +133,43 @@ func ColorDepth(w io.Writer, r TimedReader, timeout time.Duration) Result {
 	if _, err := io.WriteString(w, Queries); err != nil {
 		return Result{Depth: Depth16, Reason: "could not send terminal queries: " + err.Error()}
 	}
-	return readReplies(r, timeout)
+	buf := readUntilDA(r, timeout, nil)
+	sig := scan(buf)
+	if second := secondBurst(sig); second != "" {
+		if _, err := io.WriteString(w, second); err == nil {
+			wait := timeout
+			if wait > 300*time.Millisecond {
+				wait = 300 * time.Millisecond
+			}
+			buf = readUntilDA(r, wait, buf)
+			sig = scan(buf)
+		}
+	}
+	return decide(sig, timeout)
 }
 
-func readReplies(r TimedReader, timeout time.Duration) Result {
+// secondBurst is what to ask after the first replies: CTerm's CTDA (when
+// the version answers it) and the cell size, for terminals that may draw
+// sixel. "" when there is nothing worth asking.
+func secondBurst(s signals) string {
+	cterm := s.ctermOK && s.ctermMajor*1000+s.ctermMinor >= ctermVersionCTDA
+	if !cterm && !da1Sixel(s.da1) {
+		return ""
+	}
+	q := cellQueries + "\x1b[c"
+	if cterm {
+		q = ctdaQuery + q
+	}
+	return q
+}
+
+// readUntilDA appends replies to buf until a Device Attributes reply that
+// was not already in buf arrives, or timeout passes.
+func readUntilDA(r TimedReader, timeout time.Duration, buf []byte) []byte {
 	deadline := time.Now().Add(timeout)
-	buf := make([]byte, 0, 256)
+	start := len(buf)
 	scratch := make([]byte, 128)
-	var sig signals
-	for time.Now().Before(deadline) && len(buf) < 1024 {
+	for time.Now().Before(deadline) && len(buf)-start < 1024 {
 		rem := time.Until(deadline)
 		if rem > 50*time.Millisecond {
 			rem = 50 * time.Millisecond
@@ -120,16 +177,14 @@ func readReplies(r TimedReader, timeout time.Duration) Result {
 		n, err := r.ReadTimeout(scratch, rem)
 		if n > 0 {
 			buf = append(buf, scratch[:n]...)
-			sig = scan(buf)
-			if sig.daSeen {
+			if scan(buf[start:]).daSeen {
 				break
 			}
 		} else if err != nil {
 			break
 		}
 	}
-	sig = scan(buf)
-	return decide(sig, timeout)
+	return buf
 }
 
 // Decide is the pure decision over a captured reply buffer, exported for
@@ -150,6 +205,15 @@ type signals struct {
 	rqss       string // the SGR text echoed by DECRQSS; "" when not answered
 	rqssSeen   bool
 	graphics   bool
+	da1        string // params of a DEC DA1 reply (CSI ? params c)
+	ctda       string // params of a CTerm CTDA reply (CSI < params c)
+	ctdaSeen   bool
+	cellW      int // CSI 6 ; h ; w t
+	cellH      int
+	areaW      int // CSI 4 ; h ; w t
+	areaH      int
+	rows       int // CSI 8 ; rows ; cols t
+	cols       int
 }
 
 func decide(s signals, timeout time.Duration) Result {
@@ -157,6 +221,7 @@ func decide(s signals, timeout time.Duration) Result {
 	if s.ctermOK {
 		res.CTerm = strconv.Itoa(s.ctermMajor) + "." + strconv.Itoa(s.ctermMinor)
 	}
+	decideSixel(s, &res)
 
 	// The DECRQSS echo is direct evidence of what the terminal did with a
 	// 24-bit SGR, so it outranks a name. 38;5 means it quantized.
@@ -211,6 +276,61 @@ func decide(s signals, timeout time.Duration) Result {
 	}
 	return res
 }
+
+// decideSixel fills the sixel fields. CTerm is judged only by its CTDA
+// (text-mode SyncTERM builds have no pixels whatever their version);
+// everyone else by DA1 attribute 4.
+func decideSixel(s signals, res *Result) {
+	switch {
+	case s.ctermOK && s.ctermMajor*1000+s.ctermMinor < ctermVersionCTDA:
+		res.SixelReason = "CTerm " + res.CTerm + " predates the pixel-operations query"
+	case s.ctermOK && !s.ctdaSeen:
+		res.SixelReason = "CTerm " + res.CTerm + " gave no CTDA reply"
+	case s.ctermOK:
+		if hasAttr(strings.Split(s.ctda, ";"), "4") {
+			res.Sixel = true
+			res.SixelReason = "CTerm " + res.CTerm + " CTDA lists pixel operations"
+		} else {
+			res.SixelReason = "CTerm " + res.CTerm + " CTDA lacks pixel operations: " + s.ctda
+		}
+	case da1Sixel(s.da1):
+		res.Sixel = true
+		res.SixelReason = "DA1 lists sixel: ?" + s.da1
+	case s.da1 != "":
+		res.SixelReason = "DA1 lacks sixel: ?" + s.da1
+	default:
+		res.SixelReason = "no DEC DA1 or CTDA reply"
+	}
+	if !res.Sixel {
+		return
+	}
+	switch {
+	case saneCell(s.cellW, s.cellH):
+		res.CellW, res.CellH = s.cellW, s.cellH
+	case s.rows > 0 && s.cols > 0 && saneCell(s.areaW/s.cols, s.areaH/s.rows):
+		res.CellW, res.CellH = s.areaW/s.cols, s.areaH/s.rows
+	}
+}
+
+// da1Sixel reports whether DA1 params list attribute 4. The first field is
+// the conformance level (62, 64, 65...), not a feature.
+func da1Sixel(params string) bool {
+	if params == "" {
+		return false
+	}
+	return hasAttr(strings.Split(params, ";")[1:], "4")
+}
+
+func hasAttr(attrs []string, want string) bool {
+	for _, a := range attrs {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+func saneCell(w, h int) bool { return w >= 4 && w <= 64 && h >= 6 && h <= 128 }
 
 // depthForTerminal maps an XTVERSION name to a depth. Only terminals known
 // to render 24-bit SGR are listed; everything else that answers XTVERSION
@@ -325,9 +445,37 @@ func matchCSI(buf []byte, i int, s *signals) (int, bool) {
 	case final == 'c' && (prefix == '?' || prefix == '=' || prefix == 0):
 		s.daSeen = true
 		s.replies++
-		if prefix == '=' {
+		switch prefix {
+		case '=':
 			parseCTerm(params, s)
+		case '?':
+			s.da1 = params
 		}
+		return j + 1, true
+	case final == 'c' && prefix == '<':
+		// CTerm Device Attributes; not a barrier, the DA after it is.
+		s.ctda = params
+		s.ctdaSeen = true
+		s.replies++
+		return j + 1, true
+	case final == 't' && prefix == 0:
+		f := strings.Split(params, ";")
+		if len(f) != 3 {
+			return 0, false
+		}
+		a, _ := strconv.Atoi(f[1])
+		b, _ := strconv.Atoi(f[2])
+		switch f[0] {
+		case "6":
+			s.cellH, s.cellW = a, b
+		case "4":
+			s.areaH, s.areaW = a, b
+		case "8":
+			s.rows, s.cols = a, b
+		default:
+			return 0, false
+		}
+		s.replies++
 		return j + 1, true
 	case final == 'S' && prefix == '?' && strings.HasPrefix(params, "2;"):
 		// CSI ? 2 ; 0 ; w ; h S  — status 0 means "answered".
@@ -360,5 +508,12 @@ func parseCTerm(params string, s *signals) {
 
 // String renders the result on one line for a log.
 func (r Result) String() string {
-	return fmt.Sprintf("%s (%s; %d replies, %d leftover bytes)", r.Depth, r.Reason, r.Replies, len(r.Leftover))
+	sixel := "no sixel"
+	if r.Sixel {
+		sixel = "sixel"
+		if r.CellW > 0 {
+			sixel += fmt.Sprintf(" %dx%d px cells", r.CellW, r.CellH)
+		}
+	}
+	return fmt.Sprintf("%s (%s; %s; %d replies, %d leftover bytes)", r.Depth, r.Reason, sixel, r.Replies, len(r.Leftover))
 }

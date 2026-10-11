@@ -138,7 +138,7 @@
                 <div id="avatar-chat-welcome-avatar" class="avatar-chat-avatar-preview"></div>
                 <div id="avatar-chat-welcome-name"></div>
             </div>
-            <p class="avatar-chat-modal-text">You have no avatar yet. Pick one to go with your messages.</p>
+            <p id="avatar-chat-welcome-text" class="avatar-chat-modal-text">You have no avatar yet. Pick one to go with your messages.</p>
             <div class="avatar-chat-modal-actions">
                 <button id="avatar-chat-welcome-avatar-open" class="avatar-chat-sidebar-button is-primary" type="button">Choose avatar</button>
                 <button id="avatar-chat-welcome-colors" class="avatar-chat-sidebar-button" type="button">Colour your name</button>

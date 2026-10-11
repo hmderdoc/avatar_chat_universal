@@ -285,6 +285,13 @@ func run() error {
 		ansi.Reset(conn)
 		ansi.ClearScreen(conn)
 		fmt.Fprintf(conn, "\r\nPress C to colour your name, any other key to skip...\r\n")
+		// The picker's Enter often arrives as CR LF; the LF (or anything
+		// else typed ahead) mustn't answer this.
+		for {
+			if _, ok, _ := input.Next(250 * time.Millisecond); !ok {
+				break
+			}
+		}
 		k, ok, _ := input.Next(30 * time.Second)
 		startInSettings = ok && k.Type == ansi.KeyChar && (k.Rune == 'c' || k.Rune == 'C')
 	}

@@ -4209,6 +4209,7 @@
         styleModal.classList.remove('is-open');
         styleModal.setAttribute('aria-hidden', 'true');
         applyPageStyle(savedPageStyle);
+        returnToWelcome();
     }
 
     function openStyleModal() {
@@ -4655,7 +4656,10 @@
 
     if (avatarOpen && avatarModal) {
         avatarOpen.addEventListener('click', openAvatarModal);
-        avatarClose.addEventListener('click', closeAvatarModal);
+        avatarClose.addEventListener('click', function () {
+            closeAvatarModal();
+            returnToWelcome();
+        });
         avatarCollection.addEventListener('change', function () {
             showCollection(avatarCollection.value);
         });
@@ -4773,39 +4777,78 @@
     var welcomeAvatarOpen = document.getElementById('avatar-chat-welcome-avatar-open');
     var welcomeColors = document.getElementById('avatar-chat-welcome-colors');
     var welcomeLater = document.getElementById('avatar-chat-welcome-later');
+    var welcomeText = document.getElementById('avatar-chat-welcome-text');
+    /* welcomeReturn: the avatar or style modal was opened from the welcome,
+       so closing it comes back here and the other choice is still offered. */
+    var welcomeReturn = false;
+    var welcomeOffersColors = false;
 
     function closeWelcomeModal() {
+        welcomeReturn = false;
         welcomeModal.classList.remove('is-open');
         welcomeModal.setAttribute('aria-hidden', 'true');
+    }
+
+    function loadWelcomeState() {
+        return Promise.all([fetchJSON(apiBase + '?action=avatar'), fetchJSON(apiBase + '?action=style')]).then(function (replies) {
+            var style = replies[1] && replies[1].style ? replies[1].style : {};
+            return {
+                avatar: replies[0] && replies[0].ok ? replies[0].avatar : undefined,
+                style: style,
+                colors: Array.isArray(style.colors) ? style.colors.filter(function (c) { return HEX_COLOR.test(c || ''); }) : []
+            };
+        });
+    }
+
+    function showWelcome(st) {
+        var has = !!(st.avatar && st.avatar.data && !st.avatar.disabled);
+        welcomeAvatar.innerHTML = has ? avatarTile(st.avatar.data) : '<div class="avatar-chat-avatar-placeholder">none</div>';
+        renderEmbeddedAvatars(welcomeAvatar);
+        welcomeName.innerHTML = renderHandle(String(pageConfig.userAlias || ''), st.style);
+        welcomeText.textContent = has ? 'Your avatar is set.' : 'You have no avatar yet. Pick one to go with your messages.';
+        welcomeAvatarOpen.textContent = has ? 'Change avatar' : 'Choose avatar';
+        welcomeColors.hidden = !welcomeOffersColors;
+        welcomeLater.textContent = has || st.colors.length ? 'Done' : 'Not now';
+        welcomeModal.classList.add('is-open');
+        welcomeModal.setAttribute('aria-hidden', 'false');
+        welcomeAvatarOpen.focus();
     }
 
     function maybeWelcome() {
         if (!pageConfig.isLoggedIn || !welcomeModal || !avatarModal || !styleModal) {
             return;
         }
-        Promise.all([fetchJSON(apiBase + '?action=avatar'), fetchJSON(apiBase + '?action=style')]).then(function (replies) {
-            var avatar = replies[0] && replies[0].ok ? replies[0].avatar : undefined;
-            var style = replies[1] && replies[1].style ? replies[1].style : {};
-            var colors = Array.isArray(style.colors) ? style.colors.filter(function (c) { return HEX_COLOR.test(c || ''); }) : [];
-            if (avatar === undefined || (avatar && (avatar.data || avatar.disabled)) || document.querySelector('.avatar-chat-modal.is-open')) {
+        loadWelcomeState().then(function (st) {
+            if (st.avatar === undefined || (st.avatar && (st.avatar.data || st.avatar.disabled)) || document.querySelector('.avatar-chat-modal.is-open')) {
                 return;
             }
-            welcomeAvatar.innerHTML = '<div class="avatar-chat-avatar-placeholder">none</div>';
-            welcomeName.innerHTML = renderHandle(String(pageConfig.userAlias || ''), style);
-            welcomeColors.hidden = colors.length > 0;
-            welcomeModal.classList.add('is-open');
-            welcomeModal.setAttribute('aria-hidden', 'false');
-            welcomeAvatarOpen.focus();
+            welcomeOffersColors = st.colors.length === 0;
+            showWelcome(st);
+        }).catch(function () {});
+    }
+
+    // returnToWelcome reopens the welcome after a modal it opened closes.
+    function returnToWelcome() {
+        if (!welcomeReturn) {
+            return;
+        }
+        welcomeReturn = false;
+        loadWelcomeState().then(function (st) {
+            if (!document.querySelector('.avatar-chat-modal.is-open')) {
+                showWelcome(st);
+            }
         }).catch(function () {});
     }
 
     if (welcomeModal) {
         welcomeAvatarOpen.addEventListener('click', function () {
             closeWelcomeModal();
+            welcomeReturn = true;
             openAvatarModal();
         });
         welcomeColors.addEventListener('click', function () {
             closeWelcomeModal();
+            welcomeReturn = true;
             openStyleModal();
             stylePreset.focus();
         });
@@ -4877,6 +4920,7 @@
         if (event.key === 'Escape' && avatarModal && avatarModal.classList.contains('is-open') &&
             !(window.AnsiEditorModal && AnsiEditorModal.isOpen)) {
             closeAvatarModal();
+            returnToWelcome();
             return;
         }
         if (event.key === 'Escape' && roomModal && roomModal.classList.contains('is-open')) {

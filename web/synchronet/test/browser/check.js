@@ -50,12 +50,16 @@ function check(cond, name, detail) {
   await page.click("#avatar-chat-welcome-colors");
   check(await page.$("#avatar-chat-welcome-modal.is-open") === null && await page.$("#avatar-chat-style-modal.is-open") !== null, "Colour your name opens the handle style modal");
   await page.click("#avatar-chat-style-cancel");
+  await page.waitForSelector("#avatar-chat-welcome-modal.is-open", { timeout: 5000 }).catch(() => {});
+  check(await page.$("#avatar-chat-welcome-modal.is-open") !== null && await page.isVisible("#avatar-chat-welcome-avatar-open"), "closing the style modal comes back to the welcome, avatar still offered");
   await page.reload();
   await page.waitForSelector("#avatar-chat-welcome-modal.is-open", { timeout: 5000 }).catch(() => {});
   check(await page.$("#avatar-chat-welcome-modal.is-open") !== null, "asked again on the next page load");
   await page.click("#avatar-chat-welcome-avatar-open");
   check(await page.$("#avatar-chat-welcome-modal.is-open") === null && await page.$("#avatar-chat-avatar-modal.is-open") !== null, "Choose avatar opens the avatar modal");
   await page.click("#avatar-chat-avatar-close");
+  await page.waitForSelector("#avatar-chat-welcome-modal.is-open", { timeout: 5000 }).catch(() => {});
+  check(await page.$("#avatar-chat-welcome-modal.is-open") !== null && await page.isVisible("#avatar-chat-welcome-colors"), "closing the avatar modal comes back to the welcome, colours still offered");
   await page.reload();
   await page.waitForSelector("#avatar-chat-welcome-modal.is-open", { timeout: 5000 }).catch(() => {});
   await page.click("#avatar-chat-welcome-later");

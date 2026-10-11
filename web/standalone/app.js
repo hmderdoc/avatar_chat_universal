@@ -31,7 +31,7 @@
         noRoomsModal: $("norooms-modal"), noRoomsDefault: $("norooms-default"), noRoomsMain: $("norooms-main"),
         noRoomsPick: $("norooms-pick"), noRoomsCancel: $("norooms-cancel"),
         welcomeModal: $("welcome-modal"), welcomeAvatar: $("welcome-avatar"), welcomeName: $("welcome-name"),
-        welcomeAvatarOpen: $("welcome-avatar-open"), welcomeColors: $("welcome-colors"), welcomeLater: $("welcome-later"),
+        welcomeAvatarOpen: $("welcome-avatar-open"), welcomeColors: $("welcome-colors"), welcomeLater: $("welcome-later"), welcomeText: $("welcome-text"),
         settingsModal: $("settings-modal"), settingsForm: $("settings-form"), settingsNick: $("settings-nick"),
         settingsColors: $("settings-colors"),
         styleLetters: $("style-letters"), stylePreview: $("style-preview"), stylePreset: $("style-preset"),
@@ -71,6 +71,7 @@
         whoTimers: new Map(),
         key: "", claimed: false, refused: false,
         welcomed: false, welcomeNext: false, // the first-logon welcome, once per page load
+        welcomeReturn: false, welcomeOffersColors: false, // a modal opened from it comes back to it
         pm: "",                // key of the private thread on screen, "" for a room
         threads: new Map(),    // lower(name)|lower(host) -> {name, host, mailbox, msgs, unread, last}
     };
@@ -1149,16 +1150,29 @@
     function openWelcome() {
         state.welcomed = true;
         state.welcomeNext = true;
-        fillAvatar(els.welcomeAvatar, "");
-        els.welcomeAvatar.textContent = "none";
+        state.welcomeOffersColors = !state.colors.some((c) => c);
+        showWelcome();
+    }
+    function showWelcome() {
+        const has = !!state.avatar;
+        fillAvatar(els.welcomeAvatar, state.avatar, state.nick);
+        if (!has) els.welcomeAvatar.textContent = "none";
         els.welcomeName.replaceChildren(handle(state.nick, state.colors));
-        els.welcomeColors.hidden = state.colors.some((c) => c);
+        els.welcomeText.textContent = has ? "Your avatar is set." : "You have no avatar yet. Pick one to go with your messages.";
+        els.welcomeAvatarOpen.textContent = has ? "Change avatar" : "Choose avatar";
+        els.welcomeColors.hidden = !state.welcomeOffersColors;
+        els.welcomeLater.textContent = has || state.colors.some((c) => c) ? "Done" : "Not now";
         openModal(els.welcomeModal, els.welcomeAvatarOpen);
     }
     // welcomeDone offers the rooms once the welcome, and whatever it
     // opened, has closed.
     function welcomeDone() {
         if (!state.welcomeNext || anyModalOpen()) return;
+        if (state.welcomeReturn) {
+            state.welcomeReturn = false;
+            showWelcome();
+            return;
+        }
         state.welcomeNext = false;
         offerRooms();
     }
@@ -1699,10 +1713,12 @@
     els.noRoomsCancel.onclick = () => closeModal(els.noRoomsModal);
 
     els.welcomeAvatarOpen.onclick = () => {
+        state.welcomeReturn = true;
         openAvatarModal();
         closeModal(els.welcomeModal);
     };
     els.welcomeColors.onclick = () => {
+        state.welcomeReturn = true;
         openSettings();
         closeModal(els.welcomeModal);
         els.settingsColors.scrollIntoView({block: "nearest"});

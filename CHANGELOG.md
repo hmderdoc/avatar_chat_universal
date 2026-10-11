@@ -50,6 +50,10 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Fixed (web)
 
+- The first-logon welcome closed for good once you picked an avatar, so
+  name colours were never offered. Closing the avatar or colour dialog
+  opened from it now comes back to it, showing what's set (**Change
+  avatar**, **Done**).
 - Synchronet page: sending a PM against the bundled Go server wiped the
   sender's PM history; link-card fetches never sent their Range header.
 - The bundled chat server's WHO answers `{nick, system}` like
@@ -237,6 +241,9 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Fixed
 
+- First run: the avatar picker's Enter often arrives as CR LF, and the
+  LF answered the "Press C to colour your name" prompt as a skip. Keys
+  typed ahead are now dropped before it.
 - `/settings`: unsaved handle edits were lost on a trip to the avatar
   picker, editor or uploader and back.
 - `themes/green.ini`: highlight pills were green on green; now red.

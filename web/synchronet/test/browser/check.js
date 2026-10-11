@@ -353,6 +353,38 @@ function check(cond, name, detail) {
   await page.waitForSelector(".avatar-chat-group", { timeout: 10000 });
   check(await page.$eval("#avatar-chat-page-style", (e) => e.value) === "amber", "after a reload the picker shows the saved style");
 
+  // Links that serve audio or video themselves (a download link, no file
+  // extension in the path) get a card with a player.
+  const dlUrl = "https://files.example/api/files.ssjs?call=download-file&dir=mp3s&file=Song.mp3";
+  await fetch(BASE + "/__say?text=" + encodeURIComponent("new track " + dlUrl));
+  await fetch(BASE + "/__say?text=" + encodeURIComponent("watch https://files.example/clip?x=1"));
+  await page.waitForTimeout(1500);
+  const players = await page.$$eval(".avatar-chat-card audio, .avatar-chat-card video", (els) => els.map((e) => e.tagName + " " + e.getAttribute("src")));
+  check(players.indexOf("AUDIO " + dlUrl) >= 0, "a download link that served an mp3 shows an audio player", JSON.stringify(players));
+  check(players.indexOf("VIDEO https://files.example/clip?x=1") >= 0, "a link that served a video shows a video player", JSON.stringify(players));
+  const dlTitle = await page.$$eval(".avatar-chat-card-title", (els) => els.map((e) => e.textContent));
+  check(dlTitle.indexOf("Song.mp3") >= 0, "the card is titled with the file name", JSON.stringify(dlTitle));
+
+  // A PM to a standalone web user goes to its mailbox; the page never
+  // shows the mailbox string.
+  await fetch(BASE + "/__webuser");
+  await page.waitForTimeout(800);
+  const webbyName = await page.$('[data-private-user="Webby"]');
+  check(!!webbyName, "the web user's name is clickable");
+  if (webbyName) {
+    await webbyName.click();
+    await page.waitForTimeout(700);
+    await page.fill("#avatar-chat-input", "hello webby");
+    await page.press("#avatar-chat-input", "Enter");
+    await page.waitForTimeout(700);
+    st = await (await fetch(BASE + "/__state")).json();
+    const pmPost = st.posts.filter((x) => x.action === "sendPrivate").pop();
+    check(pmPost && pmPost.q.target === "Webby" && pmPost.q.system === "web.example" && pmPost.q.mailbox === "Webby@web_example",
+      "the reply carries the web user's mailbox for the BBS to re-check", JSON.stringify(pmPost && pmPost.q));
+  }
+  const shown = await page.evaluate(() => document.body.innerText);
+  check(shown.indexOf("web_example") < 0 && shown.indexOf("Webby@") < 0, "no mailbox string is on screen");
+
   check(errors.length === 0, "no page errors", errors.join(" | "));
   check(dialogs.length === 0, "no alert() ran", dialogs.join(" | "));
   await browser.close();

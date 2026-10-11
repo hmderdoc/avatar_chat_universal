@@ -93,8 +93,14 @@ interface JsonPacket {
 }
 
 declare class HTTPRequest {
-    constructor(user?: string, password?: string, headers?: string[], timeout?: number);
+    /* extra headers are a name -> value map (http.js AddExtraHeaders). */
+    constructor(user?: string, password?: string, headers?: { [name: string]: string }, timeout?: number);
     Get(url: string): string;
+    SetupGet(url: string): void;
+    SendRequest(): void;
+    ReadStatus(): void;
+    ReadHeaders(): void;
+    sock: { recv(len: number, timeout?: number): string | null; close(): void } | undefined;
     response_code: number;
     response_headers_parsed: { [key: string]: string[] };
 }

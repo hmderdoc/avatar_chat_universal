@@ -25,6 +25,7 @@
     var users = [];
     var rooms = [];
     var privateThreads = [];
+    var mailboxes = {}; /* thread key -> a web user's mailbox; see rememberMailbox */
     var motdState = {
         text: '',
         timestamp: 0
@@ -928,6 +929,8 @@
         next.text = text;
         next.previewText = buildMessagePreview(text);
         next.kind = 'text';
+        rememberMailbox(next.sender, next.system, next.mailbox);
+        rememberMailbox(next.peerName, next.peerSystem, next.peerMailbox);
 
         record = ensureBitmapRecord(text);
         if (record) {
@@ -940,6 +943,20 @@
         }
 
         return next;
+    }
+
+    /* Where a PM to a standalone web user goes (their name@origin mailbox,
+       re-checked by the server), keyed like threads. Data only: never put
+       on screen. (mailboxes is declared with the other state at the top.) */
+
+    function rememberMailbox(name, system, mailbox) {
+        if (name && typeof mailbox === 'string' && mailbox.length) {
+            mailboxes[buildThreadKey(name, system || '')] = mailbox;
+        }
+    }
+
+    function mailboxFor(name, system) {
+        return mailboxes[buildThreadKey(name, system || '')] || '';
     }
 
     function normalizeMessages(list) {
@@ -1581,7 +1598,7 @@
 
     function cardHtml(url, data) {
         var html = '';
-        if (!data || data.error || !(data.title || data.description || data.image || data.audio)) {
+        if (!data || data.error || !(data.title || data.description || data.image || data.audio || data.video)) {
             return '';
         }
         if (data.image && /^https?:\/\//i.test(data.image)) {
@@ -1597,6 +1614,9 @@
         }
         if (data.audio && /^https?:\/\//i.test(data.audio)) {
             html += '<audio class="avatar-chat-rich-audio" controls preload="none" src="' + escapeAttr(data.audio) + '"></audio>';
+        }
+        if (data.video && /^https?:\/\//i.test(data.video)) {
+            html += '<video class="avatar-chat-rich-video" controls preload="none" src="' + escapeAttr(data.video) + '"></video>';
         }
         return html + '</div>';
     }
@@ -2105,6 +2125,9 @@
     }
 
     function upsertPrivateThread(summary) {
+        if (summary) {
+            rememberMailbox(summary.name, summary.system, summary.mailbox);
+        }
         summary = normalizeThreadSummary(summary);
         var key = buildThreadKey(summary.name, summary.system || '');
         var index = 0;
@@ -2851,6 +2874,10 @@
         var html = '';
         var visibleUsers = Array.isArray(panelUsers) ? panelUsers : [];
 
+        visibleUsers.forEach(function (entry) {
+            rememberMailbox(entry && entry.nick, entry && entry.system, entry && entry.mailbox);
+        });
+
         if (!usersList) {
             return;
         }
@@ -3353,6 +3380,9 @@
         body.set('message', text);
         if (activeView.system) {
             body.set('system', activeView.system);
+        }
+        if (mailboxFor(activeView.name, activeView.system)) {
+            body.set('mailbox', mailboxFor(activeView.name, activeView.system));
         }
 
         return fetchJSON(apiBase, {

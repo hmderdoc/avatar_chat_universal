@@ -343,11 +343,11 @@ load('http.js');
     }
   }
   function sameOrigin() {
-    var origin = trimText(http_request.header["origin"]);
-    if (!origin.length)
+    var origin2 = trimText(http_request.header["origin"]);
+    if (!origin2.length)
       return true;
     var host = trimText(http_request.header["x-forwarded-host"]) || trimText(http_request.header["host"]) || trimText(http_request.host);
-    var m = /^https?:\/\/([^/]+)$/i.exec(origin);
+    var m = /^https?:\/\/([^/]+)$/i.exec(origin2);
     if (!m)
       return false;
     return m[1].toLowerCase() === host.split(",")[0].replace(/^\s+|\s+$/g, "").toLowerCase();
@@ -651,6 +651,33 @@ load('http.js');
     return { ok: true, style: clean };
   }
 
+  // build/lib/mailbox.js
+  function origin(host) {
+    var h = String(host === void 0 || host === null ? "" : host);
+    var out = "";
+    for (var i = 0; i < h.length; i++) {
+      var c = h.charCodeAt(i);
+      if (c >= 48 && c <= 57 || c >= 65 && c <= 90 || c >= 97 && c <= 122 || c === 95 || c === 45)
+        out += h.charAt(i);
+      else if (c < 128)
+        out += "_";
+      else if (c < 2048)
+        out += "__";
+      else if (c >= 55296 && c <= 56319) {
+        out += "____";
+        i++;
+      } else
+        out += "___";
+    }
+    return out;
+  }
+  function validMailbox(name, host, mailbox) {
+    var m = String(mailbox === void 0 || mailbox === null ? "" : mailbox);
+    if (!m.length || !name.length || m.indexOf(".") >= 0)
+      return "";
+    return m.toLowerCase() === (name + "@" + origin(host)).toLowerCase() ? m : "";
+  }
+
   // build/lib/chat.js
   var MAX_TEXT = 1e3;
   var MAX_BITMAP_TEXT = 32e3;
@@ -718,12 +745,14 @@ load('http.js');
     var name = sanitizeAlias(n.name);
     if (!name.length)
       return null;
+    var host = trimText(n.host);
     return {
       name: name,
-      host: trimText(n.host),
+      host: host,
       qwkid: normalizeUpper(n.qwkid),
       avatar: trimText(n.avatar),
-      style: n.style && typeof n.style === "object" ? normalizeStyle(n.style) : null
+      style: n.style && typeof n.style === "object" ? normalizeStyle(n.style) : null,
+      mailbox: validMailbox(name, host, n.mailbox)
     };
   }
   function isPrivateMessage(message) {
@@ -771,6 +800,8 @@ load('http.js');
       out.qwkid = nick.qwkid;
     if (nick && nick.avatar.length)
       out.avatar = nick.avatar;
+    if (nick && nick.mailbox.length)
+      out.mailbox = nick.mailbox;
     var style = nick ? wireStyle(nick.style, sender) : null;
     if (style)
       out.style = style;
@@ -782,6 +813,8 @@ load('http.js');
           out.peerSystem = peer.host;
         if (peer.avatar.length)
           out.peerAvatar = peer.avatar;
+        if (peer.mailbox.length)
+          out.peerMailbox = peer.mailbox;
       }
     }
     return out;
@@ -843,6 +876,14 @@ load('http.js');
     }
     if (isArray(existing))
       return;
+    var tail = null;
+    try {
+      tail = client.slice("chat", location, -1, void 0, 1);
+    } catch (_e) {
+      tail = null;
+    }
+    if (isArray(tail) && tail.length > 0)
+      return;
     try {
       client.write("chat", location, [], 2);
     } catch (_e) {
@@ -879,6 +920,8 @@ load('http.js');
         var u_1 = users[existing];
         if (!u_1.avatar && nick && nick.avatar)
           u_1.avatar = nick.avatar;
+        if (!u_1.mailbox && nick && nick.mailbox)
+          u_1.mailbox = nick.mailbox;
         if (!u_1.style && nick) {
           var s_1 = wireStyle(nick.style, name);
           if (s_1)
@@ -887,11 +930,13 @@ load('http.js');
         continue;
       }
       seen[id] = users.length;
-      var u = { nick: name, system: host, userNumber: localNumber(nick || { name: name, host: host, qwkid: "", avatar: "", style: null }) };
+      var u = { nick: name, system: host, userNumber: localNumber(nick || { name: name, host: host, qwkid: "", avatar: "", style: null, mailbox: "" }) };
       if (qwkid.length)
         u.qwkid = qwkid;
       if (nick && nick.avatar.length)
         u.avatar = nick.avatar;
+      if (nick && nick.mailbox.length)
+        u.mailbox = nick.mailbox;
       var s = nick ? wireStyle(nick.style, name) : null;
       if (s)
         u.style = s;
@@ -1019,6 +1064,8 @@ load('http.js');
           th.avatar = peer.avatar;
         if (peer.host.length)
           th.system = peer.host;
+        if (peer.mailbox.length)
+          th.mailbox = peer.mailbox;
       }
       var sender = normalizeNick(m.nick);
       if (since > 0 && t > since && sender && normalizeUpper(sender.name) !== normalizeUpper(viewer.alias))
@@ -1056,6 +1103,16 @@ load('http.js');
       peerOut = { name: selected.name, system: selected.host };
       if (selected.avatar.length)
         peerOut.avatar = selected.avatar;
+      for (var i = list.length - 1; i >= 0; i--) {
+        var m = list[i];
+        if (!isPrivateMessage(m))
+          continue;
+        var p = peerOf(m, viewer.alias);
+        if (p && normalizeUpper(p.name) === wantName && normalizeUpper(p.host) === normalizeUpper(selected.host) && p.mailbox.length) {
+          peerOut.mailbox = p.mailbox;
+          break;
+        }
+      }
     }
     return { peer: peerOut, messages: messages };
   }
@@ -1078,15 +1135,19 @@ load('http.js');
     confirmLatest(client, base + ".history", packet);
     return { success: true, channel: channel, timestamp: packet.time };
   }
-  function sendPrivate(client, viewer, target, targetSystem, text) {
+  function sendPrivate(client, viewer, target, targetSystem, mailbox, text) {
     var to = { name: target };
     if (targetSystem.length)
       to["host"] = targetSystem;
+    var box = validMailbox(target, targetSystem, mailbox);
+    if (box.length)
+      to["mailbox"] = box;
+    var dest = box.length ? box : target;
     var packet = { nick: ownNick(viewer), str: text, time: Date.now(), private: { to: to } };
-    ensureHistory(client, mailboxHistory(target));
+    ensureHistory(client, mailboxHistory(dest));
     ensureHistory(client, mailboxHistory(viewer.alias));
-    client.write("chat", mailboxLive(target), packet, 2);
-    client.push("chat", mailboxHistory(target), packet, 2);
+    client.write("chat", mailboxLive(dest), packet, 2);
+    client.push("chat", mailboxHistory(dest), packet, 2);
     client.push("chat", mailboxHistory(viewer.alias), packet, 2);
     confirmLatest(client, mailboxHistory(viewer.alias), packet);
     return { success: true, target: target, timestamp: packet.time };
@@ -1151,14 +1212,14 @@ load('http.js');
     if (!parsed)
       return null;
     var hostPart = parsed.host.indexOf(":") !== -1 ? "[" + parsed.host + "]" : parsed.host;
-    var origin = parsed.scheme + "://" + hostPart + (parsed.port !== null ? ":" + parsed.port : "");
+    var origin2 = parsed.scheme + "://" + hostPart + (parsed.port !== null ? ":" + parsed.port : "");
     if (/^\/\//.test(r))
       return parsed.scheme + ":" + r;
     if (/^\//.test(r))
-      return origin + r;
+      return origin2 + r;
     var dir = parsed.rest.replace(/[?#].*$/, "");
     dir = dir.substring(0, dir.lastIndexOf("/") + 1) || "/";
-    return origin + dir + r;
+    return origin2 + dir + r;
   }
   function privateIpv4(ip) {
     var parts = ip.split(".");
@@ -1367,6 +1428,7 @@ load('http.js');
   var MAX_REDIRECTS = 3;
   var RECV_TIMEOUT_SECONDS = 8;
   var FAIL_TTL_SECONDS = 60 * 60;
+  var MAX_BODY = 262144;
   function checkHostPublic(host) {
     var target = host;
     if (!/^\d+\.\d+\.\d+\.\d+$/.test(host) && host.indexOf(":") === -1) {
@@ -1380,6 +1442,46 @@ load('http.js');
     }
     return isPrivateAddress(target) ? "address not allowed" : null;
   }
+  function getCapped(url, withRange) {
+    var headers = {};
+    if (withRange)
+      headers["Range"] = "bytes=0-" + (MAX_BODY - 1);
+    var req = new HTTPRequest(void 0, void 0, headers, RECV_TIMEOUT_SECONDS);
+    req.SetupGet(url);
+    req.SendRequest();
+    var body = "";
+    try {
+      req.ReadStatus();
+      req.ReadHeaders();
+      var code = req.response_code || 0;
+      if (code < 300 || code >= 400) {
+        var chunk2 = void 0;
+        while (body.length < MAX_BODY && req.sock && (chunk2 = req.sock.recv(Math.min(16384, MAX_BODY - body.length), RECV_TIMEOUT_SECONDS)) !== null && chunk2 !== "") {
+          body += chunk2;
+        }
+      }
+    } finally {
+      if (req.sock)
+        req.sock.close();
+    }
+    return { req: req, body: body };
+  }
+  function dispositionName(value) {
+    var v = String(value || "");
+    var m = /filename\*\s*=\s*(?:UTF-8|utf-8)?'[^']*'([^;]+)/.exec(v);
+    var name = "";
+    if (m) {
+      try {
+        name = decodeURIComponent(m[1].trim());
+      } catch (_e) {
+        name = m[1].trim();
+      }
+    } else if ((m = /filename\s*=\s*"([^"]*)"/.exec(v)) || (m = /filename\s*=\s*([^;\s]+)/.exec(v))) {
+      name = m[1];
+    }
+    var parts = name.split(/[\\/]/);
+    return parts[parts.length - 1] || "";
+  }
   function fetchGuarded(url) {
     var current2 = String(url);
     for (var hop = 0; hop <= MAX_REDIRECTS; hop++) {
@@ -1389,13 +1491,16 @@ load('http.js');
       var hostError = checkHostPublic(check.host || "");
       if (hostError)
         return { error: hostError };
-      var req = new HTTPRequest(void 0, void 0, ["Range: bytes=0-262143", "Accept: text/html,application/xhtml+xml;q=0.9,*/*;q=0.5"], RECV_TIMEOUT_SECONDS);
-      var body = "";
+      var got = void 0;
       try {
-        body = req.Get(current2);
+        got = getCapped(current2, true);
+        if ((got.req.response_code || 0) === 416)
+          got = getCapped(current2, false);
       } catch (_e) {
         return { error: "fetch failed" };
       }
+      var req = got.req;
+      var body = got.body;
       var code = req.response_code || 0;
       var headers = req.response_headers_parsed || {};
       if (code >= 300 && code < 400) {
@@ -1411,7 +1516,8 @@ load('http.js');
       if (code !== 200 && code !== 206)
         return { error: "http " + code };
       var contentType = String(headers["content-type"] && headers["content-type"][0] || "").toLowerCase();
-      return { finalUrl: current2, body: body || "", contentType: contentType };
+      var disposition = String(headers["content-disposition"] && headers["content-disposition"][0] || "");
+      return { finalUrl: current2, body: body || "", contentType: contentType, fileName: dispositionName(disposition) };
     }
     return { error: "too many redirects" };
   }
@@ -1465,7 +1571,7 @@ load('http.js');
     } else if ((fetched.contentType || "").indexOf("image/") === 0) {
       result = { url: url, finalUrl: fetched.finalUrl, kind: "image", title: urlBasename(fetched.finalUrl || url), description: "", image: fetched.finalUrl, siteName: "" };
     } else if ((fetched.contentType || "").indexOf("text/html") !== 0 && (fetched.contentType || "").indexOf("application/xhtml") !== 0) {
-      result = { error: "not html" };
+      result = mediaCard(url, fetched.finalUrl || url, fetched.contentType || "", fetched.fileName || "", fetched.body || "") || { error: "not html" };
     } else {
       var meta = parseMetadata(fetched.body || "", fetched.finalUrl || url);
       if (!meta.title.length && !meta.description.length && !meta.image && !meta.audio) {
@@ -1485,6 +1591,69 @@ load('http.js');
     }
     writeCache(cacheDir, path, result);
     return result;
+  }
+  var GENERIC_TYPES = ["", "application/octet-stream", "binary/octet-stream", "application/x-download", "application/download", "application/force-download"];
+  var NAME_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".ogg": "audio/ogg",
+    ".oga": "audio/ogg",
+    ".opus": "audio/opus",
+    ".flac": "audio/flac",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+    ".mkv": "video/x-matroska"
+  };
+  function typeForName(name) {
+    var m = /(\.[^.\\/]+)$/.exec(String(name || "").toLowerCase());
+    return m ? NAME_TYPES[m[1]] || "" : "";
+  }
+  function sniffMedia(b) {
+    var at = function(i) {
+      return b.charCodeAt(i) & 255;
+    };
+    if (b.length >= 3 && b.substr(0, 3) === "ID3")
+      return "audio/mpeg";
+    if (b.length >= 2 && at(0) === 255 && (at(1) & 224) === 224 && (at(1) & 6) !== 0)
+      return "audio/mpeg";
+    if (b.length >= 4 && b.substr(0, 4) === "OggS")
+      return "audio/ogg";
+    if (b.length >= 4 && b.substr(0, 4) === "fLaC")
+      return "audio/flac";
+    if (b.length >= 12 && b.substr(0, 4) === "RIFF" && b.substr(8, 4) === "WAVE")
+      return "audio/wav";
+    if (b.length >= 12 && b.substr(4, 4) === "ftyp")
+      return b.substr(8, 3) === "M4A" ? "audio/mp4" : "video/mp4";
+    if (b.length >= 4 && at(0) === 26 && at(1) === 69 && at(2) === 223 && at(3) === 163)
+      return "video/webm";
+    return "";
+  }
+  function mediaCard(url, finalUrl, contentType, fileName, body) {
+    var ct = String(contentType || "").split(";")[0].trim().toLowerCase();
+    var typ = "";
+    if (ct.indexOf("audio/") === 0 || ct.indexOf("video/") === 0)
+      typ = ct;
+    else if (GENERIC_TYPES.indexOf(ct) >= 0)
+      typ = typeForName(fileName) || sniffMedia(body);
+    var name = fileName && fileName !== "." && fileName !== "/" ? fileName : urlBasename(finalUrl);
+    var siteName = "";
+    var hm = /^https?:\/\/(?:[^@\/]*@)?(\[[^\]]+\]|[^:\/?#]+)/i.exec(finalUrl);
+    if (hm)
+      siteName = hm[1].replace(/^\[|\]$/g, "");
+    var card = { url: url, finalUrl: finalUrl, kind: "site", title: name, description: "", siteName: siteName };
+    if (typ.indexOf("audio/") === 0) {
+      card.audio = finalUrl;
+      card.audioType = typ;
+    } else if (typ.indexOf("video/") === 0) {
+      card.video = finalUrl;
+    } else {
+      return null;
+    }
+    return card;
   }
 
   // build/entries/api.js
@@ -1727,7 +1896,7 @@ load('http.js');
         if (!trimText(text_2).length)
           return { error: "empty message" };
         return withClient(cfg, function(c2) {
-          return sendPrivate(c2, viewer, target_2, trimText(param("system")), text_2);
+          return sendPrivate(c2, viewer, target_2, trimText(param("system")), trimText(param("mailbox")), text_2);
         });
       }
       case "style":

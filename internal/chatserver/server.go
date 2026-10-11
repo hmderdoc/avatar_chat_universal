@@ -325,13 +325,20 @@ func (s *Server) opWho(c *conn, pkt *packet) {
 	key := storeKey(pkt.Scope, pkt.Location)
 	s.mu.RLock()
 	subs := s.subs[key]
-	out := make([]string, 0, len(subs))
+	// Synchronet's json-db answers WHO with {id, nick, system} per
+	// subscriber; the same shape here, without the id (it's the peer's
+	// address in this server).
+	type whoEntry struct {
+		Nick   string `json:"nick"`
+		System string `json:"system,omitempty"`
+	}
+	out := make([]whoEntry, 0, len(subs))
 	for sub := range subs {
 		who := sub.nick
 		if who == "" {
-			who = sub.id
+			who = "guest"
 		}
-		out = append(out, who)
+		out = append(out, whoEntry{Nick: who, System: sub.system})
 	}
 	s.mu.RUnlock()
 	raw, _ := json.Marshal(out)

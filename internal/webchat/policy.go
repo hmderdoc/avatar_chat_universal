@@ -19,6 +19,9 @@ import (
 // the page does, and stamps identity itself:
 //
 //   - SOCKET PING is answered here, PONG dropped;
+//   - SOCKET CLAIM {nick, key} comes first: the nickname is checked
+//     against this server's name claims (claims.go) and, once granted, is
+//     the connection's for good;
 //   - chat QUERYs only: SUBSCRIBE, UNSUBSCRIBE, WRITE and WHO on
 //     channels.<room>.messages, SLICE and PUSH on channels.<room>.history,
 //     KEYS on public_channels, and (with CreateRooms) WRITE true on
@@ -26,9 +29,14 @@ import (
 //   - <room> is the default room or one in the public_channels registry,
 //     so a browser can't read a member's private mailbox
 //     (channels.<alias>.messages) by naming it as a room;
-//   - the first SUBSCRIBE's nick becomes the connection's for good, and
-//     every packet's nick and system, and every message's nick.name and
-//     nick.host, are forced to it and to Config.SystemName;
+//   - private messages: the browser reads only its own web mailbox,
+//     channels.<nick>@<origin>.{messages,history} (chat.MailboxFor), and
+//     may WRITE a message to any other channels.<x>.messages and PUSH it
+//     to channels.<x>.history, but never SUBSCRIBE, SLICE or WHO there:
+//     no plain-name mailbox is ever readable from the page;
+//   - every packet's nick and system, and every message's nick.name,
+//     nick.host and nick.mailbox, are forced to the claimed nick,
+//     Config.SystemName and its mailbox;
 //   - a message's text is cleaned and capped at MaxMessage characters, its
 //     time is the server's, TV tuner markers are refused, an avatar must
 //     be a well-formed 120-byte one and a style is normalized.
@@ -49,7 +57,15 @@ type packet struct {
 type policy struct {
 	srv  *Server
 	ip   string
-	nick string // fixed by the first SUBSCRIBE
+	nick string // fixed by the CLAIM
+}
+
+// mailbox is the connection's own web mailbox, "" before the CLAIM.
+func (p *policy) mailbox() string {
+	if p.nick == "" {
+		return ""
+	}
+	return chat.MailboxFor(p.nick, p.srv.cfg.SystemName)
 }
 
 var roomName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,32}$`)
@@ -65,9 +81,12 @@ func (p *policy) filter(line []byte) (pass, reply []byte) {
 		return nil, errorPacket("malformed JSON")
 	}
 	if pkt.Scope == "SOCKET" {
-		if pkt.Func == "PING" {
+		switch pkt.Func {
+		case "PING":
 			b, _ := json.Marshal(packet{Scope: "SOCKET", Func: "PONG", Data: pkt.Data})
 			return nil, b
+		case "CLAIM":
+			return nil, p.claim(pkt.Data)
 		}
 		return nil, nil
 	}
@@ -117,17 +136,16 @@ func (p *policy) check(pkt *packet) string {
 		return "not allowed: " + pkt.Location
 	}
 	room, leaf := parts[1], parts[2]
+	if own := p.mailbox(); own != "" && strings.EqualFold(room, own) {
+		return p.checkOwnMailbox(pkt, oper, leaf)
+	}
 	if !roomName.MatchString(room) || !p.srv.rooms.allowed(room) {
-		return "no public room named " + room
+		return p.checkPM(pkt, oper, room, leaf)
 	}
 	switch {
 	case leaf == "messages" && (oper == "SUBSCRIBE" || oper == "UNSUBSCRIBE" || oper == "WHO"):
-		if oper == "SUBSCRIBE" && p.nick == "" {
-			n, ok := cleanNick(pkt.Nick)
-			if !ok {
-				return "pick a nickname: 1 to 25 letters, digits, spaces, - or _"
-			}
-			p.nick = n
+		if p.nick == "" {
+			return "claim a nickname first"
 		}
 		pkt.Data, pkt.Lock = nil, 0
 	case leaf == "messages" && oper == "WRITE", leaf == "history" && oper == "PUSH":
@@ -140,36 +158,152 @@ func (p *policy) check(pkt *packet) string {
 		}
 		pkt.Data, pkt.Lock = data, chat.LockWrite
 	case leaf == "history" && oper == "SLICE":
-		var args struct {
-			Start int  `json:"start"`
-			End   *int `json:"end,omitempty"`
-		}
-		if len(pkt.Data) > 0 && json.Unmarshal(pkt.Data, &args) != nil {
-			return "bad SLICE arguments"
-		}
-		if args.Start < -500 {
-			args.Start = -500
-		}
-		pkt.Data, _ = json.Marshal(args)
-		pkt.Lock = chat.LockRead
+		return p.slice(pkt)
 	default:
 		return "not allowed: " + oper + " " + pkt.Location
 	}
 	return ""
 }
 
+// checkOwnMailbox: the browser's own web mailbox. It may follow its
+// messages, read its history and push its sent copies there.
+func (p *policy) checkOwnMailbox(pkt *packet, oper, leaf string) string {
+	switch {
+	case leaf == "messages" && (oper == "SUBSCRIBE" || oper == "UNSUBSCRIBE"):
+		pkt.Data, pkt.Lock = nil, 0
+	case leaf == "history" && oper == "SLICE":
+		return p.slice(pkt)
+	case leaf == "history" && oper == "PUSH":
+		data, why := p.message(pkt.Data)
+		if why != "" {
+			return why
+		}
+		pkt.Data, pkt.Lock = data, chat.LockWrite
+	default:
+		return "not allowed: " + oper + " " + pkt.Location
+	}
+	return ""
+}
+
+// checkPM: any channel that isn't a public room or the browser's own
+// mailbox is someone's mailbox. A message may be written there and pushed
+// to its history (a PM); nothing there can be read.
+func (p *policy) checkPM(pkt *packet, oper, target, leaf string) string {
+	if !(leaf == "messages" && oper == "WRITE" || leaf == "history" && oper == "PUSH") {
+		return "no public room named " + target
+	}
+	if p.nick == "" {
+		return "claim a nickname first"
+	}
+	if !validTarget(target) {
+		return "no such recipient"
+	}
+	data, why := p.message(pkt.Data)
+	if why != "" {
+		return why
+	}
+	pkt.Data, pkt.Lock = data, chat.LockWrite
+	return ""
+}
+
+// validTarget: a mailbox name a PM may go to: a BBS alias (Synchronet
+// allows most printable characters) or a web mailbox; no dot, which would
+// split the location, and no controls.
+func validTarget(s string) bool {
+	if s == "" || len(s) > 80 || strings.TrimSpace(s) != s {
+		return false
+	}
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || r == '.' {
+			return false
+		}
+	}
+	return utf8.ValidString(s)
+}
+
+// slice clamps a SLICE's arguments.
+func (p *policy) slice(pkt *packet) string {
+	var args struct {
+		Start int  `json:"start"`
+		End   *int `json:"end,omitempty"`
+	}
+	if len(pkt.Data) > 0 && json.Unmarshal(pkt.Data, &args) != nil {
+		return "bad SLICE arguments"
+	}
+	if args.Start < -500 {
+		args.Start = -500
+	}
+	pkt.Data, _ = json.Marshal(args)
+	pkt.Lock = chat.LockRead
+	return ""
+}
+
+// claim handles SOCKET CLAIM {nick, key} and returns the reply, a SOCKET
+// CLAIM packet with {ok, nick} or {ok: false, reason: "invalid" | "taken"
+// | "limit" | "error" | "fixed"}.
+func (p *policy) claim(raw json.RawMessage) []byte {
+	var in struct {
+		Nick string `json:"nick"`
+		Key  string `json:"key"`
+	}
+	reply := func(ok bool, reason string) []byte {
+		data, _ := json.Marshal(map[string]interface{}{"ok": ok, "nick": p.nick, "reason": reason})
+		b, _ := json.Marshal(packet{Scope: "SOCKET", Func: "CLAIM", Data: data})
+		return b
+	}
+	if json.Unmarshal(raw, &in) != nil {
+		return reply(false, "invalid")
+	}
+	n, ok := cleanNick(in.Nick)
+	if !ok {
+		return reply(false, "invalid")
+	}
+	if p.nick != "" {
+		if strings.EqualFold(n, p.nick) {
+			return reply(true, "")
+		}
+		return reply(false, "fixed") // a new name needs a new connection
+	}
+	switch p.srv.claims.claim(n, in.Key, p.ip) {
+	case claimOK:
+		p.nick = n
+		return reply(true, "")
+	case claimTaken:
+		return reply(false, "taken")
+	case claimLimit:
+		return reply(false, "limit")
+	}
+	return reply(false, "error")
+}
+
 // webNick is a message's nick as the policy rebuilds it.
 type webNick struct {
-	Name   string           `json:"name"`
-	Host   string           `json:"host,omitempty"`
-	Avatar string           `json:"avatar,omitempty"`
-	Style  *nickstyle.Style `json:"style,omitempty"`
+	Name    string    `json:"name"`
+	Host    string    `json:"host,omitempty"`
+	Mailbox string    `json:"mailbox,omitempty"`
+	Avatar  string    `json:"avatar,omitempty"`
+	Style   *webStyle `json:"style,omitempty"`
+}
+
+// webStyle is a handle style as the page may send it: colours only.
+type webStyle struct {
+	Colors []string `json:"colors"`
+}
+
+// toNick is a PM's recipient as carried in private.to.
+type toNick struct {
+	Name    string `json:"name"`
+	Host    string `json:"host,omitempty"`
+	Mailbox string `json:"mailbox,omitempty"`
 }
 
 type webMessage struct {
-	Nick *webNick `json:"nick"`
-	Str  string   `json:"str"`
-	Time int64    `json:"time"`
+	Nick    *webNick `json:"nick"`
+	Str     string   `json:"str"`
+	Time    int64    `json:"time"`
+	Private *struct {
+		To *toNick `json:"to"`
+	} `json:"private,omitempty"`
 }
 
 func (p *policy) message(raw json.RawMessage) (json.RawMessage, string) {
@@ -178,7 +312,10 @@ func (p *policy) message(raw json.RawMessage) (json.RawMessage, string) {
 			Avatar string           `json:"avatar"`
 			Style  *nickstyle.Style `json:"style"`
 		} `json:"nick"`
-		Str string `json:"str"`
+		Str     string `json:"str"`
+		Private *struct {
+			To *toNick `json:"to"`
+		} `json:"private"`
 	}
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return nil, "a message is {nick, str}"
@@ -199,16 +336,31 @@ func (p *policy) message(raw json.RawMessage) (json.RawMessage, string) {
 		p.srv.seen.add(u)
 	}
 	out := webMessage{
-		Nick: &webNick{Name: p.nick, Host: p.srv.cfg.SystemName},
+		Nick: &webNick{Name: p.nick, Host: p.srv.cfg.SystemName, Mailbox: p.mailbox()},
 		Str:  text,
 		Time: p.srv.now().UnixMilli(),
+	}
+	if in.Private != nil && in.Private.To != nil {
+		to := in.Private.To
+		name, host := cleanText(to.Name), cleanText(to.Host)
+		if name != "" && utf8.RuneCountInString(name) <= 60 && utf8.RuneCountInString(host) <= 60 {
+			t := &toNick{Name: name, Host: host}
+			if chat.ValidMailbox(name, host, to.Mailbox) {
+				t.Mailbox = to.Mailbox
+			}
+			out.Private = &struct {
+				To *toNick `json:"to"`
+			}{To: t}
+		}
 	}
 	if in.Nick != nil {
 		if validAvatar(in.Nick.Avatar) {
 			out.Nick.Avatar = in.Nick.Avatar
 		}
-		if st := in.Nick.Style; st != nil && (len(st.Colors) > 0 || st.Tag.Text != "") {
-			out.Nick.Style = st // UnmarshalJSON normalized it
+		// Colours only (UnmarshalJSON normalized them): a tag twists how
+		// a name reads, so it never goes out from the page.
+		if st := in.Nick.Style; st != nil && len(st.Colors) > 0 {
+			out.Nick.Style = &webStyle{Colors: st.Colors}
 		}
 	}
 	b, err := json.Marshal(out)

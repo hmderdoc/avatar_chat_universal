@@ -9,6 +9,33 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Added
 
+- **Private messages on the standalone page.** A web user's mailbox is
+  `name@origin` (the server's `system_name` with anything outside
+  `[A-Za-z0-9_-]` as `_`), carried as `nick.mailbox`, which the server
+  stamps itself. The first browser to use a name holds it on that server
+  by a key it keeps (`web_claims_file`; a sysop releases a name by
+  deleting its line; `web_claims_per_ip_day`). A browser can read only
+  its own mailbox, never a plain-name one. The door (`/msg`, name clicks,
+  `/r`, which now answers the exact sender), the Synchronet page, the
+  futureland shell and website route PMs to a valid mailbox; anything
+  that doesn't match `name@origin(host)` is ignored. BBS users' PMs are
+  unchanged and still reach every client they're logged in on. Old
+  clients keep working; their PMs to web users don't arrive.
+- **`/media?url=` on the standalone server**: guarded same-origin
+  passthrough for audio and video (seen-URL rule, type checks,
+  `media_proxy_max_mb`, `media_streams`, Range passed on with a 416
+  retry), so download links and track pages play on the page.
+- **Handle colours on the standalone page**: per-letter colours and
+  presets in Settings, kept in the browser per name, colours only.
+- **Download links play on the Synchronet page too**, by the same rule as
+  the door's cards.
+
+### Fixed (web)
+
+- Synchronet page: sending a PM against the bundled Go server wiped the
+  sender's PM history; link-card fetches never sent their Range header.
+- The bundled chat server's WHO answers `{nick, system}` like
+  Synchronet's instead of bare names.
 - **Standalone web page caught up.** A members column with avatars and
   handle colours; avatar settings (bundled collections and an optional
   `avatars_dir`, a 10x6 editor, `.bin`/`.ans` upload, kept in the browser

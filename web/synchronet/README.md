@@ -30,7 +30,11 @@ chat server and has no logins.
   they follow you between browsers. Everyone sees the MOTD ticker; only the host BBS's
   sysop can post to it.
 - Private messages between members, including members of other BBSes on
-  the same chat server, with a thread list and unread counts.
+  the same chat server, with a thread list and unread counts. A member
+  of a standalone web page (the bundled server's, no BBS login) is kept
+  apart from a BBS user with the same name, and a PM to them goes to
+  their own web mailbox; the BBS re-checks that mailbox against their
+  name and board before writing, and never shows it.
 - Avatars: the sender's avatar as it travels on the message. Otherwise
   the page looks it up through stock webv4: by account number for your own
   users, and by `alias@QWKID` for remote ones.
@@ -60,7 +64,12 @@ chat server and has no logins.
   it never flashes the default first. The sysop picks which styles are
   offered and the default (`web_styles`, `web_default_style`).
 - Inline pictures (up to three per message), audio and video players for
-  media links, and a link card for the first other link. Pictures whose
+  media links, and a link card for the first other link. A link that
+  serves an audio or video file itself (a download link such as
+  `files.ssjs?call=download-file&file=Song.mp3`, sent as
+  `application/octet-stream`) gets a card with a player, titled with the
+  file name: decided by its type, then the attachment's file name, then
+  its first bytes. Pictures whose
   link or message matches `nsfw_keywords` are blurred until clicked.
 - Messages that say your name are highlighted. A whole-word match counts,
   with or without `@`, in any case.
@@ -260,7 +269,10 @@ which is the rule for the whole network.
   https on the default ports are fetched, with no user:password in the
   URL. The address must be public; loopback, private, link-local, CGNAT,
   documentation and multicast ranges are refused, for IPv4 and IPv6, and
-  checked again at every redirect. At most the first 256 KB is read. Cards
+  checked again at every redirect. At most the first 256 KB is read, and
+  the connection closed, so a large download is never pulled whole; a
+  server that answers the Range request with 416 (websrvr does, for
+  dynamic pages) is asked again without it. Cards
   are cached in `data/avatarchat/previews/`.
   - **DNS rebinding.** The name is checked before `http.js` resolves it
     again, so an answer that changes in between is not caught. The door,

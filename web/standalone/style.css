@@ -180,9 +180,20 @@ body {
     .avatar-chat-web.sa-root .avatar-chat-shell {
         padding: 0.4rem;
     }
-    .avatar-chat-web .avatar-chat-sidebar {
+    .avatar-chat-web .avatar-chat-sidebar:not(.sa-members) {
         max-height: 30vh;
         padding: 0.6rem;
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+    }
+    /* You and your buttons first, the lists scroll below; no empty
+       private list taking a phone's space. */
+    .avatar-chat-web .avatar-chat-sidebar .sa-you {
+        order: -1;
+    }
+    .avatar-chat-web .sa-private.is-empty {
+        display: none;
     }
     /* You and your two buttons on one line. */
     .avatar-chat-web .sa-you {

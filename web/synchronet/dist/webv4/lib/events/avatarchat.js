@@ -279,6 +279,33 @@ var AvatarChatEvents = (function() {
     return { colors: colors, tag: { text: s.tag.text, fg: s.tag.fg, bg: s.tag.bg } };
   }
 
+  // build/lib/mailbox.js
+  function origin(host) {
+    var h = String(host === void 0 || host === null ? "" : host);
+    var out = "";
+    for (var i = 0; i < h.length; i++) {
+      var c = h.charCodeAt(i);
+      if (c >= 48 && c <= 57 || c >= 65 && c <= 90 || c >= 97 && c <= 122 || c === 95 || c === 45)
+        out += h.charAt(i);
+      else if (c < 128)
+        out += "_";
+      else if (c < 2048)
+        out += "__";
+      else if (c >= 55296 && c <= 56319) {
+        out += "____";
+        i++;
+      } else
+        out += "___";
+    }
+    return out;
+  }
+  function validMailbox(name, host, mailbox) {
+    var m = String(mailbox === void 0 || mailbox === null ? "" : mailbox);
+    if (!m.length || !name.length || m.indexOf(".") >= 0)
+      return "";
+    return m.toLowerCase() === (name + "@" + origin(host)).toLowerCase() ? m : "";
+  }
+
   // build/lib/chat.js
   function currentViewer() {
     var guest = typeof settings === "object" && settings ? String(settings.guest || "") : "";
@@ -343,12 +370,14 @@ var AvatarChatEvents = (function() {
     var name = sanitizeAlias(n.name);
     if (!name.length)
       return null;
+    var host = trimText(n.host);
     return {
       name: name,
-      host: trimText(n.host),
+      host: host,
       qwkid: normalizeUpper(n.qwkid),
       avatar: trimText(n.avatar),
-      style: n.style && typeof n.style === "object" ? normalizeStyle(n.style) : null
+      style: n.style && typeof n.style === "object" ? normalizeStyle(n.style) : null,
+      mailbox: validMailbox(name, host, n.mailbox)
     };
   }
   function isPrivateMessage(message) {
@@ -396,6 +425,8 @@ var AvatarChatEvents = (function() {
       out.qwkid = nick.qwkid;
     if (nick && nick.avatar.length)
       out.avatar = nick.avatar;
+    if (nick && nick.mailbox.length)
+      out.mailbox = nick.mailbox;
     var style = nick ? wireStyle(nick.style, sender) : null;
     if (style)
       out.style = style;
@@ -407,6 +438,8 @@ var AvatarChatEvents = (function() {
           out.peerSystem = peer.host;
         if (peer.avatar.length)
           out.peerAvatar = peer.avatar;
+        if (peer.mailbox.length)
+          out.peerMailbox = peer.mailbox;
       }
     }
     return out;

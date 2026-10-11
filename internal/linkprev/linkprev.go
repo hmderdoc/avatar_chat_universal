@@ -556,3 +556,8 @@ func (c *Cache) put(rawURL string, m *Meta) {
 	}
 	inlineimg.TrimDir(c.Dir, ".json", max)
 }
+
+// SniffMedia is the audio or video type of a file judged by its first
+// bytes, "" when it is neither (the same check a download link's card
+// uses).
+func SniffMedia(b []byte) string { return sniffMedia(b) }

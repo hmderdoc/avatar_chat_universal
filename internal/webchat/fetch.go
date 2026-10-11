@@ -241,6 +241,19 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.seen.add(m.Image) // the card's picture comes through /img
+	// Its audio or video plays through /media, as the type it announced.
+	if m.Audio != "" {
+		s.seen.add(m.Audio)
+		s.cardMedia.set(m.Audio, m.AudioType)
+	}
+	if m.Video != "" {
+		s.seen.add(m.Video)
+		typ := "video/mp4"
+		if strings.Contains(strings.ToLower(m.Video), ".webm") {
+			typ = "video/webm"
+		}
+		s.cardMedia.set(m.Video, typ)
+	}
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 	_ = json.NewEncoder(w).Encode(m)
 }

@@ -14,6 +14,17 @@ load('http.js');
 
 var SANDBOX = argv[0];
 var DIST = argv[1];
+var MEDIA_PORT = parseInt(argv[2] || '0', 10);
+
+/* http://example.com (port 80) goes to the local media mock instead: the
+   card code still checks example.com's real, public address first. */
+if (MEDIA_PORT && js.global.ConnectedSocket) {
+    var RealConnectedSocket = js.global.ConnectedSocket;
+    js.global.ConnectedSocket = function (host, port) {
+        if (String(host).toLowerCase() === 'example.com' && Number(port) === 80) return new RealConnectedSocket('127.0.0.1', MEDIA_PORT);
+        return new RealConnectedSocket(host, port);
+    };
+}
 var failures = 0;
 var passes = 0;
 
@@ -388,6 +399,54 @@ r = api(alice, 'GET', { action: 'privateHistory', target: 'Bob' });
 check(r.messages && r.messages.length === 1 && r.messages[0].isSelf === true && r.peer.name === 'Bob', "alice's copy of the thread", JSON.stringify(r));
 r = api(bob, 'GET', { action: 'history', channel: 'main' });
 check(lastText(r.messages) !== 'psst bob', 'the PM is not in the public room');
+
+/* ---- PMs with a standalone web user (name@origin mailbox) ---- */
+var rawHostPort = a.server.split(':');
+var raw = new JSONClient(rawHostPort[0], parseInt(rawHostPort[1], 10));
+/* A fresh connection per read: replies to this client's earlier writes
+   would otherwise be taken as the answer. */
+function rawTail(loc) {
+    var c = new JSONClient(rawHostPort[0], parseInt(rawHostPort[1], 10));
+    var list = null;
+    try { list = c.slice('chat', loc, -5, undefined, 1); } catch (e) { list = null; }
+    c.disconnect();
+    return list && list.length ? String(list[list.length - 1].str || '') : '';
+}
+/* What the bundled server would write for web user Webby on web.example. */
+var webby = { name: 'Webby', host: 'web.example', mailbox: 'Webby@web_example' };
+var fromWebby = { nick: webby, str: 'hi from the web', time: Date.now(), private: { to: { name: 'Alice' } } };
+raw.write('chat', 'channels.Alice.messages', fromWebby, 2);
+raw.push('chat', 'channels.Alice.history', fromWebby, 2);
+/* And a forged one: Mallory claims Bob's plain mailbox as hers. */
+var forged = { nick: { name: 'Mallory', host: 'evil.example', mailbox: 'Bob' }, str: 'reply to me', time: Date.now() + 1, private: { to: { name: 'Alice' } } };
+raw.write('chat', 'channels.Alice.messages', forged, 2);
+raw.push('chat', 'channels.Alice.history', forged, 2);
+mswait(200);
+r = api(alice, 'GET', { action: 'private' });
+var tWebby = null, tMallory = null;
+for (i = 0; r.threads && i < r.threads.length; i++) {
+    if (r.threads[i].name === 'Webby') tWebby = r.threads[i];
+    if (r.threads[i].name === 'Mallory') tMallory = r.threads[i];
+}
+check(tWebby && tWebby.system === 'web.example' && tWebby.mailbox === 'Webby@web_example', "a web user's thread carries its mailbox (data) and a plain name", JSON.stringify(tWebby));
+check(tMallory && !tMallory.mailbox, 'a forged mailbox is dropped', JSON.stringify(tMallory));
+r = api(alice, 'POST', { action: 'sendPrivate', target: 'Webby', system: 'web.example', mailbox: 'Webby@web_example', message: 'hello webby' });
+check(r.success === true, 'alice replies to the web user', JSON.stringify(r));
+check(rawTail('channels.Webby@web_example.history') === 'hello webby', "the reply lands in the web user's mailbox");
+check(rawTail('channels.Webby.history') !== 'hello webby', 'and not in the plain-name mailbox');
+r = api(alice, 'POST', { action: 'sendPrivate', target: 'Mallory', system: 'evil.example', mailbox: 'Bob', message: 'not for bob' });
+check(r.success === true && rawTail('channels.Bob.history') !== 'not for bob' && rawTail('channels.Mallory.history') === 'not for bob',
+    "a forged mailbox can't redirect a PM into Bob's mailbox; it goes to the plain name");
+r = api(alice, 'POST', { action: 'sendPrivate', target: 'Webby', system: 'web.example', mailbox: 'Webby@web.example', message: 'dotted' });
+check(rawTail('channels.Webby.history') === 'dotted', 'a mailbox with a dot falls back to the plain name');
+r = api(alice, 'GET', { action: 'privateHistory', target: 'Webby', system: 'web.example' });
+var texts = (r.messages || []).map(function (m) { return m.text; });
+check(texts.indexOf('hi from the web') >= 0 && texts.indexOf('hello webby') >= 0 && r.peer && r.peer.mailbox === 'Webby@web_example',
+    "alice's own mailbox history holds both sides; the peer keeps its mailbox", JSON.stringify(r));
+check(JSON.stringify(r).indexOf('Webby@web_example') < 0 || (r.peer && r.peer.name === 'Webby'), 'the peer is named by its plain name');
+r = api(bob, 'GET', { action: 'private' });
+check(r.threads && r.threads.length === 1 && r.threads[0].name === 'Alice', "bob's own mailbox reads are unchanged by all this", JSON.stringify(r));
+raw.disconnect();
 bobEvents.dispose();
 bobMail.dispose();
 mswait(300);
@@ -415,6 +474,29 @@ if (r.error === 'unresolvable host' || r.error === 'fetch failed') {
     writeln('skip public card fetch (no outside network here): ' + r.error);
 } else {
     check(r.kind === 'site' && /Example Domain/.test(r.title), 'card for a public page', JSON.stringify(r));
+}
+
+/* ---- links that serve audio or video themselves ---- */
+r = api(alice, 'GET', { action: 'preview', url: 'http://example.com/stream' });
+if (!MEDIA_PORT || r.error === 'unresolvable host') {
+    writeln('skip media cards (no media mock or no DNS for example.com): ' + JSON.stringify(r));
+} else {
+    check(r.audio === 'http://example.com/stream' && r.audioType === 'audio/mpeg', 'audio/* by type', JSON.stringify(r));
+    var dl = 'http://example.com/api/files.ssjs?call=download-file&dir=mp3s&file=Song.mp3';
+    r = api(alice, 'GET', { action: 'preview', url: dl });
+    check(r.audio === dl && r.audioType === 'audio/mpeg' && r.title === 'Song.mp3' && r.siteName === 'example.com',
+        'a download link (octet-stream, 416 on Range, 300 KB) is an audio card named by its attachment', JSON.stringify(r));
+    r = api(alice, 'GET', { action: 'preview', url: 'http://example.com/get?id=7' });
+    check(r.audio === 'http://example.com/get?id=7', 'no file name: sniffed from ID3', JSON.stringify(r));
+    r = api(alice, 'GET', { action: 'preview', url: 'http://example.com/clip?x=1' });
+    check(r.video === 'http://example.com/clip?x=1' && !r.audio, 'ftyp isom sniffs as video', JSON.stringify(r));
+    r = api(alice, 'GET', { action: 'preview', url: 'http://example.com/v.webm?t=1' });
+    check(r.video === 'http://example.com/v.webm?t=1', 'video/* by type', JSON.stringify(r));
+    r = api(alice, 'GET', { action: 'preview', url: 'http://example.com/blob' });
+    check(r.error === 'not html' && !r.audio && !r.video, 'a zip gets no card', JSON.stringify(r));
+    r = api(alice, 'GET', { action: 'preview', url: 'http://example.com/?page=records&track=Song.mp3' });
+    check(r.kind === 'site' && r.title === 'Song by Someone' && r.audio === 'http://example.com/media/Song.mp3',
+        'a track page (HTML, 416 on Range) keeps its og:audio card', JSON.stringify(r));
 }
 
 /* ---- uploads ---- */

@@ -51,6 +51,12 @@ type Session struct {
 	hostCache   map[string]string // lowercase nick -> bbs/system name
 	styleCache  map[string]*nickstyle.Style // lowercase nick -> last handle style seen
 	nickNames   map[string]string // lowercase nick -> original casing
+	// peers is the last nick seen for each name (lowercase), with its host
+	// and only a valid web mailbox, so a PM by name reaches a standalone web
+	// user's name@origin mailbox. lastReplyNick is the sender of the most
+	// recent PM, for /r.
+	peers         map[string]Nick
+	lastReplyNick *Nick
 
 	bitmapQueue    []*BitmapEntry
 	bitmapMaxQueue int
@@ -80,10 +86,21 @@ func NewSession(client *Client, self *Nick, channel string) *Session {
 		hostCache:      map[string]string{},
 		styleCache:     map[string]*nickstyle.Style{},
 		nickNames:      map[string]string{},
+		peers:          map[string]Nick{},
 		bitmapMaxQueue: 20,
 		joined:         []string{channel},
 		unread:         map[string]int{},
 	}
+}
+
+// peerOf is n as a PM target: name, host and its mailbox only when valid
+// (a forged one is dropped, so the PM goes to the plain name).
+func peerOf(n *Nick) Nick {
+	p := Nick{Name: n.Name, Host: n.Host}
+	if ValidMailbox(n.Name, n.Host, n.Mailbox) {
+		p.Mailbox = n.Mailbox
+	}
+	return p
 }
 
 // ignored reports whether m is from someone the user ignores.
@@ -337,6 +354,7 @@ func (s *Session) rememberNick(n *Nick) {
 	// Every message carries the sender's current style (or none), so the
 	// latest one wins, including a style that was cleared.
 	s.styleCache[key] = n.Style
+	s.peers[key] = peerOf(n)
 	s.mu.Unlock()
 }
 
@@ -561,20 +579,53 @@ func (s *Session) Send(text string) error {
 //   - PUSH to the recipient's history (so they see it later)
 //   - locally append with Private=true so the sender sees their own PM
 func (s *Session) SendPrivate(recipient, text string) error {
+	if recipient == "" {
+		return nil
+	}
+	s.mu.Lock()
+	p, ok := s.peers[strings.ToLower(recipient)]
+	s.mu.Unlock()
+	if !ok {
+		p = Nick{Name: recipient}
+	}
+	return s.sendPrivateTo(recipient, p, text)
+}
+
+// ReplyPrivate answers the most recent PM (/r): to that sender's mailbox
+// when they are a standalone web user, else their plain name.
+func (s *Session) ReplyPrivate(text string) error {
+	s.mu.Lock()
+	p := s.lastReplyNick
+	name := s.lastReply
+	s.mu.Unlock()
+	if p == nil {
+		return s.SendPrivate(name, text)
+	}
+	return s.sendPrivateTo(p.Name, *p, text)
+}
+
+// sendPrivateTo sends to peer: its valid mailbox (a standalone web user),
+// else the plain-name mailbox `recipient` as typed. The local echo names
+// the plain recipient; a mailbox string is never shown.
+func (s *Session) sendPrivateTo(recipient string, peer Nick, text string) error {
 	text = sanitizeText(text)
 	if text == "" || recipient == "" {
 		return nil
+	}
+	dest := recipient
+	if ValidMailbox(peer.Name, peer.Host, peer.Mailbox) {
+		dest = peer.Mailbox
 	}
 	msg := &Message{
 		Nick: s.Self,
 		Str:  text,
 		Time: time.Now().UnixNano() / 1000000,
 	}
-	loc := s.locMessages(recipient)
+	loc := s.locMessages(dest)
 	if err := s.Client.Write("chat", loc, msg, LockWrite); err != nil {
 		return err
 	}
-	_ = s.Client.Push("chat", s.locHistory(recipient), msg, LockWrite)
+	_ = s.Client.Push("chat", s.locHistory(dest), msg, LockWrite)
 
 	// Local view: a PM from us, addressed to <recipient>. We tweak the
 	// displayed string to show the destination so the sender knows where
@@ -682,8 +733,10 @@ func (s *Session) handleUpdate(pkt *Packet) {
 
 		// Track most recent PM sender so /r works.
 		if msg.Private && msg.Nick != nil && !s.isSelfName(msg.Nick.Name) {
+			p := peerOf(msg.Nick)
 			s.mu.Lock()
 			s.lastReply = msg.Nick.Name
+			s.lastReplyNick = &p
 			s.mu.Unlock()
 		}
 

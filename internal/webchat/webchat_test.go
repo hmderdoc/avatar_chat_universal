@@ -140,9 +140,17 @@ func put(t *testing.T, ws *websocket.Conn, s string) {
 
 const mainLoc = "channels.main.messages"
 
+// testKey is the browser key the tests claim nick with.
+func testKey(nick string) string { return "testkey-" + strings.Repeat("0", 32) + nick }
+
+func claimPacket(nick string) string {
+	return `{"scope":"SOCKET","func":"CLAIM","data":{"nick":"` + nick + `","key":"` + testKey(nick) + `"}}`
+}
+
+// subscribe claims nick (in the same frame) and joins main.
 func subscribe(t *testing.T, ws *websocket.Conn, nick string) {
 	t.Helper()
-	put(t, ws, `{"scope":"chat","func":"QUERY","oper":"SUBSCRIBE","location":"`+mainLoc+`","nick":"`+nick+`","system":"spoofed"}`)
+	put(t, ws, claimPacket(nick)+"\n"+`{"scope":"chat","func":"QUERY","oper":"SUBSCRIBE","location":"`+mainLoc+`","nick":"`+nick+`","system":"spoofed"}`)
 }
 
 func door(t *testing.T, addr, nick string) *chat.Client {
@@ -356,8 +364,19 @@ func TestPolicy(t *testing.T) {
 		}
 	}
 	refused(`{"scope":"chat","func":"QUERY","oper":"WRITE","location":"`+mainLoc+`","data":{"str":"x"}}`, "nickname first")
-	refused(`{"scope":"chat","func":"QUERY","oper":"SUBSCRIBE","location":"`+mainLoc+`","nick":"bad.name"}`, "pick a nickname")
-	refused(`{"scope":"chat","func":"QUERY","oper":"SUBSCRIBE","location":"`+mainLoc+`","nick":"`+strings.Repeat("n", 26)+`"}`, "pick a nickname")
+	refused(`{"scope":"chat","func":"QUERY","oper":"SUBSCRIBE","location":"`+mainLoc+`","nick":"eve"}`, "claim a nickname first")
+	claimed := func(nick, want string) {
+		t.Helper()
+		_, reply := filterOne(p, claimPacket(nick))
+		if !strings.Contains(reply, want) {
+			t.Fatalf("claim %q: %s (want %s)", nick, reply, want)
+		}
+	}
+	claimed("bad.name", `"reason":"invalid"`)
+	claimed(strings.Repeat("n", 26), `"reason":"invalid"`)
+	if _, reply := filterOne(p, `{"scope":"SOCKET","func":"CLAIM","data":{"nick":"eve","key":"short"}}`); !strings.Contains(reply, `"ok":false`) {
+		t.Fatalf("short key: %s", reply)
+	}
 	refused(`{"scope":"chat","func":"QUERY","oper":"SUBSCRIBE","location":"channels.bob.messages","nick":"eve"}`, "no public room named bob")
 	refused(`{"scope":"other","func":"QUERY","oper":"READ","location":"x"}`, "not allowed")
 	refused(`{"scope":"chat","func":"QUERY","oper":"LOCK","location":"`+mainLoc+`"}`, "not allowed")
@@ -366,15 +385,13 @@ func TestPolicy(t *testing.T) {
 	refused(`{"scope":"chat","func":"QUERY","oper":"WRITE","location":"public_channels.newroom","data":true}`, "creating rooms is off")
 	refused(`not json`, "malformed")
 
-	pass, _ := filterOne(p, `{"scope":"chat","func":"QUERY","oper":"SUBSCRIBE","location":"`+mainLoc+`","nick":"  eve   two ","system":"futureland"}`)
+	claimed("  eve   two ", `"ok":true`)
+	pass, _ := filterOne(p, `{"scope":"chat","func":"QUERY","oper":"SUBSCRIBE","location":"`+mainLoc+`","nick":"mallory","system":"futureland"}`)
 	if !strings.Contains(pass, `"nick":"eve two"`) || !strings.Contains(pass, `"system":"testbbs"`) {
 		t.Fatalf("subscribe passed as %s", pass)
 	}
-	// The nick is fixed by the first SUBSCRIBE.
-	pass, _ = filterOne(p, `{"scope":"chat","func":"QUERY","oper":"SUBSCRIBE","location":"`+mainLoc+`","nick":"mallory"}`)
-	if !strings.Contains(pass, `"nick":"eve two"`) {
-		t.Fatalf("second subscribe passed as %s", pass)
-	}
+	// The nick is fixed by the claim.
+	claimed("mallory", `"reason":"fixed"`)
 	refused(`{"scope":"chat","func":"QUERY","oper":"WRITE","location":"`+mainLoc+`","data":{"str":"[TVTUNER|off]"}}`, "not allowed")
 	refused(`{"scope":"chat","func":"QUERY","oper":"WRITE","location":"`+mainLoc+`","data":{"str":"`+strings.Repeat("é", 1001)+`"}}`, "too long")
 	refused(`{"scope":"chat","func":"QUERY","oper":"WRITE","location":"`+mainLoc+`","data":{"str":"  \r\n "}}`, "empty")
@@ -388,8 +405,11 @@ func TestPolicy(t *testing.T) {
 	if err := json.Unmarshal([]byte(pass), &out); err != nil {
 		t.Fatalf("%v: %s", err, pass)
 	}
-	if out.Data.Nick.Name != "eve two" || out.Data.Nick.Avatar != avatar || out.Data.Nick.Style == nil || out.Lock != chat.LockWrite {
+	if out.Data.Nick.Name != "eve two" || out.Data.Nick.Mailbox != "eve two@testbbs" || out.Data.Nick.Avatar != avatar || out.Data.Nick.Style == nil || out.Lock != chat.LockWrite {
 		t.Fatalf("push passed as %s", pass)
+	}
+	if strings.Contains(pass, "tag") || strings.Contains(pass, "hi") && strings.Contains(pass, "there") {
+		t.Fatalf("a tag got through: %s", pass)
 	}
 	if !web.seen.has("https://example.com/a.png") {
 		t.Fatal("the sender's own link isn't fetchable for them")

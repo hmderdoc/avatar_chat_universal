@@ -14,7 +14,7 @@
  *   GET  ?action=avatarCollection&collection=ID   one collection's avatars (login)
  *   GET  ?action=preview&url=..                   a link card            (login)
  *   POST ?action=send&channel=..&message=..                              (login, token)
- *   POST ?action=sendPrivate&target=..[&system=..]&message=..           (login, token)
+ *   POST ?action=sendPrivate&target=..[&system=..][&mailbox=..]&message=..           (login, token)
  *   POST ?action=createChannel&channel=..                                (login, token)
  *   GET  ?action=prefs                            your page style + sidebar rooms (login)
  *   POST ?action=joinRoom&channel=..[&create=1]   add a room to your sidebar;
@@ -269,7 +269,7 @@ function run(cfg: WebConfig, viewer: chat.Viewer, action: string): Reply {
             if (!target.length) return { error: 'target required' };
             if (!trimText(text).length) return { error: 'empty message' };
             return chat.withClient(cfg, function (c) {
-                return chat.sendPrivate(c, viewer, target, trimText(param('system')), text);
+                return chat.sendPrivate(c, viewer, target, trimText(param('system')), trimText(param('mailbox')), text);
             });
         }
 

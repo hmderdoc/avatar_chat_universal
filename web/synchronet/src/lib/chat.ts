@@ -7,6 +7,7 @@
 import { WebConfig } from './config';
 import { current as currentAvatar } from './avatars';
 import { normalizeStyle, readStyle, wireStyle, HandleStyle } from './style';
+import { validMailbox } from './mailbox';
 import { channelKey, isArray, normalizeUpper, ownKeys, sanitizeAlias, sanitizeChannel, trimText } from './util';
 
 export const MAX_TEXT = 1000;          /* what the server keeps of a line */
@@ -19,6 +20,7 @@ export interface Nick {
     qwkid: string;
     avatar: string;
     style: HandleStyle | null;
+    mailbox: string; /* a standalone web user's validated mailbox, else '' */
 }
 
 export interface ChatMessage {
@@ -32,9 +34,13 @@ export interface ChatMessage {
     avatar?: string;
     style?: { colors: string[]; tag: { text: string; fg: string; bg: string } };
     private: boolean;
+    /* Where a reply goes, for a standalone web user (data for sendPrivate;
+       never displayed). */
+    mailbox?: string;
     peerName?: string;
     peerSystem?: string;
     peerAvatar?: string;
+    peerMailbox?: string;
 }
 
 interface RawMessage {
@@ -105,15 +111,17 @@ function isMailboxName(name: string): boolean {
 
 export function normalizeNick(nick: unknown): Nick | null {
     if (!nick || typeof nick !== 'object') return null;
-    const n = nick as { name?: unknown; host?: unknown; qwkid?: unknown; avatar?: unknown; style?: unknown };
+    const n = nick as { name?: unknown; host?: unknown; qwkid?: unknown; avatar?: unknown; style?: unknown; mailbox?: unknown };
     const name = sanitizeAlias(n.name);
     if (!name.length) return null;
+    const host = trimText(n.host);
     return {
         name: name,
-        host: trimText(n.host),
+        host: host,
         qwkid: normalizeUpper(n.qwkid),
         avatar: trimText(n.avatar),
-        style: n.style && typeof n.style === 'object' ? normalizeStyle(n.style) : null
+        style: n.style && typeof n.style === 'object' ? normalizeStyle(n.style) : null,
+        mailbox: validMailbox(name, host, n.mailbox)
     };
 }
 
@@ -157,6 +165,7 @@ export function formatMessage(raw: unknown, viewer: Viewer): ChatMessage {
     };
     if (nick && nick.qwkid.length) out.qwkid = nick.qwkid;
     if (nick && nick.avatar.length) out.avatar = nick.avatar;
+    if (nick && nick.mailbox.length) out.mailbox = nick.mailbox;
     const style = nick ? wireStyle(nick.style, sender) : null;
     if (style) out.style = style;
     if (out.private && viewer.authed) {
@@ -165,6 +174,7 @@ export function formatMessage(raw: unknown, viewer: Viewer): ChatMessage {
             out.peerName = peer.name;
             if (peer.host.length) out.peerSystem = peer.host;
             if (peer.avatar.length) out.peerAvatar = peer.avatar;
+            if (peer.mailbox.length) out.peerMailbox = peer.mailbox;
         }
     }
     return out;
@@ -219,8 +229,13 @@ function ensureHistory(client: JSONClient, location: string): void {
     let existing: unknown = null;
     try { existing = client.read('chat', location, 1); } catch (_e) { existing = null; }
     if (isArray(existing)) return;
-    /* The Go server keeps WRITE values apart from PUSH arrays and builds the
-       array on the first PUSH, so an unset location is fine there too. */
+    /* The Go server keeps WRITE values apart from PUSH arrays: its READ of a
+       pushed history answers null, and a WRITE there would wipe it. So look
+       with SLICE before seeding; an unset location is fine there too, since
+       the first PUSH builds the array. */
+    let tail: unknown = null;
+    try { tail = client.slice('chat', location, -1, undefined, 1); } catch (_e) { tail = null; }
+    if (isArray(tail) && (tail as unknown[]).length > 0) return;
     try { client.write('chat', location, [], 2); } catch (_e) { /* PUSH creates it */ }
 }
 
@@ -237,7 +252,7 @@ export function history(client: JSONClient, channel: string, count: number, view
     return out;
 }
 
-export interface WhoUser { nick: string; system: string; userNumber: number; qwkid?: string; avatar?: string; style?: ChatMessage['style']; }
+export interface WhoUser { nick: string; system: string; userNumber: number; qwkid?: string; avatar?: string; mailbox?: string; style?: ChatMessage['style']; }
 
 export function who(client: JSONClient, channel: string): WhoUser[] {
     const result = client.who('chat', 'channels.' + channel + '.messages') || {};
@@ -256,13 +271,15 @@ export function who(client: JSONClient, channel: string): WhoUser[] {
         if (typeof existing === 'number') {
             const u = users[existing]!;
             if (!u.avatar && nick && nick.avatar) u.avatar = nick.avatar;
+            if (!u.mailbox && nick && nick.mailbox) u.mailbox = nick.mailbox;
             if (!u.style && nick) { const s = wireStyle(nick.style, name); if (s) u.style = s; }
             continue;
         }
         seen[id] = users.length;
-        const u: WhoUser = { nick: name, system: host, userNumber: localNumber(nick || { name: name, host: host, qwkid: '', avatar: '', style: null }) };
+        const u: WhoUser = { nick: name, system: host, userNumber: localNumber(nick || { name: name, host: host, qwkid: '', avatar: '', style: null, mailbox: '' }) };
         if (qwkid.length) u.qwkid = qwkid;
         if (nick && nick.avatar.length) u.avatar = nick.avatar;
+        if (nick && nick.mailbox.length) u.mailbox = nick.mailbox;
         const s = nick ? wireStyle(nick.style, name) : null;
         if (s) u.style = s;
         users.push(u);
@@ -342,7 +359,7 @@ function threadKey(nick: Nick): string {
     return normalizeUpper(nick.name).replace(/[^A-Z0-9]/g, '') + '|' + (nick.qwkid || normalizeUpper(nick.host));
 }
 
-export interface ThreadSummary { name: string; system: string; avatar?: string; lastTimestamp: number; preview: string; newCount: number; }
+export interface ThreadSummary { name: string; system: string; avatar?: string; mailbox?: string; lastTimestamp: number; preview: string; newCount: number; }
 
 export function privateThreads(client: JSONClient, cfg: WebConfig, viewer: Viewer, since: number): ThreadSummary[] {
     const list = recent(client, mailboxHistory(viewer.alias), Math.max(80, cfg.maxHistory * 2));
@@ -365,6 +382,7 @@ export function privateThreads(client: JSONClient, cfg: WebConfig, viewer: Viewe
             th.preview = m.str === undefined || m.str === null ? '' : String(m.str);
             if (peer.avatar.length) th.avatar = peer.avatar;
             if (peer.host.length) th.system = peer.host;
+            if (peer.mailbox.length) th.mailbox = peer.mailbox;
         }
         const sender = normalizeNick(m.nick);
         if (since > 0 && t > since && sender && normalizeUpper(sender.name) !== normalizeUpper(viewer.alias)) th.newCount++;
@@ -375,7 +393,7 @@ export function privateThreads(client: JSONClient, cfg: WebConfig, viewer: Viewe
     return out;
 }
 
-export function privateHistory(client: JSONClient, cfg: WebConfig, viewer: Viewer, target: string, targetSystem: string): { peer: { name: string; system: string; avatar?: string } | null; messages: ChatMessage[] } {
+export function privateHistory(client: JSONClient, cfg: WebConfig, viewer: Viewer, target: string, targetSystem: string): { peer: { name: string; system: string; avatar?: string; mailbox?: string } | null; messages: ChatMessage[] } {
     const list = recent(client, mailboxHistory(viewer.alias), Math.max(80, cfg.maxHistory * 2));
     const wantName = normalizeUpper(target);
     const wantSystem = normalizeUpper(targetSystem);
@@ -390,10 +408,21 @@ export function privateHistory(client: JSONClient, cfg: WebConfig, viewer: Viewe
         if (!selected) selected = peer;
         messages.push(formatMessage(m, viewer));
     }
-    let peerOut: { name: string; system: string; avatar?: string } | null = null;
+    let peerOut: { name: string; system: string; avatar?: string; mailbox?: string } | null = null;
     if (selected) {
         peerOut = { name: selected.name, system: selected.host };
         if (selected.avatar.length) peerOut.avatar = selected.avatar;
+        /* The newest message that names a mailbox wins: a reply goes where
+           the peer now receives. */
+        for (let i = list.length - 1; i >= 0; i--) {
+            const m = list[i]!;
+            if (!isPrivateMessage(m)) continue;
+            const p = peerOf(m, viewer.alias);
+            if (p && normalizeUpper(p.name) === wantName && normalizeUpper(p.host) === normalizeUpper(selected.host) && p.mailbox.length) {
+                peerOut.mailbox = p.mailbox;
+                break;
+            }
+        }
     }
     return { peer: peerOut, messages: messages };
 }
@@ -420,14 +449,20 @@ export function sendPublic(client: JSONClient, viewer: Viewer, channel: string, 
     return { success: true, channel: channel, timestamp: packet.time };
 }
 
-export function sendPrivate(client: JSONClient, viewer: Viewer, target: string, targetSystem: string, text: string): { success: boolean; target: string; timestamp: number } {
+/* A PM to target (on targetSystem). A standalone web user is reached at
+ * their mailbox: `mailbox` is what their messages said, re-checked here, and
+ * anything that isn't exactly theirs falls back to the plain name. */
+export function sendPrivate(client: JSONClient, viewer: Viewer, target: string, targetSystem: string, mailbox: string, text: string): { success: boolean; target: string; timestamp: number } {
     const to: { [k: string]: string } = { name: target };
     if (targetSystem.length) to['host'] = targetSystem;
+    const box = validMailbox(target, targetSystem, mailbox);
+    if (box.length) to['mailbox'] = box;
+    const dest = box.length ? box : target;
     const packet = { nick: ownNick(viewer), str: text, time: Date.now(), private: { to: to } };
-    ensureHistory(client, mailboxHistory(target));
+    ensureHistory(client, mailboxHistory(dest));
     ensureHistory(client, mailboxHistory(viewer.alias));
-    client.write('chat', mailboxLive(target), packet, 2);
-    client.push('chat', mailboxHistory(target), packet, 2);
+    client.write('chat', mailboxLive(dest), packet, 2);
+    client.push('chat', mailboxHistory(dest), packet, 2);
     client.push('chat', mailboxHistory(viewer.alias), packet, 2);
     confirmLatest(client, mailboxHistory(viewer.alias), packet);
     return { success: true, target: target, timestamp: packet.time };

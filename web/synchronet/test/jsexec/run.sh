@@ -32,4 +32,9 @@ web_uploads = on
 web_upload_max_mb = 2
 web_upload_retention_days = 7
 INI
-"$JSEXEC" -n "$HERE/harness.js" "$SB/" "$PKG/dist/webv4/"
+MPORT=${AVATARCHAT_MEDIA_PORT:-18189}
+node "$HERE/media_mock.js" "$MPORT" &
+MPID=$!
+trap 'kill $PID $MPID 2>/dev/null || true; rm -rf "$TMP"' EXIT
+sleep 0.5
+"$JSEXEC" -n "$HERE/harness.js" "$SB/" "$PKG/dist/webv4/" "$MPORT"

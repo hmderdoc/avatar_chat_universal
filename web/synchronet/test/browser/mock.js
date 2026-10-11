@@ -187,6 +187,10 @@ const server = http.createServer(async (req, res) => {
         return json(res, { channel: "motd", previewText: "mock motd", timestamp: Date.now() });
       case "private":
         return json(res, { threads: [] });
+      case "privateHistory":
+        return json(res, { peer: { name: q.target, system: q.system || "" }, messages: [], serverTime: Date.now() });
+      case "sendPrivate":
+        return json(res, { success: true, target: q.target, timestamp: Date.now() });
       case "style":
         return json(res, { ok: true, alias: "Tester", style: state.style });
       case "saveStyle": {
@@ -216,6 +220,13 @@ const server = http.createServer(async (req, res) => {
         state.avatar.disabled = q.enabled !== "1";
         return json(res, { ok: true, avatar: state.avatar });
       case "preview":
+        // as preview.ts: a download link that served an mp3, a video file
+        if (q.url === "https://files.example/api/files.ssjs?call=download-file&dir=mp3s&file=Song.mp3") {
+          return json(res, { url: q.url, finalUrl: q.url, kind: "site", title: "Song.mp3", description: "", siteName: "files.example", audio: q.url, audioType: "audio/mpeg" });
+        }
+        if (q.url === "https://files.example/clip?x=1") {
+          return json(res, { url: q.url, finalUrl: q.url, kind: "site", title: "clip", description: "", siteName: "files.example", video: q.url });
+        }
         if (q.url === "https://news.example/story") {
           return json(res, { url: q.url, finalUrl: q.url, kind: "site", title: "Big <News> Story", description: "Something happened.", image: "", siteName: "News Example" });
         }
@@ -256,6 +267,20 @@ const server = http.createServer(async (req, res) => {
     return json(res, { ok: true });
   }
 
+  // A live message from Carol with the given text.
+  if (p === "/__say") {
+    const m = msg("Carol", url.searchParams.get("text") || "", { timestamp: Date.now() });
+    state.messages.push(m);
+    pushEvent(Object.assign({ type: "message", channel: "main" }, m));
+    return json(res, { ok: true });
+  }
+  // A live message from a standalone web user (carrying its mailbox).
+  if (p === "/__webuser") {
+    const m = msg("Webby", "hi from the web", { system: "web.example", mailbox: "Webby@web_example", timestamp: Date.now() });
+    state.messages.push(m);
+    pushEvent(Object.assign({ type: "message", channel: "main" }, m));
+    return json(res, { ok: true });
+  }
   if (p === "/__state") return json(res, { joined: state.joined, rooms: state.rooms, pageStyle: state.pageStyle, posts: state.posts, stored: Object.keys(state.stored).map((k) => [k, state.stored[k].length]), style: state.style, lastStyleBody: state.lastStyleBody, avatar: state.avatar });
 
   if (state.stored[p]) { res.writeHead(200, { "Content-Type": "image/png" }); res.end(state.stored[p]); return; }

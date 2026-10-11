@@ -50,6 +50,10 @@ func main() {
 	flag.BoolVar(&wc.CreateRooms, "web-create-rooms", false, "let web users register new public rooms")
 	flag.IntVar(&wc.FetchPerMinute, "fetch-per-minute", wc.FetchPerMinute, "picture and link-card fetches per address per minute")
 	flag.IntVar(&wc.ImageMaxMB, "image-max-mb", wc.ImageMaxMB, "largest picture the web page's /img passes through, MB")
+	flag.StringVar(&wc.ClaimsFile, "web-claims-file", "web_claims.txt", "which browser holds each web nickname; delete a line to free a name (\"\" keeps claims in memory only)")
+	flag.IntVar(&wc.ClaimsPerIPDay, "web-claims-per-ip-day", wc.ClaimsPerIPDay, "new web nicknames one address may claim per day (-1 for no cap)")
+	flag.IntVar(&wc.MediaProxyMaxMB, "media-proxy-max-mb", wc.MediaProxyMaxMB, "largest audio or video file the web page's /media streams through, MB")
+	flag.IntVar(&wc.MediaStreams, "media-streams", wc.MediaStreams, "audio or video files the web page's /media streams at once")
 	webCache := flag.String("web-cache-dir", "webcache", "where fetched pictures and link cards are cached (\"\" for none)")
 	avatarsDir := flag.String("avatars-dir", "", "extra .bin avatar collections the web page offers, besides the bundled ones")
 	nsfw := flag.String("nsfw-keywords", "", "comma-separated words that veil a picture or link card on the web page (\"none\" turns the veil off; default the door's list)")
@@ -126,6 +130,7 @@ func main() {
 		str("system-name", &wc.SystemName, "system_name")
 		str("default-channel", &wc.DefaultChannel, "default_channel")
 		str("web-cache-dir", webCache, "web_cache_dir")
+		str("web-claims-file", &wc.ClaimsFile, "web_claims_file")
 		str("avatars-dir", avatarsDir, "avatars_dir")
 		str("nsfw-keywords", nsfw, "nsfw_keywords")
 		str("web-styles", styles, "web_styles")
@@ -137,6 +142,9 @@ func main() {
 		num("web-max-per-ip", &wc.MaxPerIP, "web_max_per_ip")
 		num("fetch-per-minute", &wc.FetchPerMinute, "fetch_per_minute")
 		num("image-max-mb", &wc.ImageMaxMB, "image_max_mb")
+		num("web-claims-per-ip-day", &wc.ClaimsPerIPDay, "web_claims_per_ip_day")
+		num("media-proxy-max-mb", &wc.MediaProxyMaxMB, "media_proxy_max_mb")
+		num("media-streams", &wc.MediaStreams, "media_streams")
 		if v, ok := keys["web_create_rooms"]; ok && !set["web-create-rooms"] {
 			wc.CreateRooms = iniBool(v)
 		}
@@ -208,6 +216,7 @@ func main() {
 		web.Static = webpage.Standalone
 		web.Media = media
 		web.Images, web.Pages, web.Previews = webFetchers(*webCache, web.Config().ImageMaxMB)
+		web.Streams = inlineimg.NewFetcher("") // /media: guarded, streamed, never cached
 		web.Avatars = webAvatars(*avatarsDir, logger)
 		run := func() {
 			if err := web.ListenAndServe(ctx); err != nil {

@@ -435,3 +435,38 @@ func TrimDir(dir, ext string, max int64) {
 		}
 	}
 }
+
+// Open starts a GET of rawURL through the same guards as Fetch and returns
+// the response for the caller to stream and close; the body is not read or
+// capped here and no Timeout applies past the headers (a long song plays
+// for minutes). rng, when set, is passed as the Range header; an upstream
+// that refuses ranges with 416 (Synchronet's web server does, for its
+// dynamic replies) is asked again without one.
+func (f *Fetcher) Open(ctx context.Context, rawURL, rng string) (*http.Response, error) {
+	if err := f.checkURL(rawURL); err != nil {
+		return nil, err
+	}
+	get := func(rng string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		if f.UserAgent != "" {
+			req.Header.Set("User-Agent", f.UserAgent)
+		}
+		req.Header.Set("Accept", "audio/*,video/*;q=0.9,*/*;q=0.5")
+		if rng != "" {
+			req.Header.Set("Range", rng)
+		}
+		return f.httpClient().Do(req)
+	}
+	resp, err := get(rng)
+	if err != nil {
+		return nil, err
+	}
+	if rng != "" && resp.StatusCode == http.StatusRequestedRangeNotSatisfiable {
+		resp.Body.Close()
+		return get("")
+	}
+	return resp, nil
+}

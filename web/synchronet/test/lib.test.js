@@ -225,3 +225,47 @@ test("web prefs record: style and sidebar rooms, cleaned", () => {
   assert.deepStrictEqual(L.removeRoom(["main", "Lobby"], "lobby"), ["main"]);
   assert.strictEqual(L.cleanRooms(Array.from({ length: 80 }, (_, i) => "r" + i)).length, 50);
 });
+
+test("web mailboxes: same rule as the door's chat.ValidMailbox", () => {
+  assert.strictEqual(L.origin("futureland.today"), "futureland_today");
+  assert.strictEqual(L.origin("web bbs-1_x"), "web_bbs-1_x");
+  assert.strictEqual(L.origin("café"), "caf__"); // one '_' per UTF-8 byte, like Go
+  assert.strictEqual(L.validMailbox("alice", "web.example", "alice@web_example"), "alice@web_example");
+  assert.strictEqual(L.validMailbox("alice", "web.example", "ALICE@WEB_EXAMPLE"), "ALICE@WEB_EXAMPLE");
+  assert.strictEqual(L.validMailbox("alice", "", "alice@"), "alice@");
+  for (const [name, host, box] of [
+    ["alice", "web.example", "Hm Derdoc"],         // someone else's plain mailbox
+    ["alice", "web.example", "bob@web_example"],   // someone else's web mailbox
+    ["alice", "web.example", "alice@web.example"], // a dot
+    ["alice", "web.example", ""],
+    ["", "web.example", "@web_example"],
+  ]) assert.strictEqual(L.validMailbox(name, host, box), "", box);
+});
+
+test("media links: the door's mediaFile rule (type, then attachment name, then bytes)", () => {
+  assert.strictEqual(L.dispositionName('attachment; filename="Blood_In_Bangkoks_Hollow_hm_derdoc.mp3"'), "Blood_In_Bangkoks_Hollow_hm_derdoc.mp3");
+  assert.strictEqual(L.dispositionName("attachment; filename=notes.zip"), "notes.zip");
+  assert.strictEqual(L.dispositionName("attachment; filename*=UTF-8''caf%C3%A9.mp3"), "café.mp3");
+  assert.strictEqual(L.dispositionName('attachment; filename="../../etc/x.mp3"'), "x.mp3");
+  assert.strictEqual(L.dispositionName("inline"), "");
+  assert.strictEqual(L.typeForName("Song.MP3"), "audio/mpeg");
+  assert.strictEqual(L.typeForName("a.webm"), "video/webm");
+  assert.strictEqual(L.typeForName("notes.zip"), "");
+  assert.strictEqual(L.sniffMedia("ID3\x03"), "audio/mpeg");
+  assert.strictEqual(L.sniffMedia("\xff\xfb\x90"), "audio/mpeg");
+  assert.strictEqual(L.sniffMedia("\xff\xe0"), "", "frame sync with no layer is not MPEG audio");
+  assert.strictEqual(L.sniffMedia("OggS"), "audio/ogg");
+  assert.strictEqual(L.sniffMedia("fLaC"), "audio/flac");
+  assert.strictEqual(L.sniffMedia("RIFF\x00\x00\x00\x00WAVEfmt "), "audio/wav");
+  assert.strictEqual(L.sniffMedia("\x00\x00\x00\x20ftypM4A "), "audio/mp4");
+  assert.strictEqual(L.sniffMedia("\x00\x00\x00\x18ftypisom"), "video/mp4");
+  assert.strictEqual(L.sniffMedia("\x1a\x45\xdf\xa3"), "video/webm");
+  assert.strictEqual(L.sniffMedia("PK\x03\x04"), "");
+  const dl = "https://futureland.today/api/files.ssjs?call=download-file&dir=mp3s&file=Song.mp3";
+  const c = L.mediaCard(dl, dl, "application/octet-stream", "Song.mp3", "ID3");
+  assert.deepStrictEqual([c.audio, c.audioType, c.title, c.siteName], [dl, "audio/mpeg", "Song.mp3", "futureland.today"]);
+  assert.strictEqual(L.mediaCard(dl, dl, "audio/ogg; codecs=opus", "", "").audioType, "audio/ogg");
+  assert.strictEqual(L.mediaCard("https://x.org/v", "https://x.org/v", "video/mp4", "", "").video, "https://x.org/v");
+  assert.strictEqual(L.mediaCard("https://x.org/b", "https://x.org/b", "application/octet-stream", "notes.zip", "PK"), null);
+  assert.strictEqual(L.mediaCard("https://x.org/j", "https://x.org/j", "application/json", "Song.mp3", "ID3"), null, "a named type that isn't generic decides");
+});

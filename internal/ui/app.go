@@ -1015,7 +1015,7 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		}
 		bodyStart := len(cmd) + 1
 		body := text[bodyStart:]
-		if err := a.Session.SendPrivate(target, body); err != nil {
+		if err := a.Session.ReplyPrivate(body); err != nil {
 			a.Session.Notice(fmt.Sprintf("/r failed: %v", err))
 		}
 		return false, true

@@ -15,6 +15,12 @@
                 <div class="avatar-chat-sidebar-section">
                     <div id="rooms" class="avatar-chat-nav-list"></div>
                 </div>
+                <div id="private-section" class="avatar-chat-sidebar-section sa-private is-empty">
+                    <div class="avatar-chat-sidebar-header">
+                        <h4 class="avatar-chat-sidebar-heading">Private Chats</h4>
+                    </div>
+                    <div id="private" class="avatar-chat-nav-list"></div>
+                </div>
                 <div class="avatar-chat-sidebar-section sa-you">
                     <div class="sa-me">
                         <div id="me-avatar" class="sa-mini-avatar"></div>
@@ -113,13 +119,31 @@
     </div>
 
     <div id="settings-modal" class="avatar-chat-modal" aria-hidden="true">
-        <form id="settings-form" class="avatar-chat-modal-card" role="dialog" aria-modal="true" aria-labelledby="settings-title" autocomplete="off">
+        <form id="settings-form" class="avatar-chat-modal-card avatar-chat-style-card" role="dialog" aria-modal="true" aria-labelledby="settings-title" autocomplete="off">
             <div class="avatar-chat-modal-header">
                 <h4 id="settings-title" class="avatar-chat-modal-title">Settings</h4>
             </div>
             <label class="sa-field">Nickname
                 <input id="settings-nick" class="avatar-chat-sidebar-input" maxlength="25" autocomplete="nickname">
             </label>
+            <div class="sa-field">Handle colours
+                <span class="avatar-chat-modal-text">A colour for each letter of your name, kept in this browser for that name.</span>
+                <div id="style-preview" class="avatar-chat-style-preview"></div>
+                <div id="style-letters" class="avatar-chat-style-letters"></div>
+                <div class="avatar-chat-style-row">
+                    <label>Preset
+                        <select id="style-preset">
+                            <option value="">Choose...</option>
+                            <option value="solid">Solid</option>
+                            <option value="gradient">Gradient</option>
+                            <option value="rainbow">Rainbow</option>
+                            <option value="clear">Clear colours</option>
+                        </select>
+                    </label>
+                    <label>From <input id="style-a" type="color" value="#55ffff"></label>
+                    <label>To <input id="style-b" type="color" value="#ff55ff"></label>
+                </div>
+            </div>
             <label class="sa-field">Page style
                 <select id="settings-style"></select>
             </label>
@@ -169,6 +193,9 @@
                     </div>
                 </div>
                 <button id="card-close" class="avatar-chat-users-close" type="button" aria-label="Close">&times;</button>
+            </div>
+            <div class="avatar-chat-modal-actions">
+                <button id="card-message" class="avatar-chat-sidebar-button" type="button">Message</button>
             </div>
         </div>
     </div>

@@ -5,3 +5,5 @@ export * from '../src/lib/media';
 export { buildConfig, iniPathFor, DEFAULT_NSFW_KEYWORDS, ALL_UPLOAD_TYPES, DEFAULT_UPLOAD_TYPES } from '../src/lib/config';
 export { normalizeStyle, wireStyle, styleIsEmpty, hex } from '../src/lib/style';
 export { PAGE_STYLES, offeredStyles, defaultStyle, resolveStyle, normalizePrefs, joinedRooms, addRoom, removeRoom, cleanRooms } from '../src/lib/webprefs';
+export { origin, validMailbox } from '../src/lib/mailbox';
+export { dispositionName, typeForName, sniffMedia, mediaCard } from '../src/lib/preview';

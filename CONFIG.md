@@ -181,8 +181,8 @@ also the on-screen action bars and `/help`.
 | `/help` / `/?`                | Show available commands.                                                      |
 | `/quit` / `/q` / `/exit` / `/bye` | Disconnect and exit the door.                                              |
 | `/me <action>`                | Broadcast an action message ("alice waves").                                  |
-| `/msg <user> <text>` / `/m`   | Send a private message.                                                       |
-| `/r <text>` / `/reply`        | Reply to the last private sender.                                             |
+| `/msg <user> <text>` / `/m`   | Send a private message. To a standalone web user (the bundled server's page), it goes to their own web mailbox, so it never lands with a BBS user of the same name. |
+| `/r <text>` / `/reply`        | Reply to the last private sender, to their web mailbox when they have one.    |
 | `/who`                        | Open the roster modal listing everyone in the channel.                        |
 | `/channels` / `/list`         | Room list: your joined channels with unread counts, then every public room the server registers, with user counts. Enter joins or switches, `L` leaves. |
 | `/join <channel>` / `/j`      | Switch to another channel. The one you leave stays joined: its new messages count as unread (top-bar `/channels [N]`). |

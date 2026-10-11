@@ -7,13 +7,20 @@
 // shared/app.css and its page styles dress both; the rooms, avatar and
 // attach behaviour follow that page too. There are no accounts here, so
 // the nickname, avatar, page style and joined rooms live in this browser.
+//
+// Private messages (WEB.md "Private messages"): the server gives a name to
+// the first browser that claims it, with a key kept here. PMs to us arrive
+// in our own web mailbox, channels.<nick>@<origin>.messages, which only
+// this browser may read; we send to a peer's web mailbox when their nick
+// carries a valid one, else to their plain name (a BBS user). No mailbox
+// string is ever shown.
 "use strict";
 
 (function () {
     const $ = (id) => document.getElementById(id);
     const els = {
         app: $("app"), chatpanel: $("chatpanel"), messages: $("messages"),
-        rooms: $("rooms"), roomLabel: $("room-label"), count: $("count"), roomActions: $("room-actions"),
+        rooms: $("rooms"), private: $("private"), roomLabel: $("room-label"), count: $("count"), roomActions: $("room-actions"),
         status: $("status"), statusText: $("status-text"),
         form: $("form"), input: $("input"), file: $("file"), attach: $("attach"), draw: $("draw"),
         members: $("members"), membersTitle: $("members-title"), membersList: $("members-list"), membersClose: $("members-close"),
@@ -24,13 +31,15 @@
         noRoomsModal: $("norooms-modal"), noRoomsDefault: $("norooms-default"), noRoomsMain: $("norooms-main"),
         noRoomsPick: $("norooms-pick"), noRoomsCancel: $("norooms-cancel"),
         settingsModal: $("settings-modal"), settingsForm: $("settings-form"), settingsNick: $("settings-nick"),
+        styleLetters: $("style-letters"), stylePreview: $("style-preview"), stylePreset: $("style-preset"),
+        styleA: $("style-a"), styleB: $("style-b"),
         settingsStyle: $("settings-style"), settingsStatus: $("settings-status"), settingsCancel: $("settings-cancel"),
         avatarModal: $("avatar-modal"), avatarPreview: $("avatar-preview"), avatarDraw: $("avatar-draw"),
         avatarUpload: $("avatar-upload"), avatarRemove: $("avatar-remove"), avatarFile: $("avatar-file"),
         avatarLibrary: $("avatar-library"), avatarCollection: $("avatar-collection"), avatarGrid: $("avatar-grid"),
         avatarStatus: $("avatar-status"), avatarUse: $("avatar-use"), avatarClose: $("avatar-close"),
         cardModal: $("card-modal"), cardAvatar: $("card-avatar"), cardName: $("card-name"), cardBoard: $("card-board"),
-        cardClose: $("card-close"),
+        cardClose: $("card-close"), cardMessage: $("card-message"),
     };
 
     const HISTORY = 60;            // messages loaded when a room is opened
@@ -42,19 +51,24 @@
     const ART_EXTENSIONS = /\.(ans|asc|nfo|diz|ice|txt)$/i;
     const ART_MAX_BYTES = 1024 * 1024;
     const ROOM_NAME = /^[A-Za-z0-9_-]{1,32}$/;
+    const PM_HISTORY = 200;        // messages read from our own mailbox
+    const MAX_THREAD = 300;        // messages kept per private thread
 
     const cfg = {
         defaultChannel: "main", systemName: "", maxMessage: 1000, createRooms: false, uploads: false,
         mode: "local", nsfwKeywords: [], styles: [{id: "classic", label: "Classic"}], defaultStyle: "classic", avatars: false,
     };
     const state = {
-        nick: "", avatar: "", style: "", joined: [], view: "",
+        nick: "", avatar: "", style: "", colors: [], draftColors: [], joined: [], view: "",
         ws: null, open: false, retry: 0, retryTimer: 0, subscribed: new Set(),
         messages: [], lastGroup: null, pendingSelf: [], pendingArt: null, busy: false,
         who: new Map(),        // room (lower) -> [{nick, system}]
         unread: new Map(),     // room (lower) -> count
         publicRooms: [],       // names from public_channels
         whoTimers: new Map(),
+        key: "", claimed: false, refused: false,
+        pm: "",                // key of the private thread on screen, "" for a room
+        threads: new Map(),    // lower(name)|lower(host) -> {name, host, mailbox, msgs, unread, last}
     };
 
     // --- storage (this browser only; may be unavailable) -------------------
@@ -87,8 +101,12 @@
         if (!nick || !nick.name) return false;
         const key = seenKey(nick.name, nick.host);
         const prev = seen.get(key) || {};
-        const next = {a: nick.avatar || prev.a || "", s: nick.style && Array.isArray(nick.style.colors) ? nick.style.colors : prev.s || null};
-        if (next.a === prev.a && JSON.stringify(next.s) === JSON.stringify(prev.s)) return false;
+        const next = {
+            a: nick.avatar || prev.a || "",
+            s: nick.style && Array.isArray(nick.style.colors) ? nick.style.colors : prev.s || null,
+            m: validMailbox(nick.name, nick.host, nick.mailbox) ? nick.mailbox : prev.m || "",
+        };
+        if (next.a === prev.a && next.m === (prev.m || "") && JSON.stringify(next.s) === JSON.stringify(prev.s)) return false;
         seen.delete(key);
         seen.set(key, next);
         while (seen.size > 300) seen.delete(seen.keys().next().value);
@@ -111,7 +129,25 @@
         const e = seenFor(name, host);
         return e ? e.a : "";
     }
+    // --- web mailboxes (chat.MailboxFor in Go) ---------------------------------
+    const origin = (host) => String(host || "").replace(/[^A-Za-z0-9_-]/g, "_");
+    const mailboxFor = (name, host) => name + "@" + origin(host);
+    function validMailbox(name, host, mb) {
+        if (!mb || !name || String(mb).indexOf(".") >= 0) return false;
+        return lower(mb) === lower(mailboxFor(name, host));
+    }
+    function ownMailbox() { return state.nick ? mailboxFor(state.nick, cfg.systemName) : ""; }
+    // peerMailbox is where a PM to name on host goes when they're a web
+    // user: from a message they sent, or, for someone on this same server
+    // (their board is ours), worked out; "" means a BBS user's plain name.
+    function peerMailbox(name, host) {
+        const e = host ? seen.get(seenKey(name, host)) : null;
+        if (e && e.m && validMailbox(name, host, e.m)) return e.m;
+        if (host && lower(host) === lower(cfg.systemName)) return mailboxFor(name, host);
+        return "";
+    }
     function colorsOf(name, host) {
+        if (isMe(name, host)) return state.colors;
         const e = seenFor(name, host);
         return e && Array.isArray(e.s) ? e.s : null;
     }
@@ -247,25 +283,63 @@
         state.subscribed = new Set();
         rx = new Uint8Array(0);
         setStatus("info", "Connecting...");
+        state.claimed = false;
+        state.refused = false;
         ws.onopen = () => {
-            state.open = true;
             state.retry = 0;
-            clearStatus("info");
-            clearStatus("warning");
-            state.joined.forEach(subscribe);
-            openView(state.view || state.joined[0] || cfg.defaultChannel);
-            refreshCounts();
-            if (!state.joined.length) openModal(els.noRoomsModal, els.noRoomsMain);
+            // The name first: nothing else is allowed until it's ours.
+            send({scope: "SOCKET", func: "CLAIM", data: {nick: state.nick, key: claimKey()}});
         };
         ws.onmessage = (ev) => receive(ev.data);
         ws.onclose = () => {
             if (state.ws !== ws) return;
             state.open = false;
+            state.claimed = false;
+            if (state.refused) return; // waits for another nickname
             const wait = Math.min(30000, 1000 * Math.pow(2, state.retry++));
             setStatus("warning", "Disconnected. Reconnecting in " + Math.round(wait / 1000) + "s...");
             state.retryTimer = setTimeout(connect, wait);
         };
     }
+    // claimed runs once the server has given us our name.
+    function claimed() {
+        state.open = true;
+        state.claimed = true;
+        clearStatus("info");
+        clearStatus("warning");
+        state.joined.forEach(subscribe);
+        query("SUBSCRIBE", loc.messages(ownMailbox()), {nick: state.nick, system: cfg.systemName});
+        query("SLICE", loc.history(ownMailbox()), {data: {start: -PM_HISTORY}, lock: 1});
+        if (state.pm && state.threads.has(state.pm)) openThread(state.pm);
+        else openView(state.view || state.joined[0] || cfg.defaultChannel);
+        refreshCounts();
+        if (!state.joined.length && !state.pm) openModal(els.noRoomsModal, els.noRoomsMain);
+    }
+    function onClaim(data) {
+        if (data && data.ok) { claimed(); return; }
+        const reason = data && data.reason;
+        state.refused = true;
+        if (state.ws) state.ws.close();
+        clearStatus("info");
+        askNick(reason === "taken" ? "That name is taken on this server. Pick another."
+            : reason === "limit" ? "Too many new names from your address today. Use one you've had here before, or try again tomorrow."
+                : reason === "invalid" ? "Letters, digits, spaces, - and _ only, up to 25."
+                    : "The server couldn't give you that name. Try again.");
+    }
+    // claimKey is this browser's key for the names it holds, made once.
+    function claimKey() {
+        if (state.key) return state.key;
+        let k = load("key");
+        if (!/^[0-9a-f]{64}$/.test(k)) {
+            const b = new Uint8Array(32);
+            crypto.getRandomValues(b);
+            k = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+            save("key", k);
+        }
+        state.key = k;
+        return k;
+    }
+
     function reconnect() {
         const old = state.ws;
         state.ws = null;
@@ -300,6 +374,7 @@
     function handle_(pkt) {
         if (pkt.scope === "SOCKET") {
             if (pkt.func === "PING") send({scope: "SOCKET", func: "PONG", data: pkt.data});
+            else if (pkt.func === "CLAIM") onClaim(pkt.data);
             return;
         }
         if (pkt.func === "ERROR") {
@@ -316,9 +391,20 @@
             setStatus("error", why);
             return;
         }
+        const mine = ownMailbox();
+        if (mine && pkt.location === loc.history(mine) && pkt.func === "RESPONSE" && pkt.oper === "SLICE") {
+            setThreads(Array.isArray(pkt.data) ? pkt.data : []);
+            return;
+        }
+        if (mine && pkt.location === loc.messages(mine)) {
+            if (pkt.func === "UPDATE" && String(pkt.oper || "").toUpperCase() === "WRITE" && pkt.data && typeof pkt.data === "object") {
+                incomingPM(pkt.data);
+            }
+            return;
+        }
         const room = roomOf(pkt.location);
         if (pkt.func === "RESPONSE") {
-            if (pkt.oper === "SLICE" && room && lower(room) === lower(state.view)) {
+            if (pkt.oper === "SLICE" && room && !state.pm && lower(room) === lower(state.view)) {
                 setHistory(Array.isArray(pkt.data) ? pkt.data : []);
             } else if (pkt.oper === "WHO" && room) {
                 setWho(room, Array.isArray(pkt.data) ? pkt.data : []);
@@ -329,7 +415,7 @@
         }
         if (pkt.func !== "UPDATE" || !room) return;
         const oper = String(pkt.oper || "").toUpperCase();
-        const here = lower(room) === lower(state.view);
+        const here = !state.pm && lower(room) === lower(state.view);
         if (oper === "WRITE") {
             const m = pkt.data;
             if (!m || typeof m !== "object") return;
@@ -477,14 +563,10 @@
                 img.src = imgSrc(u);
                 a.appendChild(img);
                 media.appendChild(a);
-            } else if ((AUDIO_EXT.test(path) || VIDEO_EXT.test(path)) && sameOrigin(u)) {
-                // Players only for this server's own files: the page never
-                // makes the browser fetch from another site.
-                const player = el(AUDIO_EXT.test(path) ? "audio" : "video", AUDIO_EXT.test(path) ? "avatar-chat-rich-audio" : "avatar-chat-rich-video");
-                player.controls = true;
-                player.preload = "none";
-                player.src = u;
-                media.appendChild(player);
+            } else if (AUDIO_EXT.test(path) || VIDEO_EXT.test(path)) {
+                // Another site's file plays through this server's /media,
+                // so the browser never fetches from it.
+                media.appendChild(player(AUDIO_EXT.test(path) ? "audio" : "video", mediaSrc(u)));
             } else if (!card && !ANSI_EXT.test(path) && !MEDIA_PATH.test(u) && !AUDIO_EXT.test(path) && !VIDEO_EXT.test(path) && u.length <= 2048) {
                 card = u;
             }
@@ -492,6 +574,16 @@
         if (media.childElementCount) b.appendChild(media);
         if (card) linkCard(card, b);
         return b;
+    }
+
+    // mediaSrc: this server's own file as is, another site's through /media.
+    function mediaSrc(u) { return sameOrigin(u) ? u : "media?url=" + encodeURIComponent(u); }
+    function player(kind, src) {
+        const p = el(kind, kind === "audio" ? "avatar-chat-rich-audio" : "avatar-chat-rich-video");
+        p.controls = true;
+        p.preload = "none";
+        p.src = src;
+        return p;
     }
 
     function bitmapBubble(str) {
@@ -550,6 +642,9 @@
             title.rel = "noopener noreferrer";
             body.appendChild(title);
             if (d.description) body.appendChild(el("div", "avatar-chat-card-text", d.description));
+            // A download link or a track page (og:audio) plays in the card.
+            if (d.audio && /^https?:\/\//i.test(d.audio)) body.appendChild(player("audio", mediaSrc(d.audio)));
+            else if (d.video && /^https?:\/\//i.test(d.video)) body.appendChild(player("video", mediaSrc(d.video)));
             box.appendChild(body);
             box.classList.add("is-ready");
             if (pinned) scrollDown(true);
@@ -607,6 +702,7 @@
         room = String(room || "").replace(/^#/, "");
         if (!ROOM_NAME.test(room)) room = cfg.defaultChannel;
         state.view = room;
+        state.pm = "";
         state.unread.delete(lower(room));
         state.messages = [];
         state.lastGroup = null;
@@ -616,6 +712,7 @@
         askWho(room, 0);
         renderHeader();
         renderRooms();
+        renderPrivate();
         renderMembers();
     }
 
@@ -667,6 +764,8 @@
     }
 
     function renderHeader() {
+        if (state.pm) { renderThreadHeader(); return; }
+        els.count.hidden = false;
         els.roomLabel.textContent = "#" + state.view;
         els.count.textContent = plural(userCount(state.view));
         els.roomActions.replaceChildren();
@@ -696,7 +795,7 @@
             const ua = state.unread.get(lower(a)) ? 1 : 0, ub = state.unread.get(lower(b)) ? 1 : 0;
             return ub - ua || a.toLowerCase().localeCompare(b.toLowerCase());
         }).forEach((room) => {
-            const active = lower(room) === lower(state.view);
+            const active = !state.pm && lower(room) === lower(state.view);
             const row = el("div", "avatar-chat-nav-item avatar-chat-room" + (active ? " is-active" : ""));
             row.setAttribute("role", "button");
             row.tabIndex = 0;
@@ -855,11 +954,170 @@
         fillAvatar(els.cardAvatar, avatarOf(name, host), name);
         els.cardName.replaceChildren(handle(name, colorsOf(name, host)));
         els.cardBoard.textContent = host || "";
+        els.cardMessage.hidden = isMe(name, host);
+        els.cardMessage.onclick = () => { closeModal(els.cardModal); messageTo(name, host); };
         openModal(els.cardModal, els.cardClose);
     }
 
+    // --- private messages ----------------------------------------------------------
+    const threadKey = (name, host) => lower(name) + "|" + lower(host);
+
+    // thread returns (making it) the thread with name on host.
+    function thread(name, host, mailbox) {
+        const key = threadKey(name, host);
+        let t = state.threads.get(key);
+        if (!t) {
+            t = {key, name, host: host || "", mailbox: "", msgs: [], unread: 0, last: 0};
+            state.threads.set(key, t);
+        }
+        if (validMailbox(name, host, mailbox)) t.mailbox = mailbox;
+        return t;
+    }
+    // peerOf: who a message in our mailbox is with, and whether we sent it.
+    function peerOf(m) {
+        const n = m.nick && typeof m.nick === "object" ? m.nick : null;
+        if (!n || !n.name) return null;
+        if (isMe(n.name, n.host)) {
+            const to = m.private && m.private.to;
+            return to && to.name ? {name: plain(to.name).trim(), host: plain(to.host || "").trim(), mailbox: to.mailbox || "", mine: true} : null;
+        }
+        return {name: plain(n.name).trim(), host: plain(n.host || "").trim(), mailbox: n.mailbox || "", mine: false};
+    }
+    function filePM(m) {
+        const p = peerOf(m);
+        if (!p || !p.name) return null;
+        if (!p.mine) remember(m.nick);
+        const t = thread(p.name, p.host, p.mailbox);
+        t.msgs.push(m);
+        if (t.msgs.length > MAX_THREAD) t.msgs.shift();
+        t.last = Math.max(t.last, Number(m.time) || 0);
+        return t;
+    }
+    function setThreads(list) {
+        const unread = new Map();
+        state.threads.forEach((t, k) => unread.set(k, t.unread));
+        state.threads = new Map();
+        list.forEach((m) => { if (m && typeof m === "object") filePM(m); });
+        state.threads.forEach((t, k) => { t.unread = unread.get(k) || 0; });
+        if (state.pm) {
+            if (state.threads.has(state.pm)) openThread(state.pm);
+        }
+        renderPrivate();
+    }
+    function incomingPM(m) {
+        const t = filePM(m);
+        if (!t) return;
+        if (state.pm === t.key) addMessage(m, true);
+        else t.unread++;
+        renderPrivate();
+    }
+
+    // messageTo opens (or starts) the thread with name on host.
+    function messageTo(name, host) {
+        const t = thread(name, host, peerMailbox(name, host));
+        openThread(t.key);
+        els.input.focus();
+    }
+    function openThread(key) {
+        const t = state.threads.get(key);
+        if (!t) return;
+        state.pm = key;
+        t.unread = 0;
+        state.messages = [];
+        state.lastGroup = null;
+        els.messages.textContent = "";
+        t.msgs.forEach((m) => addMessage(m, false));
+        if (!t.msgs.length) els.messages.appendChild(el("div", "avatar-chat-empty", "No messages with " + t.name + " yet. Say hello."));
+        document.title = "@" + t.name + " - Avatar Chat";
+        renderHeader();
+        renderRooms();
+        renderPrivate();
+        scrollDown(true);
+    }
+    function renderThreadHeader() {
+        const t = state.threads.get(state.pm);
+        els.roomLabel.textContent = "@" + (t ? t.name : "");
+        els.count.hidden = true;
+        els.roomActions.replaceChildren();
+        const b = el("button", "avatar-chat-room-action", "Back to #" + state.view);
+        b.type = "button";
+        b.onclick = () => openView(state.view);
+        els.roomActions.appendChild(b);
+    }
+    function renderPrivate() {
+        els.private.replaceChildren();
+        $("private-section").classList.toggle("is-empty", state.threads.size === 0);
+        const items = Array.from(state.threads.values()).sort((a, b) =>
+            (b.unread ? 1 : 0) - (a.unread ? 1 : 0) || b.last - a.last || a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+        if (!items.length) {
+            els.private.appendChild(el("div", "avatar-chat-nav-empty", "No private chats yet."));
+            return;
+        }
+        items.forEach((t) => {
+            const row = el("button", "avatar-chat-nav-item" + (state.pm === t.key ? " is-active" : ""));
+            row.type = "button";
+            row.dataset.thread = t.name;
+            const inner = el("div", "avatar-chat-thread-row");
+            const online = (state.who.get(lower(state.view)) || []).some((p) => lower(p.nick) === lower(t.name) && (!p.system || !t.host || lower(p.system) === lower(t.host)));
+            const dot = el("span", "avatar-chat-presence-dot " + (online ? "is-online" : "is-offline"));
+            dot.setAttribute("aria-hidden", "true");
+            inner.appendChild(dot);
+            const av = el("div", "avatar-chat-thread-avatar");
+            fillAvatar(av, avatarOf(t.name, t.host), t.name);
+            if (!av.querySelector("img")) av.replaceChildren(el("div", "avatar-chat-avatar-placeholder", initial(t.name)));
+            inner.appendChild(av);
+            const text = el("div");
+            const top = el("div", "avatar-chat-nav-top");
+            const title = el("span", "avatar-chat-nav-title");
+            title.appendChild(document.createTextNode("@"));
+            title.appendChild(handle(t.name, colorsOf(t.name, t.host)));
+            top.appendChild(title);
+            if (t.unread) top.appendChild(el("span", "avatar-chat-badge is-unread", String(t.unread)));
+            text.appendChild(top);
+            if (t.host) text.appendChild(el("div", "avatar-chat-nav-secondary", t.host));
+            const last = t.msgs[t.msgs.length - 1];
+            if (last) {
+                const pv = AvatarCodec.isBitmap(String(last.str || "")) ? "(art)" : plain(last.str).slice(0, 60);
+                text.appendChild(el("div", "avatar-chat-nav-preview", pv));
+            }
+            inner.appendChild(text);
+            row.appendChild(inner);
+            row.onclick = () => openThread(t.key);
+            els.private.appendChild(row);
+        });
+    }
+    // ownNick is our nick as it goes on a message.
+    function ownNick() {
+        const nick = {name: state.nick, host: cfg.systemName};
+        if (state.avatar) nick.avatar = state.avatar;
+        if (state.colors.some((c) => HEX.test(c || ""))) nick.style = {colors: state.colors.slice()};
+        return nick;
+    }
+
+    // postPM sends text to the open thread: to the peer's web mailbox when
+    // they have one, else their plain name, with a copy in our own.
+    function postPM(text) {
+        const t = state.threads.get(state.pm);
+        if (!t) return false;
+        const nick = ownNick();
+        const to = {name: t.name, host: t.host};
+        if (validMailbox(t.name, t.host, t.mailbox)) to.mailbox = t.mailbox;
+        const msg = {nick, str: text, time: Date.now(), private: {to}};
+        const target = to.mailbox || t.name;
+        const lp = {data: msg, lock: 2};
+        query("WRITE", loc.messages(target), lp);
+        query("PUSH", loc.history(target), lp);
+        query("PUSH", loc.history(ownMailbox()), lp);
+        t.msgs.push(msg);
+        t.last = msg.time;
+        addMessage(msg, true);
+        renderPrivate();
+        clearStatus("error");
+        return true;
+    }
+
     function renderMe() {
-        els.meName.replaceChildren(handle(state.nick || "?", null));
+        els.meName.replaceChildren(handle(state.nick || "?", state.colors));
         fillAvatar(els.meAvatar, state.avatar, state.nick);
     }
 
@@ -888,8 +1146,15 @@
         const changed = n !== state.nick;
         state.nick = n;
         save("nick", n);
+        state.colors = storedColors(n);
         renderMe();
-        if (changed && state.ws) reconnect(); // the server fixes a nick per connection
+        if (changed) {
+            // Another name, another mailbox: its threads come with the claim.
+            state.threads = new Map();
+            state.pm = "";
+            renderPrivate();
+        }
+        if (changed && state.ws || state.refused) reconnect(); // the server fixes a nick per connection
         else if (!state.ws) connect();
         return true;
     }
@@ -901,8 +1166,70 @@
         els.app.classList.add("ac-style-" + id);
     }
 
+    // --- handle colours: one per letter of the name, kept in this browser
+    // per name, sent as nick.style (colours only, no tag) ------------------
+    const colorsKey = (name) => "colors." + lower(name);
+    function storedColors(name) {
+        const list = loadJSON(colorsKey(name), []);
+        const n = Array.from(name || "").length;
+        const out = [];
+        for (let i = 0; i < n; i++) out.push(HEX.test((list && list[i]) || "") ? list[i] : "");
+        return out;
+    }
+    function saveColors(name, colors) {
+        const list = colors.slice();
+        while (list.length && !list[list.length - 1]) list.pop();
+        save(colorsKey(name), list.length ? JSON.stringify(list) : "");
+    }
+    const hexChannel = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0");
+    const hexRgb = (h) => HEX.test(h || "") ? [parseInt(h.substr(1, 2), 16), parseInt(h.substr(3, 2), 16), parseInt(h.substr(5, 2), 16)] : null;
+    function hsvHex(h, s, v) {
+        const c = v * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = v - c;
+        const rgb = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+        return "#" + hexChannel((rgb[0] + m) * 255) + hexChannel((rgb[1] + m) * 255) + hexChannel((rgb[2] + m) * 255);
+    }
+    // presetColors matches the Synchronet page's (and the door's) presets.
+    function presetColors(kind, n, a, b) {
+        const ra = hexRgb(a), rb = hexRgb(b), out = [];
+        for (let i = 0; i < n; i++) {
+            if (kind === "solid") out.push(a);
+            else if (kind === "gradient" && ra && rb) {
+                const t = n > 1 ? i / (n - 1) : 0;
+                out.push("#" + hexChannel(ra[0] + (rb[0] - ra[0]) * t) + hexChannel(ra[1] + (rb[1] - ra[1]) * t) + hexChannel(ra[2] + (rb[2] - ra[2]) * t));
+            } else if (kind === "rainbow") out.push(hsvHex(i / Math.max(1, n) * 360, 0.85, 1));
+            else out.push("");
+        }
+        return out;
+    }
+    function draftName() { return els.settingsNick.value.replace(/\s+/g, " ").trim() || state.nick; }
+    function renderStyleEditor() {
+        const name = draftName();
+        const chars = Array.from(name);
+        els.styleLetters.replaceChildren();
+        chars.forEach((ch, i) => {
+            const c = state.draftColors[i] || "";
+            const box = el("span", "avatar-chat-style-letter" + (c ? "" : " is-default"));
+            box.appendChild(el("span", "avatar-chat-style-char", ch));
+            const pick = el("input");
+            pick.type = "color";
+            pick.value = c || "#aaaaaa";
+            pick.dataset.letter = String(i);
+            pick.setAttribute("aria-label", "Colour of letter " + (i + 1));
+            box.appendChild(pick);
+            const x = el("button", "", "x");
+            x.type = "button";
+            x.dataset.reset = String(i);
+            x.title = "Default colour";
+            box.appendChild(x);
+            els.styleLetters.appendChild(box);
+        });
+        els.stylePreview.replaceChildren(handle(name, state.draftColors));
+    }
+
     function openSettings() {
         els.settingsNick.value = state.nick;
+        state.draftColors = state.colors.slice();
+        renderStyleEditor();
         els.settingsStyle.replaceChildren();
         cfg.styles.forEach((s) => {
             const o = el("option", "", s.label);
@@ -933,9 +1260,9 @@
 
     function postText(text) {
         if (!state.open) { setStatus("error", "Not connected yet."); return false; }
+        if (state.pm) return postPM(text);
         if (!isJoined(state.view)) joinRoom(state.view);
-        const nick = {name: state.nick, host: cfg.systemName};
-        if (state.avatar) nick.avatar = state.avatar;
+        const nick = ownNick();
         const msg = {nick, str: text, time: Date.now()};
         const lp = {data: msg, lock: 2};
         query("WRITE", loc.messages(state.view), lp);
@@ -1293,6 +1620,31 @@
     });
 
     els.settingsOpen.onclick = openSettings;
+    // A new name in the box starts from that name's own colours.
+    els.settingsNick.addEventListener("input", () => {
+        state.draftColors = draftName() === state.nick ? state.colors.slice() : storedColors(draftName());
+        renderStyleEditor();
+    });
+    els.styleLetters.addEventListener("input", (ev) => {
+        const i = ev.target.dataset && ev.target.dataset.letter;
+        if (i === undefined) return;
+        state.draftColors[Number(i)] = ev.target.value;
+        ev.target.parentNode.classList.remove("is-default");
+        els.stylePreview.replaceChildren(handle(draftName(), state.draftColors));
+    });
+    els.styleLetters.addEventListener("click", (ev) => {
+        const i = ev.target.dataset && ev.target.dataset.reset;
+        if (i === undefined) return;
+        state.draftColors[Number(i)] = "";
+        renderStyleEditor();
+    });
+    els.stylePreset.addEventListener("change", () => {
+        const kind = els.stylePreset.value;
+        if (!kind) return;
+        state.draftColors = presetColors(kind, Array.from(draftName()).length, els.styleA.value, els.styleB.value);
+        els.stylePreset.value = "";
+        renderStyleEditor();
+    });
     els.settingsStyle.onchange = () => applyStyle(els.settingsStyle.value);
     els.settingsCancel.onclick = () => closeSettings(false);
     els.settingsForm.addEventListener("submit", (ev) => {
@@ -1306,7 +1658,11 @@
         state.style = els.settingsStyle.value;
         save("style", state.style === cfg.defaultStyle ? "" : state.style);
         applyStyle(state.style);
+        saveColors(n, state.draftColors);
         setNick(n);
+        state.colors = storedColors(n);
+        renderMe();
+        renderMembers();
         closeSettings(true);
     });
 
@@ -1371,6 +1727,7 @@
         state.view = q && ROOM_NAME.test(q) ? q : (state.joined[state.joined.length - 1] || cfg.defaultChannel);
         renderHeader();
         renderRooms();
+        renderPrivate();
         const nick = load("nick");
         if (nick && validNick(nick)) setNick(nick);
         else askNick();
@@ -1378,5 +1735,5 @@
     });
 
     // For the browser tests.
-    window.AvatarChatPage = {state, cfg, joinRoom, leaveRoom, openView};
+    window.AvatarChatPage = {state, cfg, joinRoom, leaveRoom, openView, messageTo, openThread};
 })();

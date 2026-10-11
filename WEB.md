@@ -49,10 +49,11 @@ Everything is a button; nothing needs a typed command.
   new one where `web_create_rooms` is on. Leaving your last room offers the
   default room again.
 - **Members.** Who's in the room, with their avatars and handle colours,
-  grouped by board when the chat server says which (the bundled server's
-  who's-here lists names only, so they show under Online). Click a name
-  for their card. On a narrow screen the header's user count opens the
-  list.
+  grouped by board. Click a name for their card, and **Message** on it
+  starts a private chat. On a narrow screen the header's user count opens
+  the list.
+- **Private chats.** Listed under the rooms with unread badges; see
+  Private messages below.
 - **Avatar.** Pick one from the avatar library (the door's bundled
   collections, plus `avatars_dir`), draw one at 10x6 in the ANSI editor,
   upload a `.bin` (one avatar, or a collection to pick from) or an `.ans`
@@ -66,14 +67,53 @@ Everything is a button; nothing needs a typed command.
   the first other link, both fetched by the server. A picture or card
   whose link or message has an `nsfw_keywords` word is blurred until
   clicked.
-- **Settings.** Nickname and page style: one pick from the same looks the
-  Synchronet page has (Classic, CGA, Modern dark and light, Amber and
-  Green phosphor, Windows 95, Flat compact).
+- **Audio and video.** A link to a sound or video file, a download link
+  that serves one (a BBS's `files.ssjs?call=download-file&...`), or a
+  track page announcing `og:audio` plays in the message, streamed through
+  `/media`.
+- **Settings.** Nickname; handle colours, one per letter with Solid,
+  Gradient, Rainbow and Clear presets and a live preview (colours only,
+  no tag); and page style, one pick from the same looks the Synchronet
+  page has (Classic, CGA, Modern dark and light, Amber and Green phosphor,
+  Windows 95, Flat compact).
 
-There are no accounts, so the nickname, avatar, page style and joined
-rooms live in that browser (localStorage). Private messages aren't on this
-page: without logins, anyone could take a name and read what was sent to
-it.
+There are no accounts, so the nickname, its colours, the avatar, page
+style and joined rooms live in that browser (localStorage). The colours
+are kept per name, so a new name starts plain.
+
+## Private messages
+
+A web user has no BBS login, so a private message to them can't use the
+plain-name mailbox every BBS client reads (`channels.<name>.messages`):
+anyone who typed that name would read it. The page and the server use a
+web mailbox instead.
+
+- **Names are claimed.** The first browser to use a nickname on this
+  server holds it, by a random key the page keeps in localStorage. Another
+  browser asking for the same name is told it's taken on this server. New
+  names are capped per address per day (`web_claims_per_ip_day`).
+- **A web user's mailbox is `<name>@<origin>`,** where origin is
+  `system_name` with everything outside `A-Z a-z 0-9 _ -` turned into
+  `_` (so `My BBS` gives `alice@My_BBS`). Their messages carry it as
+  `nick.mailbox`, stamped by the server. A browser may read only its own
+  web mailbox, live and its history, and never a plain-name one, not even
+  a mailbox under its own name.
+- **Sending.** The page writes a PM to the peer's web mailbox when their
+  nick carries a valid one, otherwise to their plain name (a BBS user),
+  and keeps a copy in its own mailbox's history. The door and the
+  Synchronet page reply the same way. A mailbox is honoured only when it
+  is exactly `name@origin(host)`, so a forged one is ignored, and none is
+  ever shown on screen.
+- **Releasing a name.** Claims are kept in `web_claims_file` (default
+  `web_claims.txt` in the server's directory), one line per name:
+  `<sha256 of the key> <name>`. Delete a line to free that name, for
+  example for a user who cleared their browser. The server picks the edit
+  up by itself.
+
+Limits: this keeps the page from showing anyone a message that isn't
+theirs. It doesn't make the chat network private. A raw TCP client on the
+chat port can still subscribe to any mailbox, and whoever runs this
+server, or the upstream, can read its users' messages, as on any BBS.
 
 ## Settings
 
@@ -113,6 +153,10 @@ default_channel = main
 | `web_styles` | `-web-styles` | all | Page style ids users may pick: `classic`, `cga`, `modern-dark`, `modern-light`, `amber`, `green`, `win95`, `compact`. |
 | `web_default_style` | `-web-default-style` | `classic` | The style the page opens in (when it is offered; else Classic, else the first offered). |
 | `avatars_dir` | `-avatars-dir` | (none) | More `.bin` avatar collections for the Avatar library, besides the door's bundled ones. Read only. |
+| `web_claims_file` | `-web-claims-file` | `web_claims.txt` | Which browser holds each nickname (see Private messages). `""` keeps claims in memory only, lost on restart. |
+| `web_claims_per_ip_day` | `-web-claims-per-ip-day` | `5` | New nicknames one address may claim per day; `-1` for no cap. |
+| `media_proxy_max_mb` | `-media-proxy-max-mb` | `50` | Largest audio or video file `/media` streams through. |
+| `media_streams` | `-media-streams` | `8` | Files `/media` streams at once. |
 
 ## Enabling uploads
 
@@ -151,7 +195,8 @@ paperclip's tooltip follows it.
 | `/chat` | WebSocket carrying chat packets. Upgrades at `/` still work, the way the old `ws_addr` listener took them. |
 | `/config.json` | Default room, board name, message limit, whether uploads and room creation are on, the NSFW words, the page styles on offer and the default, and whether there is an avatar library. |
 | `/img?url=` | A picture from a chat message, fetched by the server. |
-| `/preview?url=` | A link's card (title, description, picture), fetched by the server. |
+| `/preview?url=` | A link's card (title, description, picture, audio or video), fetched by the server. |
+| `/media?url=` | A card's or link's audio or video, streamed through by the server. |
 | `/upload`, `/chatmedia/…` | Attachments, when media is configured. |
 
 ### What a web user may send
@@ -165,18 +210,21 @@ browser sends before it reaches any chat server, yours or the upstream:
 - Rooms are the default room or ones in the chat's `public_channels`
   registry, the list the door's `/channels` shows. A web user can't open a
   member's private mailbox by naming it as a room.
-- The nickname is set when the user first joins and stays for that
-  connection; changing it reconnects. Every message is stamped with that
-  nick and `system_name`, whatever the browser claims. The server also
-  sets the time, cleans the text, caps it at 1000 characters, refuses TV
-  tuner markers, and drops a malformed avatar or style.
+- Private messages: the browser's own web mailbox may be read, and a
+  message may be written to any other mailbox, but no other mailbox can be
+  read (Private messages above).
+- The nickname comes from the name claim, before anything else, and stays
+  for that connection; changing it reconnects. Every message is stamped
+  with that nick, `system_name` and the web mailbox, whatever the browser
+  claims. The server also sets the time, cleans the text, caps it at 1000
+  characters, refuses TV tuner markers, drops a malformed avatar, and
+  keeps only a style's colours (a tag never goes out).
 
-This doesn't make names trustworthy, since anyone can pick any nickname.
-What it does is label every web message with your board, so other boards
-can tell who carried it. Private messages and posting the message of the
-day aren't offered on this page.
+Names hold only on this server, by the claim. What the stamping adds is
+a label on every web message with your board, so other boards can tell
+who carried it. Posting the message of the day isn't offered on this page.
 
-### `/img` and `/preview` are not an open proxy
+### `/img`, `/preview` and `/media` are not an open proxy
 
 - They only fetch a URL that has gone out to a browser on this server in
   chat traffic (a message, history), that a web user posted, or that a
@@ -187,9 +235,18 @@ day aren't offered on this page.
 - `/img` passes only png, jpeg, gif, webp and bmp, judged by the bytes,
   never HTML or SVG. It sends them with `nosniff`, a sandboxing CSP and a
   day's caching.
-- `fetch_per_minute` applies per address, and at most eight fetches run at
-  once. Put a cache or rate limit in your reverse proxy too if the page is
-  public.
+- `/media` streams only audio and video: a reply typed `audio/*` or
+  `video/*`, or a download typed octet-stream whose first bytes, or the
+  card that named it, say it is media. HTML, SVG and anything else are
+  refused. It sends `nosniff` and a sandboxing CSP, caps a file at
+  `media_proxy_max_mb` (refused when the length says so, cut there when
+  it doesn't), and plays at most `media_streams` at once. A player's
+  Range is passed on; an upstream that answers 416 to ranges, as
+  Synchronet's web server does for its download links, is asked again
+  without one.
+- `fetch_per_minute` applies per address to all three, and at most eight
+  `/img` and `/preview` fetches run at once. Put a cache or rate limit in
+  your reverse proxy too if the page is public.
 
 Anyone can still post a URL in chat to make your server fetch it once.
 That's the same exposure a door's link previews have.
@@ -245,6 +302,14 @@ The page speaks the packets the doors send, over WebSocket:
   per text frame.
 - It skips lines that aren't JSON and answers a `SOCKET` `PING` with a
   `PONG`.
+- Its first packet is `{"scope":"SOCKET","func":"CLAIM","data":{"nick":
+  "alice","key":"<64 hex>"}}`, answered by a `SOCKET` `CLAIM` packet with
+  `{"ok":true,"nick":"alice"}` or `{"ok":false,"reason":"taken"}` (also
+  `"limit"`, `"invalid"`, `"fixed"` for a second name on one connection,
+  `"error"`). Nothing that needs a nickname is accepted before it.
+- Who's-here (`WHO`) answers with `{"nick", "system"}` per person, the
+  shape Synchronet's chat service uses; the bundled server used to send
+  bare names.
 
 The server pings every 30 seconds and drops a browser that sends nothing,
 not even a pong, for 75 seconds. Packets over 128 KB close the socket with

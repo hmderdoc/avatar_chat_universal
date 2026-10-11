@@ -9,6 +9,7 @@
 //	/avatars/...   the avatar library, read only (avatars.go)
 //	/preview?url=  a link's card, fetched here
 //	/img?url=      a picture from a chat message, fetched here
+//	/media?url=    a card's audio or video, streamed through (media.go)
 //	/upload, /chatmedia/...  attachments, when media is configured
 //
 // Behind /chat the server either hosts the chat itself (Chat set: the
@@ -70,6 +71,16 @@ type Config struct {
 	NSFWSet      bool
 	Styles       []string // page style ids offered (web_styles); empty = all
 	DefaultStyle string   // web_default_style
+
+	// ClaimsFile keeps which browser holds each nickname (claims.go);
+	// "" keeps claims in memory only, lost on restart. ClaimsPerIPDay caps
+	// new names one address may claim per day.
+	ClaimsFile     string
+	ClaimsPerIPDay int
+
+	// /media: the largest file streamed, and how many play at once.
+	MediaProxyMaxMB int
+	MediaStreams    int
 }
 
 // Defaults are the front end's built-in settings.
@@ -82,6 +93,10 @@ func Defaults() Config {
 		MaxMessage:     1000,
 		FetchPerMinute: 120,
 		ImageMaxMB:     5,
+		ClaimsPerIPDay: 5,
+
+		MediaProxyMaxMB: 50,
+		MediaStreams:    8,
 	}
 }
 
@@ -107,6 +122,15 @@ func (c *Config) fill() {
 	}
 	if c.ImageMaxMB <= 0 {
 		c.ImageMaxMB = d.ImageMaxMB
+	}
+	if c.ClaimsPerIPDay == 0 {
+		c.ClaimsPerIPDay = d.ClaimsPerIPDay
+	}
+	if c.MediaProxyMaxMB <= 0 {
+		c.MediaProxyMaxMB = d.MediaProxyMaxMB
+	}
+	if c.MediaStreams <= 0 {
+		c.MediaStreams = d.MediaStreams
 	}
 }
 
@@ -135,11 +159,16 @@ type Server struct {
 	Images   ImageFetcher
 	Pages    linkprev.PageFetcher
 	Previews *linkprev.Cache
+	// Streams opens the files /media plays; nil turns /media off.
+	Streams MediaOpener
 
-	rooms   *roomList
-	seen    *seenURLs
-	fetches *rateLimit
-	fetchQ  chan struct{} // in-flight /img and /preview fetches
+	rooms     *roomList
+	claims    *claims
+	seen      *seenURLs
+	fetches   *rateLimit
+	fetchQ    chan struct{} // in-flight /img and /preview fetches
+	streamQ   chan struct{} // /media streams playing
+	cardMedia cardMedia
 
 	mu    sync.Mutex
 	conns int
@@ -158,12 +187,14 @@ func New(cfg Config) *Server {
 		seen:      newSeenURLs(10000, 24*time.Hour),
 		fetches:   newRateLimit(cfg.FetchPerMinute, time.Minute),
 		fetchQ:    make(chan struct{}, 8),
+		streamQ:   make(chan struct{}, cfg.MediaStreams),
 		perIP:     map[string]int{},
 		pingEvery: 30 * time.Second,
 		pongWait:  75 * time.Second,
 		now:       time.Now,
 	}
 	s.rooms = &roomList{srv: s, ttl: 30 * time.Second}
+	s.claims = newClaims(cfg.ClaimsFile, cfg.ClaimsPerIPDay, func() time.Time { return s.now() })
 	return s
 }
 
@@ -177,6 +208,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/config.json", s.handleConfig)
 	mux.HandleFunc("/img", s.handleImage)
 	mux.HandleFunc("/preview", s.handlePreview)
+	mux.HandleFunc("/media", s.handleMedia)
 	mux.HandleFunc("/avatars/", s.handleAvatars)
 	if s.Media != nil {
 		mh := s.Media.Handler()

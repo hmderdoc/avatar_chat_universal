@@ -57,6 +57,9 @@ type Nick struct {
 	IP     string           `json:"ip,omitempty"`
 	Avatar string           `json:"avatar,omitempty"`
 	Style  *nickstyle.Style `json:"style,omitempty"`
+	// Mailbox is where PMs to a standalone web user go (name@Origin(host),
+	// see mailbox.go); empty for BBS users, including the door's own nick.
+	Mailbox string `json:"mailbox,omitempty"`
 }
 
 // Message is the chat envelope. Time is unix milliseconds.

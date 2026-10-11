@@ -92,6 +92,9 @@ type Result struct {
 	CTerm string
 	// Replies is the number of recognised replies, for diagnostics.
 	Replies int
+	// Raw is every byte read during the probe, replies and leftover alike,
+	// in arrival order, for a diagnostic log. Decide leaves it empty.
+	Raw []byte
 
 	// Sixel reports that the terminal said it draws DEC sixel graphics;
 	// SixelReason says which reply decided it either way.
@@ -122,9 +125,11 @@ const cellQueries = "\x1b[16t\x1b[14t\x1b[18t"
 // CSI < attrs c, where attribute 4 means pixel operations (sixel).
 const ctdaQuery = "\x1b[<c"
 
-// ctermVersionCTDA is the first CTerm version that answers CSI < c
-// (cterm_lib.js cterm_version_supports_ctda), as major*1000+minor.
-const ctermVersionCTDA = 1207
+// CTDA is asked of every CTerm, whatever version it reports. SyncTERM
+// answers it from 1.207 (cterm_lib.js cterm_version_supports_ctda), but
+// forks such as fTelnet_enhanced report an older revision and still answer
+// it truthfully. A CTerm that ignores it costs nothing: the DA query after
+// it ends the wait.
 
 // ColorDepth writes the query burst to w, reads replies from r for at most
 // timeout, and returns the decision. 300-500 ms is a sensible timeout for a
@@ -145,14 +150,16 @@ func ColorDepth(w io.Writer, r TimedReader, timeout time.Duration) Result {
 			sig = scan(buf)
 		}
 	}
-	return decide(sig, timeout)
+	res := decide(sig, timeout)
+	res.Raw = buf
+	return res
 }
 
-// secondBurst is what to ask after the first replies: CTerm's CTDA (when
-// the version answers it) and the cell size, for terminals that may draw
-// sixel. "" when there is nothing worth asking.
+// secondBurst is what to ask after the first replies: CTerm's CTDA (for
+// any CTerm) and the cell size, for terminals that may draw sixel. "" when
+// there is nothing worth asking.
 func secondBurst(s signals) string {
-	cterm := s.ctermOK && s.ctermMajor*1000+s.ctermMinor >= ctermVersionCTDA
+	cterm := s.ctermOK
 	if !cterm && !da1Sixel(s.da1) {
 		return ""
 	}
@@ -282,8 +289,6 @@ func decide(s signals, timeout time.Duration) Result {
 // everyone else by DA1 attribute 4.
 func decideSixel(s signals, res *Result) {
 	switch {
-	case s.ctermOK && s.ctermMajor*1000+s.ctermMinor < ctermVersionCTDA:
-		res.SixelReason = "CTerm " + res.CTerm + " predates the pixel-operations query"
 	case s.ctermOK && !s.ctdaSeen:
 		res.SixelReason = "CTerm " + res.CTerm + " gave no CTDA reply"
 	case s.ctermOK:

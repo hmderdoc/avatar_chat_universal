@@ -121,6 +121,7 @@ func run() error {
 	if autoColor == "" || autoColor == "auto" || cfg.Images {
 		res := termprobe.ColorDepth(conn, termprobe.DeadlineReader(conn), 400*time.Millisecond)
 		probe = &res
+		logProbe(*dataDir, user, res)
 		if autoColor == "" || autoColor == "auto" {
 			if res.Depth == termprobe.DepthTrue {
 				cfg.TVColor = "truecolor"
@@ -794,6 +795,32 @@ func standaloneUser(userOverride, bbsOverride string) *dropfile.User {
 // legacy ConHost (older Win10 builds, Server 2016, VT-disabled environments)
 // rejects with ERROR_INVALID_PARAMETER -- killing standalone mode for
 // users whose Windows can't speak VT input.
+
+// probeLogMax caps termprobe.log; past it the file starts over.
+const probeLogMax = 256 << 10
+
+// logProbe appends one line per session to <data>/termprobe.log: who, what
+// the terminal answered byte for byte, and what the door decided from it.
+// It is the only way to see why a given terminal got 16 colours or sixel.
+// Failures are ignored; the log is a diagnostic, never a reason to stop.
+func logProbe(dataDir string, user *dropfile.User, res termprobe.Result) {
+	path := filepath.Join(dataDir, "termprobe.log")
+	flags := os.O_CREATE | os.O_WRONLY | os.O_APPEND
+	if st, err := os.Stat(path); err == nil && st.Size() > probeLogMax {
+		flags = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+	}
+	f, err := os.OpenFile(path, flags, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	who := "?"
+	if user != nil {
+		who = fmt.Sprintf("%s #%d node %d", user.Handle, user.UserRecord, user.Node)
+	}
+	fmt.Fprintf(f, "%s %s | %s | sixel: %s | raw %q\n",
+		time.Now().Format("2006-01-02 15:04:05"), who, res, res.SixelReason, res.Raw)
+}
 
 // imageConfig builds the inline-picture settings: fetch limits and cache
 // from the config, sixel and cell size from the terminal probe.

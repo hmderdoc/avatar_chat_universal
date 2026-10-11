@@ -43,10 +43,12 @@ The same probe says whether the terminal draws DEC sixel (`Result.Sixel`,
 with `Result.SixelReason`):
 
 - **xterm family:** DA1 (`CSI ? level ; attrs c`) lists attribute `4`.
-- **CTerm / SyncTERM:** version 1.207 or later answers CTerm Device
-  Attributes (`CSI < c`) with attribute `4`, pixel operations. That is the
-  check Synchronet's `cterm_lib.js` `supports_sixel()` makes; a text-mode
-  SyncTERM build answers without it. Older CTerm is never sent sixel.
+- **CTerm / SyncTERM:** CTerm Device Attributes (`CSI < c`) lists
+  attribute `4`, pixel operations; a text-mode SyncTERM build answers
+  without it. Every CTerm is asked, whatever revision it reports. Synchronet's
+  `cterm_lib.js` `supports_sixel()` only asks from 1.207, but forks such as
+  fTelnet_enhanced report an older revision and answer truthfully. A CTerm
+  that does not answer is never sent sixel.
 
 Only when one of those looks possible does a second, short burst go out:
 `CSI < c` (CTerm only), then `CSI 16 t`, `CSI 14 t`, `CSI 18 t` for the cell

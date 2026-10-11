@@ -114,6 +114,58 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) ([]byte, error) {
 	return body, nil
 }
 
+// FetchFile streams the body at rawURL into a new file at path (created
+// 0600, never overwriting), through the same guards as Fetch: scheme, port,
+// public addresses at dial time, each redirect re-checked. Nothing is
+// cached. More than maxBytes is an error and the partial file is removed;
+// so is the file on any other failure. It returns the bytes written.
+func (f *Fetcher) FetchFile(ctx context.Context, rawURL, path string, maxBytes int64) (int64, error) {
+	if err := f.checkURL(rawURL); err != nil {
+		return 0, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, f.Timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	if f.UserAgent != "" {
+		req.Header.Set("User-Agent", f.UserAgent)
+	}
+	accept := f.Accept
+	if accept == "" {
+		accept = "*/*"
+	}
+	req.Header.Set("Accept", accept)
+	resp, err := f.httpClient().Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("inlineimg: %s: HTTP %d", rawURL, resp.StatusCode)
+	}
+	if resp.ContentLength > maxBytes {
+		return 0, fmt.Errorf("inlineimg: %s: %d bytes is over the %d byte cap", rawURL, resp.ContentLength, maxBytes)
+	}
+	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return 0, err
+	}
+	n, err := io.Copy(out, io.LimitReader(resp.Body, maxBytes+1))
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil && n > maxBytes {
+		err = fmt.Errorf("inlineimg: %s: over the %d byte cap", rawURL, maxBytes)
+	}
+	if err != nil {
+		os.Remove(path)
+		return 0, err
+	}
+	return n, nil
+}
+
 // Page is an HTML page fetched for a link preview.
 type Page struct {
 	Body        []byte // at most the maxBytes asked for, cut silently

@@ -64,6 +64,10 @@ type Meta struct {
 	// link does not itself end in .mp3 can still be played.
 	Audio     string `json:"audio,omitempty"`
 	AudioType string `json:"audioType,omitempty"`
+	// Video is the page's direct video stream (og:video, or Twitter's
+	// player:stream), only when it is typed as media or names a video
+	// file; an og:video typed text/html is an embed page and is ignored.
+	Video string `json:"video,omitempty"`
 }
 
 // ErrNoCard means the link has nothing worth a card: not HTML, no
@@ -210,7 +214,14 @@ func Parse(html []byte, baseURL string) *Meta {
 	if raw := first("og:audio:secure_url", "og:audio", "og:audio:url"); raw != "" {
 		audio = resolve(decodeEntities(raw), baseURL)
 	}
+	video := ""
+	if raw := first("og:video:secure_url", "og:video:url", "og:video"); raw != "" && mediaVideo(raw, first("og:video:type")) {
+		video = resolve(decodeEntities(raw), baseURL)
+	} else if raw := first("twitter:player:stream"); raw != "" && mediaVideo(raw, first("twitter:player:stream:content_type")) {
+		video = resolve(decodeEntities(raw), baseURL)
+	}
 	return &Meta{
+		Video:       video,
 		Audio:       audio,
 		AudioType:   strings.ToLower(strings.TrimSpace(first("og:audio:type"))),
 		Title:       Clean(title, titleCap),
@@ -218,6 +229,18 @@ func Parse(html []byte, baseURL string) *Meta {
 		Image:       image,
 		SiteName:    Clean(first("og:site_name"), siteNameCap),
 	}
+}
+
+// videoFile matches a link that names a video file.
+var videoFile = regexp.MustCompile(`(?i)\.(mp4|m4v|webm|mov|mkv)(?:[?#]|$)`)
+
+// mediaVideo is the shell's isDirectMediaCandidate for og:video: a stated
+// type decides (video/* only), otherwise the URL must name a video file.
+func mediaVideo(rawURL, typ string) bool {
+	if t := strings.ToLower(strings.TrimSpace(typ)); t != "" {
+		return strings.HasPrefix(t, "video/")
+	}
+	return videoFile.MatchString(rawURL)
 }
 
 // resolve is resolveUrl: absolute http(s) as is, other schemes refused,
@@ -356,7 +379,7 @@ func Fold(s string) string {
 }
 
 // cacheVersion is mixed into every cache file name; bump it when Meta grows.
-const cacheVersion = "v2\x00"
+const cacheVersion = "v3\x00"
 
 // Cache keeps cards on disk under Dir, one JSON file per URL, trimmed
 // oldest-first to Max bytes. A nil *Cache or empty Dir caches nothing.
@@ -374,7 +397,7 @@ type cacheFile struct {
 
 func (c *Cache) path(rawURL string) string {
 	// The version prefix retires cards cached before a Meta field was
-	// added (v2: og:audio), so they are fetched again rather than served
+	// added (v2: og:audio, v3: og:video), so they are fetched again rather than served
 	// without it for a whole TTL.
 	sum := sha256.Sum256([]byte(cacheVersion + rawURL))
 	return filepath.Join(c.Dir, hex.EncodeToString(sum[:16])+".json")

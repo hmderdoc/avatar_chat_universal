@@ -211,3 +211,23 @@ func TestParseOpenGraphAudio(t *testing.T) {
 		t.Errorf("javascript: audio = %q", m.Audio)
 	}
 }
+
+// og:video counts only as media: a video/* type or a video file name. An
+// embed page (text/html) is not playable and is ignored.
+func TestParseOpenGraphVideo(t *testing.T) {
+	cases := []struct {
+		html, want string
+	}{
+		{`<meta property="og:video" content="/clip.mp4">`, "https://v.example/clip.mp4"},
+		{`<meta property="og:video:secure_url" content="https://cdn.example/s?id=1"><meta property="og:video:type" content="video/mp4">`, "https://cdn.example/s?id=1"},
+		{`<meta property="og:video" content="https://www.youtube.com/embed/x"><meta property="og:video:type" content="text/html">`, ""},
+		{`<meta property="og:video" content="https://cdn.example/s?id=1">`, ""},
+		{`<meta name="twitter:player:stream" content="https://cdn.example/t.mp4">`, "https://cdn.example/t.mp4"},
+		{`<meta property="og:video" content="javascript:x.mp4">`, ""},
+	}
+	for _, c := range cases {
+		if got := Parse([]byte(c.html), "https://v.example/page").Video; got != c.want {
+			t.Errorf("%s: video = %q, want %q", c.html, got, c.want)
+		}
+	}
+}

@@ -423,3 +423,49 @@ func TestFetchPageRetriesWithoutRangeAfter416(t *testing.T) {
 		t.Fatalf("body = %q", p.Body)
 	}
 }
+
+// FetchFile keeps every guard of Fetch: a loopback server is refused under
+// the real rules, a redirect to a private address is refused, and an
+// oversized body leaves no partial file behind.
+func TestFetchFileGuards(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/clip.mp4":
+			w.Write(bytes.Repeat([]byte("v"), 1000))
+		case "/big.mp4":
+			w.Write(bytes.Repeat([]byte("v"), 5000))
+		case "/evil.mp4":
+			http.Redirect(w, r, "http://10.0.0.1/clip.mp4", http.StatusFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+
+	real := NewFetcher("")
+	if _, err := real.FetchFile(context.Background(), srv.URL+"/clip.mp4", filepath.Join(dir, "a"), 1<<20); err == nil {
+		t.Fatal("loopback server fetched under the real rules")
+	}
+	f := testFetcher(t, srv)
+	if n, err := f.FetchFile(context.Background(), srv.URL+"/clip.mp4", filepath.Join(dir, "ok"), 1<<20); err != nil || n != 1000 {
+		t.Fatalf("clip: n=%d err=%v", n, err)
+	}
+	if st, err := os.Stat(filepath.Join(dir, "ok")); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("clip file: %v %v", st, err)
+	}
+	if _, err := f.FetchFile(context.Background(), srv.URL+"/evil.mp4", filepath.Join(dir, "evil"), 1<<20); err == nil {
+		t.Fatal("redirect to 10.0.0.1 followed")
+	}
+	if _, err := f.FetchFile(context.Background(), srv.URL+"/big.mp4", filepath.Join(dir, "big"), 4096); err == nil {
+		t.Fatal("oversized body accepted")
+	}
+	for _, name := range []string{"a", "evil", "big"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Errorf("%s: file left behind after a refusal", name)
+		}
+	}
+	if _, err := f.FetchFile(context.Background(), srv.URL+"/clip.mp4", filepath.Join(dir, "ok"), 1<<20); err == nil {
+		t.Fatal("an existing file was overwritten")
+	}
+}

@@ -213,7 +213,7 @@ modal:
 > 4. Press Enter below; we'll wait for your client to start a Zmodem send.
 
 Press Enter, the door enters Zmodem-receive mode, your terminal client
-detects the inbound `ZRINIT` and pops its file picker (Alt-S in
+detects the inbound `ZRINIT` and pops its file picker (Alt-U in
 SyncTERM). Pick the `.bin`, send. The door:
 
 1. Receives via the embedded Zmodem-CRC32 receiver.

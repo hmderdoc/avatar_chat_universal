@@ -1169,7 +1169,7 @@ func (a *App) handleAvatarCmd(parts []string) {
 		// own the wire. Most BBS terminals don't auto-start on our
 		// ZRINIT, so we tell the user how to trigger the upload.
 		a.Session.Notice("\x01WZmodem ready.\x01n Trigger the upload in your terminal:")
-		a.Session.Notice("  SyncTERM: \x01WAlt-S\x01n then pick the .bin")
+		a.Session.Notice("  SyncTERM: \x01WAlt-U\x01n then pick the .bin")
 		a.Session.Notice("  NetRunner / fTelnet: Send menu -> Zmodem")
 		a.Session.Notice("  Press \x01WEsc\x01n to cancel.")
 		a.draw()
@@ -1382,7 +1382,7 @@ func (a *App) confirmUpload() bool {
 		{" 2. Draw inside a 10-wide x 6-tall canvas.", ansi.White | ansi.BgBlue},
 		{" 3. Save as a .bin file.", ansi.White | ansi.BgBlue},
 		{" 4. Press Enter below, then send via Zmodem", ansi.White | ansi.BgBlue},
-		{"    (Alt-S in SyncTERM).", ansi.White | ansi.BgBlue},
+		{"    (Alt-U in SyncTERM).", ansi.White | ansi.BgBlue},
 		{"", 0},
 		{" [Enter] start upload     [Esc] cancel", ansi.Yellow | ansi.BgBlue},
 	}

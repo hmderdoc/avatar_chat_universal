@@ -39,11 +39,12 @@ func ScreenSize(rw io.ReadWriter, timeout time.Duration) (cols, rows int, ok boo
 }
 
 func queryCursorPos(rw io.ReadWriter, d interface{ SetReadDeadline(time.Time) error }, timeout time.Duration) (cols, rows int, ok bool) {
-	// ESC 7         save cursor (DECSC, widely supported)
+	// ESC[s         save cursor (ANSI.SYS; ESC 7 prints as "7" on BBS
+	//               terminals without DECSC, an unknown CSI is ignored)
 	// ESC[999;999H  position to extreme, terminal clamps to actual size
 	// ESC[6n        device status report -> response ESC[<row>;<col>R
-	// ESC 8         restore cursor (DECRC)
-	seq := []byte("\x1b7\x1b[999;999H\x1b[6n\x1b8")
+	// ESC[u         restore cursor
+	seq := []byte("\x1b[s\x1b[999;999H\x1b[6n\x1b[u")
 	if _, err := rw.Write(seq); err != nil {
 		return 0, 0, false
 	}

@@ -69,8 +69,11 @@ const (
 
 // SizeProbe parks the cursor at the far corner, asks where it is and puts
 // it back; the reply decodes as KeyResize. The cursor is hidden for the
-// trip so the jump doesn't flash (the chat UI always shows it).
-const SizeProbe = "\x1b[?25l\x1b7\x1b[999;999H\x1b[6n\x1b8\x1b[?25h"
+// trip so the jump doesn't flash (the chat UI always shows it). The save
+// and restore are ANSI.SYS's CSI s / CSI u, not DECSC/DECRC (ESC 7 / ESC 8):
+// BBS terminals without DECSC print those as a literal "7" and "8", while
+// an unknown CSI is just ignored.
+const SizeProbe = "\x1b[?25l\x1b[s\x1b[999;999H\x1b[6n\x1b[u\x1b[?25h"
 
 type Key struct {
 	Type KeyType

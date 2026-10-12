@@ -257,6 +257,10 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Fixed
 
+- door: a stray "7" under the cursor (and an "8" in the far corner) on
+  BBS terminals without DECSC. The size probe saved and restored the
+  cursor with ESC 7 / ESC 8, which those terminals print; it now uses
+  CSI s / CSI u, which they ignore if unknown.
 - door: with a panel up, the cursor was left after the box's bottom-right
   corner, so a terminal that ignores the no-wrap mode (or echoes keys)
   scrolled garbage rows in at the bottom. It now waits on the input row,

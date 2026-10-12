@@ -289,4 +289,7 @@ func (a *App) probeSize(now time.Time) {
 	}
 	a.lastSizeProbe = now
 	_, _ = a.Conn.Write([]byte(ansi.SizeProbe))
+	// A terminal without CSI u leaves the cursor in the far corner; the
+	// next frame parks it again.
+	a.dirty = true
 }

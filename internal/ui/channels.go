@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
@@ -10,7 +11,7 @@ import (
 )
 
 // modalView is a full-screen overlay that owns input until it closes: the
-// "Who's Here" roster and the /channels list.
+// "Who's Here" roster, the /channels list and /help.
 type modalView interface {
 	HandleKey(k ansi.Key) (closed bool)
 	HandleMouse(k ansi.Key) (closed bool)
@@ -18,14 +19,20 @@ type modalView interface {
 }
 
 // ChannelsModal is the /channels list: the joined channels (with unread
-// counts) followed by every public room the server registers, each with its
-// live user count. Enter switches to (or joins) the highlighted room, L
-// leaves it, Esc closes. The App reads Join / Leave after it closes.
+// counts, the one being viewed marked "here") followed by every public room
+// the server registers, each with its live user count. Enter switches to
+// (or joins) the highlighted room, L leaves it, J asks for a room name on
+// a prompt line and joins (or creates) it, Esc closes. The App reads Join
+// / Leave after it closes.
 type ChannelsModal struct {
 	Frame *ansi.Frame
 
 	rooms    []chat.RoomInfo
 	selected int
+
+	// prompting is the J prompt being up, name what's typed on it.
+	prompting bool
+	name      []byte
 
 	// Join / Leave name the room the user picked, set when the modal closes
 	// on Enter / L. Both empty means it was just dismissed.
@@ -34,14 +41,23 @@ type ChannelsModal struct {
 
 	Theme *theme.Theme
 
-	list listGeom
+	list  listGeom
+	hints hintLine
 }
 
+// roomNameMax caps what the J prompt takes.
+const roomNameMax = 40
+
 func NewChannelsModal(frame *ansi.Frame, rooms []chat.RoomInfo) *ChannelsModal {
+	// Joined rooms first, in the order given; then the others.
+	sort.SliceStable(rooms, func(i, j int) bool { return rooms[i].Joined && !rooms[j].Joined })
 	return &ChannelsModal{Frame: frame, rooms: rooms}
 }
 
 func (m *ChannelsModal) HandleKey(k ansi.Key) bool {
+	if m.prompting {
+		return m.promptKey(k)
+	}
 	switch k.Type {
 	case ansi.KeyEsc:
 		return true
@@ -81,6 +97,35 @@ func (m *ChannelsModal) HandleKey(k ansi.Key) bool {
 				m.Leave = r.Name
 				return true
 			}
+		case 'j', 'J':
+			m.prompting, m.name = true, m.name[:0]
+		}
+	}
+	return false
+}
+
+// promptKey edits the J prompt: Enter joins the typed room (a leading '#'
+// is dropped, as /join does), Esc puts the prompt away.
+func (m *ChannelsModal) promptKey(k ansi.Key) bool {
+	switch k.Type {
+	case ansi.KeyEsc:
+		m.prompting = false
+	case ansi.KeyEnter:
+		name := strings.TrimPrefix(strings.TrimSpace(string(m.name)), "#")
+		m.prompting = false
+		if name != "" {
+			m.Join = name
+			return true
+		}
+	case ansi.KeyBackspace, ansi.KeyDelete:
+		if len(m.name) > 0 {
+			m.name = m.name[:len(m.name)-1]
+		}
+	case ansi.KeyChar:
+		// Room names are one word, as /join takes them.
+		// The prompt shows the '#' already.
+		if !k.Ctrl && k.Rune > ' ' && k.Rune < 0x7f && len(m.name) < roomNameMax && !(k.Rune == '#' && len(m.name) == 0) {
+			m.name = append(m.name, byte(k.Rune))
 		}
 	}
 	return false
@@ -104,7 +149,7 @@ func (m *ChannelsModal) Render() {
 	unreadAttr := th.ModalUnread
 
 	drawBox(f, th, listAttr)
-	boxTitle(f, "Channels", titleAttr)
+	boxTitle(f, "Rooms", titleAttr)
 
 	nameW := f.W - 30
 	if nameW > 30 {
@@ -123,6 +168,9 @@ func (m *ChannelsModal) Render() {
 	}
 	listStart := 3
 	visible := f.H - 2 - listStart
+	if m.prompting {
+		visible -= 2 // a blank row, then the prompt above the key line
+	}
 	if visible < 1 {
 		visible = 1
 	}
@@ -161,12 +209,22 @@ func (m *ChannelsModal) Render() {
 		f.PrintAt(1, listStart+i, []byte(truncate(line, f.W-2)), attr)
 	}
 
-	help := " Up/Down move   Enter join/switch   L leave   Esc close "
+	help := " Up/Down move   Enter join/switch   J join by name   L leave   Esc close "
+	hints := []hint{{"Enter join/switch", enterKey}, {"J join by name", charKey('j')}, {"L leave", charKey('l')}, {"Esc close", escKey}}
+	if m.prompting {
+		prompt := "Join room: #" + string(m.name)
+		f.PrintAt(3, f.H-3, []byte(truncate(prompt, f.W-6)), th.ModalText)
+		if x := 3 + len(prompt); x < f.W-2 {
+			f.SetCell(x, f.H-3, '_', th.ModalHint) // the caret
+		}
+		help = " Type a room name   Enter join   Esc cancel "
+		hints = []hint{{"Enter join", enterKey}, {"Esc cancel", escKey}}
+	}
 	hx := (f.W - len(help)) / 2
 	if hx < 1 {
 		hx = 1
 	}
-	f.PrintAt(hx, f.H-2, []byte(truncate(help, f.W-2)), th.ModalHint)
+	m.hints = drawHints(f, hx, f.H-2, truncate(help, f.W-2), th.ModalHint, hints...)
 }
 
 // applyChannelChoice acts on what the user picked in the /channels list.
@@ -212,10 +270,18 @@ func (a *App) partCurrent() (exit bool) {
 }
 
 // HandleMouse: the wheel moves the selection, a click picks a row and a
-// click on the picked row joins it, like Enter; the [X] is Esc.
+// click on the picked row joins it, like Enter; a click on a key-line
+// action does its key; the [X] is Esc (it closes the panel even with the
+// J prompt up).
 func (m *ChannelsModal) HandleMouse(k ansi.Key) bool {
 	if closeHit(k, m.Frame.X, m.Frame.Y) {
-		return m.HandleKey(ansi.Key{Type: ansi.KeyEsc})
+		return true
+	}
+	if hk, ok := m.hints.hit(k, m.Frame.X, m.Frame.Y); ok {
+		return m.HandleKey(hk)
+	}
+	if m.prompting {
+		return false
 	}
 	if idx, ok := m.list.pick(k); ok {
 		if idx == m.selected {

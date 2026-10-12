@@ -22,7 +22,7 @@ Single static binary per platform. No runtime dependencies.
   relative timestamps ("5m ago", "2h ago") and BBS hostname.
 - **Idle screensaver** with 15+ procedural animations plus an **ANSI gallery**
   that scrolls SAUCE-tagged `.ans`/`.bin` art from a sysop-managed directory.
-- **Mouse** (wheel scroll, clickable pills, names, pictures and `/play`
+- **Mouse** (wheel scroll, clickable buttons, names, pictures and `/play`
   lines) and **live resize**.
 - **Theming** via `themes/<name>.ini` — color palette + screensaver
   profile per theme; six ship, and users can pick their own with `/theme`.

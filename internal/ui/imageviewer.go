@@ -32,6 +32,7 @@ type ImageViewer struct {
 	height  int
 
 	closed bool
+	hints  hintLine // "Esc close" on the footer, for clicks
 }
 
 // NewImageViewer builds a viewer for the supplied list of images. The
@@ -142,7 +143,7 @@ func (v *ImageViewer) Render(w io.Writer) error {
 	if v.count() == 0 {
 		f := v.boxed("No images yet", "")
 		f.PrintAt(2, 2, []byte(truncate("Type /img after someone shares a bitmap.", v.width-4)), th.ModalBg)
-		f.PrintAt(2, 4, []byte("Esc to close."), th.ModalBg)
+		v.hints = drawHints(f, 2, 4, "Esc to close.", th.ModalBg, hint{"Esc to close", escKey})
 		if err := f.Render(&buf); err != nil {
 			return err
 		}
@@ -224,8 +225,9 @@ func (v *ImageViewer) boxed(header, footer string) *ansi.Frame {
 	f.Charset = v.Charset
 	drawBox(f, th, th.ModalBg)
 	boxTitle(f, header, th.ViewerBar)
+	v.hints = nil
 	if footer != "" {
-		f.PrintAt(2, v.height-1, []byte(truncate(footer, v.width-4)), th.ViewerBar)
+		v.hints = drawHints(f, 2, v.height-1, truncate(footer, v.width-4), th.ViewerBar, hint{"Esc close", escKey})
 	}
 	return f
 }

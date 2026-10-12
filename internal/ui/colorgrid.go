@@ -30,6 +30,7 @@ type colourGrid struct {
 	rows     [][]string // a hex per swatch
 	row, col int
 	frame    *ansi.Frame
+	hints    hintLine // the key line's actions, for clicks
 }
 
 // newColourGrid lays out the swatches and starts the cursor on current,
@@ -167,6 +168,9 @@ func (g *colourGrid) handle(k ansi.Key) (done, ok bool) {
 		if closeHit(k, f.X, f.Y) {
 			return true, false
 		}
+		if hk, ok := g.hints.hit(k, f.X, f.Y); ok {
+			return g.handle(hk)
+		}
 		if r, c, hit := g.swatchAt(k.X-f.X, k.Y-f.Y); hit {
 			g.row, g.col = r, c
 			return true, true
@@ -219,7 +223,7 @@ func (g *colourGrid) draw(th *theme.Theme, cs ansi.Charset, cols, rows int) *ans
 		}
 	}
 	f.PrintAt(gridX0, h-3, []byte(truncate(g.name(), w-2*gridX0)), th.ModalText)
-	f.PrintAt(gridX0, h-2, []byte(truncate(gridHint, w-2*gridX0)), th.ModalHint)
+	g.hints = drawHints(f, gridX0, h-2, truncate(gridHint, w-2*gridX0), th.ModalHint, hint{"Enter use", enterKey}, hint{"Esc cancel", escKey})
 	return f
 }
 

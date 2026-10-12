@@ -49,31 +49,6 @@ func TestTranscript_MentionRowsHighlighted(t *testing.T) {
 	}
 }
 
-func TestFitButtons_KeepsEscOn80Columns(t *testing.T) {
-	btns := fitButtons([]ActionButton{
-		{Label: "/who"},
-		{Label: "/img [15]", Highlight: true},
-		{Label: "/r [3]", Highlight: true},
-		{Label: "/channels [12]", Highlight: true},
-		{Label: "/settings"},
-		{Label: "/help", optional: true},
-		{Label: "Tab user", optional: true},
-		{Label: "Esc exit"},
-	}, 80)
-	if w := buttonsWidth(btns); w > 80 {
-		t.Fatalf("width %d > 80", w)
-	}
-	if btns[len(btns)-1].Label != "Esc exit" {
-		t.Fatalf("Esc exit dropped: %+v", btns)
-	}
-	// Quiet bar: everything fits, nothing dropped.
-	quiet := []ActionButton{{Label: "/who"}, {Label: "/img"}, {Label: "/channels"}, {Label: "/settings"},
-		{Label: "/help", optional: true}, {Label: "Tab user", optional: true}, {Label: "Esc exit"}}
-	if got := fitButtons(append([]ActionButton(nil), quiet...), 80); len(got) != len(quiet) {
-		t.Fatalf("quiet bar lost buttons: %d of %d", len(got), len(quiet))
-	}
-}
-
 func TestApp_PMRingsOnceAndCountsUnread(t *testing.T) {
 	sess := chat.NewSession(nil, &chat.Nick{Name: "alice"}, "main")
 	app := NewApp(io.Discard, ansi.NewInput(strings.NewReader("")), sess, 80, 25, ansi.CharsetCP437)

@@ -9,6 +9,27 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Added
 
+- door: **raised buttons under the header**: Who, Rooms, Images,
+  Settings, Help and Quit Esc on one row, each a coloured face with a
+  half-block shadow (CP437 and UTF-8). A click shows the button pressed
+  (face shifted into the shadow) for about 100 ms, then runs it; Quit does
+  what Esc does. All six fit at 80 columns; narrower, Help, Settings,
+  Rooms and Who drop out in that order (never one flashing a count).
+- door: **Help in a panel.** `/help` (or the Help button) opens a boxed
+  "Help" panel with the same lines it used to print, grouped (Commands,
+  Rooms and people, Your look, Pictures and links, TV and media), scrolled
+  with Up/Down, PgUp/PgDn, Home/End and the wheel; Esc or `[X]` closes.
+- door: **`J` in the Rooms panel** (`/channels`) asks for a room name on a
+  prompt line in the panel; Enter joins (or creates) it, Esc puts it away.
+- door: **`M` and `I` in `/who`**: M closes the panel with `/msg <name> `
+  in the input line for the selected person; I ignores or unignores them
+  (as `/ignore` / `/unignore`), and the panel shows whether they are.
+- door: **clickable key lines**: in every panel the actions on its key
+  line (`M message`, `J join by name`, `Enter join/switch`, `Esc close`,
+  `S save`, `Enter use`, `[Enter] start upload`, ...) run on a click.
+- Theme keys `top_action_shadow` (the buttons' shadow, foreground only),
+  `strip_bar` and `strip_pill` (the TV lounge's key strip and the
+  screensaver ticker); set in every shipped theme.
 - door: **an `[X]` dismiss button** at the top left of every panel
   (`/who`, `/channels`, `/settings`, the colour grid, `/img`, the avatar
   upload dialog) and at the left of the chat screen's first row (the header). A
@@ -283,6 +304,24 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Changed
 
+- door: **the bottom bar is gone**; the chat gains its row. Its pills
+  (`/join`, `/part`, `/me`, `/msg`, `/r`, `/clear`, `/quit`, `/theme`) and
+  the top bar's `Tab user` and `Esc exit` have no button now; the commands
+  all still work typed and are listed in Help, and the theme is in
+  `/settings` (`c`/`C`). The unread-PM count moved from the flashing
+  `/r [N]` pill to the Who button (`Who [N]`, flashing); the unread-rooms
+  count is on Rooms (`Rooms [N]`), the picture count and flash on Images.
+- door: `/help` no longer prints its lines into the chat (see the Help
+  panel).
+- door: the Rooms panel (`/channels`, now titled "Rooms") always lists the
+  joined rooms first.
+- door: in the TV lounge the caption bar is on the last row of the picture
+  area (the video is drawn one row shorter, popups stack above it); it used
+  to take the bottom bar's row.
+- Theme keys `bottom_action_bar`, `bottom_action_pill` and
+  `bottom_action_highlight` are retired (no bottom bar). Old theme files
+  still load: the first two set `strip_bar` / `strip_pill`, which they
+  coloured anyway, and the highlight is ignored.
 - door: every panel and dialog is drawn in a single-line box in the
   theme's `modal_frame` colour, the title on its top edge; contents moved
   in so nothing draws over it.

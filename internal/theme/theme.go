@@ -33,13 +33,18 @@ type Theme struct {
 	HeaderStats ansi.Attr // "MOTD :" label
 	HeaderMotd  ansi.Attr // MOTD body text
 
-	// Action bars (the rows of /command pills).
-	TopActionBar          ansi.Attr // background fill of the top row
-	TopActionPill         ansi.Attr // pill text (e.g. "/who")
-	TopActionHighlight    ansi.Attr // unread-image flash, etc.
-	BottomActionBar       ansi.Attr
-	BottomActionPill      ansi.Attr
-	BottomActionHighlight ansi.Attr
+	// The button rows under the header (Who, Rooms, Images, ...).
+	TopActionBar       ansi.Attr // background fill of the two rows
+	TopActionPill      ansi.Attr // a button's face and label
+	TopActionHighlight ansi.Attr // a button calling for attention (new pictures, PMs)
+	// TopActionShadow is the half-block shadow under and right of each
+	// button: foreground only, drawn on the bar's background.
+	TopActionShadow ansi.Attr
+
+	// Strips over the transcript area: the TV lounge's key strip on the
+	// picture and the screensaver's message ticker.
+	StripBar  ansi.Attr
+	StripPill ansi.Attr
 
 	// Input line (the row where the user types).
 	InputPrompt ansi.Attr
@@ -103,7 +108,7 @@ type Theme struct {
 	VeilLabel ansi.Attr
 
 	// TV lounge caption bar -- the live-subtitle strip painted across the
-	// bottom action row while a channel is tuned to a telnetvision feed.
+	// last row of the chat area while a channel is tuned to a telnetvision feed.
 	TVCaption ansi.Attr
 	TVChat    ansi.Attr // chat lines over the picture
 	TVChatDim ansi.Attr // the band behind them and the ": " separator
@@ -124,12 +129,12 @@ func Default() *Theme {
 		HeaderStats: ansi.Black | ansi.BgGreen,
 		HeaderMotd:  ansi.White | ansi.BgGreen,
 
-		TopActionBar:          ansi.White | ansi.BgBlue,
-		TopActionPill:         ansi.LightCyan | ansi.BgMagenta,
-		TopActionHighlight:    ansi.White | ansi.BgRed,
-		BottomActionBar:       ansi.White | ansi.BgMagenta,
-		BottomActionPill:      ansi.Black | ansi.BgCyan,
-		BottomActionHighlight: ansi.White | ansi.BgRed,
+		TopActionBar:       ansi.White | ansi.BgBlue,
+		TopActionPill:      ansi.LightCyan | ansi.BgMagenta,
+		TopActionHighlight: ansi.White | ansi.BgRed,
+		TopActionShadow:    ansi.Black,
+		StripBar:           ansi.White | ansi.BgMagenta,
+		StripPill:          ansi.Black | ansi.BgCyan,
 
 		InputPrompt: ansi.Yellow,
 		InputText:   ansi.LightGreen,
@@ -221,7 +226,10 @@ func Load(path string) (*Theme, error) {
 }
 
 func applyKey(t *Theme, key, val string) {
-	// Color slots.
+	// Color slots; retired names still load (retiredKeys).
+	if k, ok := retiredKeys[key]; ok {
+		key = k
+	}
 	if attrPtr := colorSlot(t, key); attrPtr != nil {
 		if a, ok := ParseColor(val); ok {
 			*attrPtr = a
@@ -257,12 +265,12 @@ func colorSlot(t *Theme, key string) *ansi.Attr {
 		return &t.TopActionPill
 	case "top_action_highlight":
 		return &t.TopActionHighlight
-	case "bottom_action_bar":
-		return &t.BottomActionBar
-	case "bottom_action_pill":
-		return &t.BottomActionPill
-	case "bottom_action_highlight":
-		return &t.BottomActionHighlight
+	case "top_action_shadow":
+		return &t.TopActionShadow
+	case "strip_bar":
+		return &t.StripBar
+	case "strip_pill":
+		return &t.StripPill
 	case "input_prompt":
 		return &t.InputPrompt
 	case "input_text":
@@ -493,8 +501,8 @@ func Keys() []string { return append([]string(nil), colorKeys...) }
 
 var colorKeys = []string{
 	"header_stats", "header_motd",
-	"top_action_bar", "top_action_pill", "top_action_highlight",
-	"bottom_action_bar", "bottom_action_pill", "bottom_action_highlight",
+	"top_action_bar", "top_action_pill", "top_action_highlight", "top_action_shadow",
+	"strip_bar", "strip_pill",
 	"input_prompt", "input_text", "input_cursor", "input_bg",
 	"bubble_left", "bubble_self", "bubble_private", "bubble_mention", "mention_edge",
 	"card_site", "card_title", "card_edge",
@@ -506,6 +514,15 @@ var colorKeys = []string{
 	"dialog_bg", "dialog_title", "dialog_head", "dialog_hint", "dialog_ok",
 	"veil_dark", "veil_light", "veil_label",
 	"tv_caption", "tv_chat", "tv_chat_dim",
+}
+
+// retiredKeys are names older theme files use, mapped to the slot that
+// took over their job ("" = the slot is gone and the line is skipped), so
+// a custom theme written for the old bottom bar still loads.
+var retiredKeys = map[string]string{
+	"bottom_action_bar":       "strip_bar",
+	"bottom_action_pill":      "strip_pill",
+	"bottom_action_highlight": "",
 }
 
 // Lint reports every line of a theme file that Load would ignore: an
@@ -534,6 +551,12 @@ func Lint(path string) ([]string, error) {
 		switch key {
 		case "name", "idle_random", "idle_sequence", "idle_disable":
 			continue
+		}
+		if k, ok := retiredKeys[key]; ok {
+			if k == "" {
+				continue
+			}
+			key = k
 		}
 		var probe Theme
 		if colorSlot(&probe, key) == nil {

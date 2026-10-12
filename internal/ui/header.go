@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"time"
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
@@ -105,34 +106,47 @@ func (s *Status) Render() {
 	s.Frame.PrintAt(1, 0, []byte(s.Text), s.Attr)
 }
 
-// ActionButton is one labelled hotkey on an ActionBar, rendered as a
-// "pill" (label with surrounding spaces) in a different background from
-// the bar so the hotkey region pops visually.
+// ActionButton is one button on the ActionBar: a coloured face with the
+// label, raised over a half-block shadow.
 type ActionButton struct {
 	Label     string
 	Highlight bool // true for new-image / new-PM / etc. attention indicators
 	Hidden    bool // suppress this frame; the App toggles this each tick to flash
 	// optional buttons are the first to go when the bar is too narrow for
-	// everything (see fitButtons); attention pills are never optional.
+	// everything (see fitButtons); attention buttons are never optional.
 	optional bool
 }
 
+// buttonGap is the bar columns between one button's shadow and the next
+// button's face.
+const buttonGap = 1
+
+// CP437 half blocks for the shadows; the UTF-8 charset maps them too.
+const (
+	halfLower = 0xDC // ▄
+	halfUpper = 0xDF // ▀
+)
+
+// buttonWidth is the columns one button takes: its face (the label with
+// a space either side) and the shadow column after it.
+func buttonWidth(b ActionButton) int { return len(b.Label) + 3 }
+
 // buttonsWidth is the columns ActionBar.Render uses for btns: one leading
-// space, each pill padded by a space either side, two-space gaps.
+// space, each button with its shadow, buttonGap between them.
 func buttonsWidth(btns []ActionButton) int {
 	if len(btns) == 0 {
 		return 0
 	}
-	w := 1 + 2*(len(btns)-1)
+	w := 1 + buttonGap*(len(btns)-1)
 	for _, b := range btns {
-		w += len(b.Label) + 2
+		w += buttonWidth(b)
 	}
 	return w
 }
 
 // fitButtons drops optional buttons, last first, until the bar fits in
-// width columns, so a flashing badge never pushes "Esc exit" off an
-// 80-column screen.
+// width columns, so a flashing badge never pushes Quit off an 80-column
+// screen.
 func fitButtons(btns []ActionButton, width int) []ActionButton {
 	for buttonsWidth(btns) > width {
 		drop := -1
@@ -150,25 +164,33 @@ func fitButtons(btns []ActionButton, width int) []ActionButton {
 	return btns
 }
 
-// ActionBar is a horizontal toolbar of ActionButtons. The bar is filled
-// with BarAttr; each button renders with ButtonAttr or HighlightAttr.
-// Buttons are separated by a margin column of bar background so the
-// pills stand out.
+// buttonName is a label's first word, which names the button whatever
+// its badge says: "Images [3]" -> "Images", "Quit Esc" -> "Quit".
+func buttonName(label string) string {
+	if i := strings.IndexByte(label, ' '); i > 0 {
+		return label[:i]
+	}
+	return label
+}
+
+// ActionBar is the two rows of raised buttons under the header. Each
+// button's face sits on the first row with a shadow in ShadowAttr (a
+// foreground, drawn on BarAttr's background): a lower half block at the
+// face's right end and upper half blocks under it, one column right. The
+// button named Pressed is drawn pushed in instead: the face one column
+// right, over where the shadow was, and no shadow.
 type ActionBar struct {
-	Frame *ansi.Frame
+	Frame *ansi.Frame // two rows
 
 	Buttons []ActionButton
-	Text    string // legacy fallback when Buttons is empty
+	Pressed string // buttonName of the button drawn pushed in, or ""
 
-	BarAttr       ansi.Attr // bar background between pills
-	ButtonAttr    ansi.Attr // normal pill
-	HighlightAttr ansi.Attr // attention pill (flashing /img count etc.)
+	BarAttr       ansi.Attr // bar background between buttons
+	ButtonAttr    ansi.Attr // normal face
+	HighlightAttr ansi.Attr // attention face (flashing Images count etc.)
+	ShadowAttr    ansi.Attr // shadow foreground
 
-	// Attr is the legacy single-color setter retained so existing callers
-	// keep working; setting it updates BarAttr.
-	Attr ansi.Attr
-
-	// pills is where Render drew each visible button, for mouse clicks.
+	// pills is where Render put each button (both rows), for mouse clicks.
 	pills []pillSpan
 }
 
@@ -177,7 +199,7 @@ type pillSpan struct {
 	label  string
 }
 
-// LabelAt returns the label of the pill drawn at column x, if any.
+// LabelAt returns the label of the button drawn at column x, if any.
 func (a *ActionBar) LabelAt(x int) (string, bool) {
 	for _, p := range a.pills {
 		if x >= p.x0 && x < p.x1 {
@@ -188,53 +210,49 @@ func (a *ActionBar) LabelAt(x int) (string, bool) {
 }
 
 func NewActionBar(f *ansi.Frame) *ActionBar {
-	bar := ansi.White | ansi.BgBlue
 	return &ActionBar{
 		Frame:         f,
-		BarAttr:       bar,
+		BarAttr:       ansi.White | ansi.BgBlue,
 		ButtonAttr:    ansi.Black | ansi.BgLightGray,
 		HighlightAttr: ansi.Black | ansi.BgBrown,
-		Attr:          bar,
+		ShadowAttr:    ansi.Black,
 	}
 }
 
 func (a *ActionBar) Render() {
-	if a.Attr != 0 && a.BarAttr == 0 {
-		a.BarAttr = a.Attr
-	}
-	a.Frame.Clear()
+	f := a.Frame
+	f.Clear()
 	a.pills = a.pills[:0]
-	for x := 0; x < a.Frame.W; x++ {
-		a.Frame.SetCell(x, 0, ' ', a.BarAttr)
+	for y := 0; y < f.H; y++ {
+		for x := 0; x < f.W; x++ {
+			f.SetCell(x, y, ' ', a.BarAttr)
+		}
 	}
-	if len(a.Buttons) == 0 {
-		// Legacy plain-text mode.
-		a.Frame.PrintAt(1, 0, []byte(a.Text), a.BarAttr)
-		return
-	}
+	shadow := ansi.FG(a.BarAttr, a.ShadowAttr)
 	x := 1
 	for i, btn := range a.Buttons {
 		if i > 0 {
-			x += 2 // gap between pills, rendered in bar bg
+			x += buttonGap
 		}
-		// Reserve label width even when hidden so the bar layout is stable.
-		pill := " " + btn.Label + " "
-		if btn.Hidden {
-			x += len(pill)
-			continue
-		}
-		attr := a.ButtonAttr
-		if btn.Highlight {
-			attr = a.HighlightAttr
-		}
-		for j := 0; j < len(pill); j++ {
-			col := x + j
-			if col >= a.Frame.W {
-				break
+		face := " " + btn.Label + " "
+		// The span covers the shadow column too, and stays while the
+		// button flashes off, so a click always lands.
+		a.pills = append(a.pills, pillSpan{x0: x, x1: x + len(face) + 1, label: btn.Label})
+		if !btn.Hidden {
+			attr := a.ButtonAttr
+			if btn.Highlight {
+				attr = a.HighlightAttr
 			}
-			a.Frame.SetCell(col, 0, pill[j], attr)
+			if a.Pressed != "" && buttonName(btn.Label) == a.Pressed {
+				putStr(f, x+1, 0, face, attr)
+			} else {
+				putStr(f, x, 0, face, attr)
+				f.SetCell(x+len(face), 0, halfLower, shadow)
+				for j := 1; j <= len(face); j++ {
+					f.SetCell(x+j, 1, halfUpper, shadow)
+				}
+			}
 		}
-		a.pills = append(a.pills, pillSpan{x0: x, x1: x + len(pill), label: btn.Label})
-		x += len(pill)
+		x += len(face) + 1
 	}
 }

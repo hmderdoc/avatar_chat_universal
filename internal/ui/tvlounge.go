@@ -16,8 +16,9 @@ import (
 // transcript region becomes a video screen. Reuses the existing 3-layer
 // composite — video on the bg layer, the (optional) history overlay in the
 // middle, and a command-hint strip + timeboxed message popups on the fg layer.
-// The live caption bar takes over the bottom action row (where the command
-// pills normally sit), with popups stacking up just above it.
+// The live caption bar takes the last row of the transcript area while the
+// lounge is on (the video is drawn one row shorter), with popups stacking up
+// just above it.
 //
 // Layered defaults (overridable via config / commands):
 //   - color depth probed from the terminal (TVColor), with a truecolor/16 toggle
@@ -238,25 +239,28 @@ func (a *App) addPopup(m *chat.Message) {
 	}
 }
 
-// drawLounge paints the TV screen into the three transcript layers plus the
-// bottom action row. Layout while tuned:
+// drawLounge paints the TV screen into the three transcript layers. Layout
+// while tuned:
 //
-//	top of video (fg row 0) : command-hint strip (relocated from the bottom)
+//	top of video (fg row 0) : command-hint strip
 //	video body              : telnetvision frame on the bg layer
 //	just above the caption  : timeboxed message popups (or the history overlay)
-//	bottom action row       : live caption bar
+//	last row (fg)           : live caption bar
 //
-// The caller still renders the header and the top action bar; we own the
-// bottom action frame here so the caption can live where the command bar was.
+// The caller still renders the header, the buttons and the input line.
 func (a *App) drawLounge() {
 	bg := a.bgAnimFrame
 	bg.Clear()
+	videoH := bg.H - 1 // the caption bar has the last row
+	if videoH < 1 {
+		videoH = bg.H
+	}
 	var fr *telnetvision.Frame
 	if src := a.feed(); src != nil {
 		fr = src.Latest()
 	}
 	if fr != nil {
-		fr.RenderTo(bg, 0, 0, bg.W, bg.H, telnetvision.RenderOpts{
+		fr.RenderTo(bg, 0, 0, bg.W, videoH, telnetvision.RenderOpts{
 			Truecolor:  a.tvColorTrue(),
 			Shade:      true,
 			Saturation: 1.8,
@@ -275,11 +279,13 @@ func (a *App) drawLounge() {
 		if a.videoPlaying() {
 			msg = "Starting " + a.videos.player.Title + " ..."
 		}
-		bg.PrintAt((bg.W-len(msg))/2, bg.H/2, []byte(msg), a.theme().TVChat)
+		bg.PrintAt((bg.W-len(msg))/2, videoH/2, []byte(msg), a.theme().TVChat)
 	}
 
-	// Middle layer: the transcript, only when the user has pulled it up.
+	// Middle layer: the transcript, only when the user has pulled it up,
+	// ending above the caption bar.
 	if a.tvShowTranscript {
+		a.transcript.Reserve = bg.H - videoH
 		a.transcript.Render(a.Session.Messages())
 	} else {
 		a.transcriptFrame.Clear()
@@ -294,31 +300,29 @@ func (a *App) drawLounge() {
 		a.drawPopups()
 	}
 
-	// Bottom action row: the live caption bar, replacing the command pills
-	// (which moved to the top strip above).
+	// Last row: the live caption bar, over the layers.
 	caption := ""
 	if a.videoPlaying() {
 		caption = a.videoCaption()
 	} else if fr != nil {
 		caption = fr.Caption
 	}
-	a.drawCaptionBar(caption)
+	a.drawCaptionBar(caption, bg.H-1)
 }
 
-// loungeHints are the command labels shown on the relocated top strip while a
-// channel is tuned. The history controls lead since the transcript only lives
-// on demand here; the rest mirror the normal bottom action bar.
+// loungeHints are the command labels shown on the strip at the top of the
+// picture while a channel is tuned. The history controls lead since the
+// transcript only lives on demand here; the rest are the typed commands.
 var loungeHints = []string{
 	"PgUp history", "PgDn/Dn close", "/join", "/me", "/msg", "/r", "/clear", "/quit",
 }
 
 // drawHintsTop paints the command-hint pills across the first row of the video
-// area (fg layer), reusing the theme's bottom-bar palette. This is the bar that
-// used to live on the bottom action row before the caption took that spot.
+// area (fg layer), in the theme's strip palette.
 func (a *App) drawHintsTop() {
 	f := a.fgAnimFrame
-	barAttr := a.Theme.BottomActionBar
-	pillAttr := a.Theme.BottomActionPill
+	barAttr := a.Theme.StripBar
+	pillAttr := a.Theme.StripPill
 	for x := 0; x < f.W; x++ {
 		f.SetCell(x, 0, ' ', barAttr)
 	}
@@ -342,17 +346,16 @@ func (a *App) drawHintsTop() {
 	}
 }
 
-// drawCaptionBar renders the live caption as a centered bar on the bottom
-// action row (the frame that normally holds the command pills). When the feed
+// drawCaptionBar renders the live caption as a centered bar on row y of the
+// fg layer (the transcript area's last row, under the picture). When the feed
 // has no caption yet we show a quiet "tuned to <channel>" placeholder so the
 // row never reads as a mystery blank strip. Color comes from Theme.TVCaption.
-func (a *App) drawCaptionBar(caption string) {
-	f := a.bottomActionFrame
-	f.Clear()
+func (a *App) drawCaptionBar(caption string, y int) {
+	f := a.fgAnimFrame
 	w := f.W
 	bar := a.Theme.TVCaption
 	for x := 0; x < w; x++ {
-		f.SetCell(x, 0, ' ', bar)
+		f.SetCell(x, y, ' ', bar)
 	}
 	text := strings.TrimSpace(caption)
 	if text == "" {
@@ -381,7 +384,7 @@ func (a *App) drawCaptionBar(caption string) {
 				c = ' '
 			}
 		}
-		f.SetCell(pad+i, 0, c, bar)
+		f.SetCell(pad+i, y, c, bar)
 	}
 }
 
@@ -407,7 +410,7 @@ func (a *App) drawPopups() {
 	if len(kept) == 0 {
 		return
 	}
-	y := f.H - 1 // bottom of the video area (input line is a separate frame)
+	y := f.H - 2 // above the caption bar on the last row
 	for i := len(kept) - 1; i >= 0 && y >= 1; i-- {
 		p := kept[i]
 		if a.TVAvatars {

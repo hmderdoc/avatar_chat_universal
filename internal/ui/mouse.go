@@ -12,8 +12,8 @@ import (
 //
 // Mouse: with Mouse set, Run asks the terminal for button reports (xterm
 // 1000, SGR 1006) and the App acts on them: the wheel scrolls the chat or
-// moves a list's selection, the pills run (or start typing) their
-// command, a speaker's name starts a /msg, a picture opens in /img, a
+// moves a list's selection, the buttons press and run, a panel's key
+// line actions run, a speaker's name starts a /msg, a picture opens in /img, a
 // "► /play" line plays, and a link card shows its full URL (the terminal
 // can't open it, and with reports on, its own select-to-copy may need
 // Shift). /mouse turns it off for the user.
@@ -101,7 +101,7 @@ func (a *App) handleMouseCmd(args []string) {
 		}
 	}
 	if want {
-		a.Session.Notice("mouse on: wheel scrolls, click names, pictures, /play lines and the pills (/mouse off)")
+		a.Session.Notice("mouse on: wheel scrolls, click names, pictures, /play lines and the buttons (/mouse off)")
 	} else {
 		a.Session.Notice("mouse off (/mouse on brings it back)")
 	}
@@ -112,6 +112,13 @@ func (a *App) handleMouse(k ansi.Key) (exit bool) {
 	if a.imageViewer != nil {
 		if closeHit(k, 0, 0) {
 			a.closeImageViewer()
+			return false
+		}
+		if hk, ok := a.imageViewer.hints.hit(k, 0, 0); ok {
+			if a.imageViewer.HandleKey(hk) {
+				a.closeImageViewer()
+			}
+			a.dirty = true
 			return false
 		}
 		wk := wheelKey(k)
@@ -132,18 +139,15 @@ func (a *App) handleMouse(k ansi.Key) (exit bool) {
 		closed := m.HandleMouse(k)
 		a.dirty = true
 		if closed {
-			a.closeModal()
-			if cm, ok := m.(*ChannelsModal); ok {
-				return a.applyChannelChoice(cm)
-			}
+			return a.afterModal(m)
 		}
 		return false
 	}
 	if k.Release {
 		return false
 	}
-	// Frame rows: the header is row 0, the top bar row 1, the transcript
-	// starts at row 2; the bottom bar and input sit at its end.
+	// Frame rows: the header is row 0, the buttons rows 1-2, the
+	// transcript starts at row 3; the input sits at its end.
 	switch k.Button {
 	case ansi.MouseWheelUp, ansi.MouseWheelDown:
 		if a.loungeActive() {
@@ -165,13 +169,9 @@ func (a *App) handleMouse(k ansi.Key) (exit bool) {
 	switch {
 	case k.Y == a.headerFrame.Y && a.header.CloseHit(k.X):
 		return a.clickPill("[X]")
-	case k.Y == a.actionFrame.Y:
+	case k.Y >= a.actionFrame.Y && k.Y < a.actionFrame.Y+a.actionFrame.H:
 		if label, ok := a.actionBar.LabelAt(k.X); ok {
-			return a.clickPill(label)
-		}
-	case k.Y == a.bottomActionFrame.Y:
-		if label, ok := a.bottomActionBar.LabelAt(k.X); ok {
-			return a.clickPill(label)
+			a.pressButton(label)
 		}
 	case k.Y >= a.transcriptFrame.Y && k.Y < a.transcriptFrame.Y+a.transcriptFrame.H && !a.loungeActive():
 		if h, ok := a.transcript.HitAt(k.X-a.transcriptFrame.X, k.Y-a.transcriptFrame.Y); ok {
@@ -181,24 +181,51 @@ func (a *App) handleMouse(k ansi.Key) (exit bool) {
 	return false
 }
 
-// clickPill runs a pill's command; the ones that need an argument start
-// it in the input line instead.
+// pressHold is how long a clicked button shows pushed in before its
+// action runs.
+const pressHold = 100 * time.Millisecond
+
+// pressButton starts a click on a button: the next frame draws it pushed
+// in, and pressTick runs it once that frame has been up for pressHold. A
+// click while another press is under way is dropped.
+func (a *App) pressButton(label string) {
+	if a.pressName != "" {
+		return
+	}
+	a.pressName, a.pressLabel, a.pressDrawn = buttonName(label), label, false
+	a.dirty = true
+}
+
+// pressTick runs the pressed button's action when it's due. Returns exit
+// like handleKey.
+func (a *App) pressTick(now time.Time) (exit bool) {
+	if a.pressName == "" || !a.pressDrawn || now.Before(a.pressUntil) {
+		return false
+	}
+	label := a.pressLabel
+	a.pressName, a.pressLabel, a.pressDrawn = "", "", false
+	a.dirty = true // the face pops back out
+	return a.clickPill(label)
+}
+
+// buttonCommands maps a button's name to the command it runs.
+var buttonCommands = map[string]string{
+	"Who":      "/who",
+	"Rooms":    "/channels",
+	"Images":   "/img",
+	"Settings": "/settings",
+	"Help":     "/help",
+}
+
+// clickPill runs a button's action (or the header's [X]).
 func (a *App) clickPill(label string) (exit bool) {
-	cmd := label
-	if i := strings.IndexByte(cmd, ' '); i > 0 {
-		cmd = cmd[:i] // "/img [3]" -> "/img", "Esc exit" -> "Esc"
-	}
-	switch cmd {
-	case "Esc", "[X]":
+	name := buttonName(label) // "Images [3]" -> "Images", "Quit Esc" -> "Quit"
+	switch name {
+	case "Quit", "[X]":
 		return a.escape()
-	case "Tab":
-		return false
-	case "/join", "/part", "/me", "/msg", "/r":
-		a.inputLine.SetValue(cmd + " ")
-		a.dirty = true
-		return false
 	}
-	if !strings.HasPrefix(cmd, "/") {
+	cmd, ok := buttonCommands[name]
+	if !ok {
 		return false
 	}
 	exit, _ = a.handleSlashCommand(cmd)

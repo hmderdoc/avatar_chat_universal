@@ -101,20 +101,30 @@ Below is every slot the door currently honors. Values shown are the
 | `header_stats` | `black\|bggreen`   | "MOTD :" label + the row's background fill          |
 | `header_motd`  | `white\|bggreen`   | The MOTD body text                                  |
 
-### Action bars
+### Buttons
 
-The top pill row shows quick-link commands; the bottom row shows
-secondary commands. Each row has a background, a pill text color, and a
-"highlight" attr used for transient flashes (e.g. unread `/img [N]`).
+The two rows under the header hold the raised buttons (Who, Rooms,
+Images, Settings, Help, Quit): a face with the label on the first row and
+a half-block shadow under it and to its right.
 
-| Key                         | Default              |
-| --------------------------- | -------------------- |
-| `top_action_bar`            | `white\|bgblue`      |
-| `top_action_pill`           | `lightcyan\|bgmagenta` |
-| `top_action_highlight`      | `white\|bgred`       |
-| `bottom_action_bar`         | `white\|bgmagenta`   |
-| `bottom_action_pill`        | `black\|bgcyan`      |
-| `bottom_action_highlight`   | `white\|bgred`       |
+| Key                    | Default                | Used for                                              |
+| ---------------------- | ---------------------- | ----------------------------------------------------- |
+| `top_action_bar`       | `white\|bgblue`        | The rows' fill around the buttons                     |
+| `top_action_pill`      | `lightcyan\|bgmagenta` | A button's face and label                             |
+| `top_action_highlight` | `white\|bgred`         | A button calling for attention (flashing `Images [N]`, `Who [N]` for PMs, `Rooms [N]`) |
+| `top_action_shadow`    | `black`                | The shadow (foreground only, drawn on `top_action_bar`'s background); pick a colour darker than that background |
+
+### Strips
+
+| Key          | Default             | Used for                                                       |
+| ------------ | ------------------- | -------------------------------------------------------------- |
+| `strip_bar`  | `white\|bgmagenta`  | The TV lounge's key strip over the picture, and the screensaver's message ticker |
+| `strip_pill` | `black\|bgcyan`     | The key labels on the lounge strip                             |
+
+There is no bottom bar any more. A theme file written for it still loads:
+`bottom_action_bar` and `bottom_action_pill` set `strip_bar` and
+`strip_pill` (which they coloured before), and `bottom_action_highlight` is
+ignored.
 
 ### Input line (where you type)
 
@@ -209,7 +219,7 @@ The avatar-upload instructions box drawn over the chat.
 
 | Key           | Default               | Used for                                  |
 | ------------- | --------------------- | ----------------------------------------- |
-| `tv_caption`  | `white\|bgblue`       | Live-subtitle bar across the bottom row   |
+| `tv_caption`  | `white\|bgblue`       | Live-subtitle bar on the last row of the picture |
 | `tv_chat`     | `white\|bgblack`      | Chat lines shown over the picture         |
 | `tv_chat_dim` | `lightgray\|bgblack`  | The band behind them, the ": " separator  |
 
@@ -249,10 +259,10 @@ header_motd  = yellow|bggreen
 top_action_bar       = black|bggreen
 top_action_pill      = white|bgbrown
 top_action_highlight = white|bgred
+top_action_shadow    = black
 
-bottom_action_bar       = white|bgbrown
-bottom_action_pill      = white|bggreen
-bottom_action_highlight = white|bgred
+strip_bar  = white|bgbrown
+strip_pill = white|bggreen
 
 input_prompt = brown
 input_text   = lightgreen

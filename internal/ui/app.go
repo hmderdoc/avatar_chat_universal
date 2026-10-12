@@ -139,20 +139,26 @@ type App struct {
 	// is empty.
 	IdleInterleaveAnsi bool
 
-	headerFrame       *ansi.Frame
-	actionFrame       *ansi.Frame
-	bgAnimFrame       *ansi.Frame
-	transcriptFrame   *ansi.Frame
-	fgAnimFrame       *ansi.Frame
-	transcriptComp    *ansi.Compositor
-	bottomActionFrame *ansi.Frame
-	inputFrame        *ansi.Frame
+	headerFrame     *ansi.Frame
+	actionFrame     *ansi.Frame // the two button rows
+	bgAnimFrame     *ansi.Frame
+	transcriptFrame *ansi.Frame
+	fgAnimFrame     *ansi.Frame
+	transcriptComp  *ansi.Compositor
+	inputFrame      *ansi.Frame
 
-	header          *Header
-	actionBar       *ActionBar
-	bottomActionBar *ActionBar
-	transcript      *Transcript
-	inputLine       *InputLine
+	header     *Header
+	actionBar  *ActionBar
+	transcript *Transcript
+	inputLine  *InputLine
+
+	// A clicked button: pressName is drawn pushed in, and once that frame
+	// has gone out (pressDrawn) and pressHold has passed (pressUntil) its
+	// action runs. See pressButton / pressTick.
+	pressName  string
+	pressLabel string
+	pressDrawn bool
+	pressUntil time.Time
 
 	// ServerAddr is shown in the header stats line ("...| host:port").
 	ServerAddr string
@@ -169,7 +175,7 @@ type App struct {
 	bellPending bool // a BEL rides at the front of the next composed frame
 	lastBell    time.Time
 	// unreadPM counts PMs received since the user last sent a line; shown
-	// as a flashing /r pill.
+	// as a flashing count on the Who button.
 	unreadPM int
 	// images is the inline picture pipeline (nil = image links stay text).
 	images *imageManager
@@ -183,7 +189,7 @@ type App struct {
 	// frame (URL@x,y each); "" when none are.
 	sixelSig string
 
-	// flashPhase is the last 500 ms on/off phase drawn for flashing pills;
+	// flashPhase is the last 500 ms on/off phase drawn for flashing buttons;
 	// a phase change re-dirties the screen so the flash actually animates.
 	flashPhase int64
 
@@ -259,26 +265,21 @@ func NewApp(conn io.Writer, in *ansi.Input, sess *chat.Session, width, height in
 // layout builds the screen frames. We reserve the very bottom row of the
 // terminal so any local-pty side effects don't corrupt our drawn UI.
 //
-//	row 0       : header (green/blue, "avatar_chat_universal" + #channel)
-//	row 1       : action bar (blue, slash-command hints)
-//	rows 2..H-3 : transcript area (3 layered frames composited)
+//	row 0       : header (stats/MOTD rotation, the [X] at the left)
+//	rows 1..2   : the raised buttons (Who, Rooms, Images, Settings, Help,
+//	              Quit), faces on row 1, half-block shadows into row 2
+//	rows 3..H-3 : transcript area (3 layered frames composited)
 //	  - bgAnimFrame    : opaque, holds BG animations or solid black
 //	  - transcriptFrame: transparent overlay, opaque only where bubbles paint
 //	  - fgAnimFrame    : transparent overlay, FG animations paint sparse cells
-//	row H-2     : status (gray, ad-hoc messages, last-msg timestamp)
-//	row H-1     : input prompt
-//	row H       : reserved (cursor scratch)
+//	              (the TV lounge takes its last row for the caption bar)
+//	row H-2     : input line (yellow > prompt)
+//	row H-1     : reserved (cursor scratch)
 func (a *App) layout() {
 	usable := a.Height - 1
 	if usable < 12 {
 		usable = a.Height
 	}
-	// row 0          : header (green; stats/MOTD rotation)
-	// row 1          : top action bar (blue, white-on-magenta pills)
-	// rows 2..H-4    : transcript (composited bg/transcript/fg layers)
-	// row H-3        : bottom action bar (magenta, black-on-cyan pills)
-	// row H-2        : input line (yellow > prompt)
-	// row H-1        : reserved (cursor scratch)
 	transcriptH := usable - 4
 	if transcriptH < 1 {
 		transcriptH = 1
@@ -289,26 +290,24 @@ func (a *App) layout() {
 		a.Theme = th
 	}
 	a.headerFrame = ansi.NewFrame(0, 0, a.Width, 1, th.HeaderStats)
-	a.actionFrame = ansi.NewFrame(0, 1, a.Width, 1, th.TopActionBar)
-	a.bgAnimFrame = ansi.NewFrame(0, 2, a.Width, transcriptH, ansi.Black|ansi.BgBlack)
-	a.transcriptFrame = ansi.NewTransparentFrame(0, 2, a.Width, transcriptH)
-	a.fgAnimFrame = ansi.NewTransparentFrame(0, 2, a.Width, transcriptH)
+	a.actionFrame = ansi.NewFrame(0, 1, a.Width, 2, th.TopActionBar)
+	a.bgAnimFrame = ansi.NewFrame(0, 3, a.Width, transcriptH, ansi.Black|ansi.BgBlack)
+	a.transcriptFrame = ansi.NewTransparentFrame(0, 3, a.Width, transcriptH)
+	a.fgAnimFrame = ansi.NewTransparentFrame(0, 3, a.Width, transcriptH)
 	a.transcriptComp = ansi.NewCompositor(a.bgAnimFrame, a.transcriptFrame, a.fgAnimFrame)
 	a.transcriptComp.Charset = a.Charset
-	a.bottomActionFrame = ansi.NewFrame(0, usable-2, a.Width, 1, th.BottomActionBar)
 	a.inputFrame = ansi.NewFrame(0, usable-1, a.Width, 1, th.InputBg)
-	for _, f := range []*ansi.Frame{a.headerFrame, a.actionFrame, a.bgAnimFrame, a.transcriptFrame, a.fgAnimFrame, a.bottomActionFrame, a.inputFrame} {
+	for _, f := range []*ansi.Frame{a.headerFrame, a.actionFrame, a.bgAnimFrame, a.transcriptFrame, a.fgAnimFrame, a.inputFrame} {
 		f.Charset = a.Charset
 	}
 
 	a.header = NewHeader(a.headerFrame)
 	a.header.StatsAttr = th.HeaderStats
 	a.header.MotdAttr = th.HeaderMotd
-	// The [X] at the left end does what Esc exit does.
+	// The [X] at the left end does what Esc (and the Quit button) does.
 	a.header.Close = true
 	a.header.CloseAttr = th.CloseButton
 	a.actionBar = NewActionBar(a.actionFrame)
-	a.bottomActionBar = NewActionBar(a.bottomActionFrame)
 	selfName := ""
 	if a.Session != nil && a.Session.Self != nil {
 		selfName = a.Session.Self.Name
@@ -328,14 +327,12 @@ func (a *App) layout() {
 		return a.Session.KnownNicks()
 	}
 
-	// Action bar attrs come from the theme (defaults to "futurewave"). Top
-	// bar = pills on the bar's BG; bottom bar same with its own palette.
+	// Button attrs come from the theme (defaults to "futurewave"): faces
+	// and shadows on the bar's BG.
 	a.actionBar.BarAttr = th.TopActionBar
 	a.actionBar.ButtonAttr = th.TopActionPill
 	a.actionBar.HighlightAttr = th.TopActionHighlight
-	a.bottomActionBar.BarAttr = th.BottomActionBar
-	a.bottomActionBar.ButtonAttr = th.BottomActionPill
-	a.bottomActionBar.HighlightAttr = th.BottomActionHighlight
+	a.actionBar.ShadowAttr = th.TopActionShadow
 
 	a.Session.OnMessage = func(m *chat.Message) {
 		a.dirty = true
@@ -389,7 +386,7 @@ func (a *App) ring() {
 	a.dirty = true
 }
 
-// hasFlashing reports whether any top-bar pill is flashing for attention.
+// hasFlashing reports whether any button is flashing for attention.
 func (a *App) hasFlashing() bool {
 	if a.unreadPM > 0 || a.unreadChannels() > 0 {
 		return true
@@ -536,9 +533,9 @@ func (a *App) renderIdleTicker() {
 	}
 	bg := ansi.LightGray | ansi.BgBlue
 	if a.Theme != nil {
-		// Reuse the bottom action bar palette so the ticker visually
-		// "belongs" with the chat chrome.
-		bg = a.Theme.BottomActionBar
+		// The strip palette (the lounge's key strip uses it too) so the
+		// ticker visually "belongs" with the chat chrome.
+		bg = a.Theme.StripBar
 	}
 	// Pad the row to full width with the bg attr.
 	for x := 0; x < maxW; x++ {
@@ -805,6 +802,11 @@ func (a *App) Run(ctx context.Context) error {
 		}
 
 
+		// A clicked button's action, once its pushed-in frame has shown.
+		if a.pressTick(time.Now()) {
+			return nil
+		}
+
 		key, ok, err := a.Input.Next(a.PollInterval)
 		if err != nil {
 			return err
@@ -877,10 +879,7 @@ func (a *App) handleKey(k ansi.Key) (exit bool, err error) {
 		closed := m.HandleKey(k)
 		a.dirty = true
 		if closed {
-			a.closeModal()
-			if cm, ok := m.(*ChannelsModal); ok {
-				return a.applyChannelChoice(cm), nil
-			}
+			return a.afterModal(m), nil
 		}
 		return false, nil
 	}
@@ -1167,41 +1166,7 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		a.handleDraw(parts[1:])
 		return false, true
 	case "/help", "/?":
-		a.Session.Notice("/me /msg /r /join /part /who /img /channels /clear /avatar /settings /theme /draw /ignore /quit")
-		if a.UserThemes {
-			a.Session.Notice("/theme lists the colour themes; /theme <name> switches and remembers it")
-		}
-		a.Session.Notice("/mouse on|off: wheel scrolls; click pills, names, pictures and /play lines")
-		a.Session.Notice("/ignore <name> hides someone's lines; /ignore lists; /unignore <name> undoes it")
-		a.Session.Notice("/join keeps the old channel joined (unread counts in /channels); /part leaves it")
-		if a.BoardWide {
-			a.Session.Notice("/avatar and /settings change your BBS avatar and handle style everywhere on this system")
-		} else {
-			a.Session.Notice("/settings (/prefs): avatar, handle colours and theme in one panel")
-		}
-		if a.images != nil {
-			a.Session.Notice("image links show inline; /img zooms them; /nsfw shows or hides veiled ones")
-		}
-		if a.cards != nil {
-			a.Session.Notice("other links get a preview card (site, title, summary) under the message")
-		}
-		if a.OnDraw != nil {
-			a.Session.Notice("/draw [WxH] opens an ANSI art editor (default 80x25, up to 80x40); Ctrl-Y posts it")
-		}
-		if a.OnMediaUpload != nil {
-			a.Session.Notice("/upload sends a picture or ANSI art by Zmodem; its link lands in your input line")
-		}
-		a.Session.Notice("TV: /tvtuner <host> <port> <channel> | /tvtuner off | /tvon | /tvoff")
-		a.Session.Notice("TV: PgUp=history (PgDn/Down or 30s closes) | /tvcolor or Ctrl-T = truecolor/16")
-		if a.AudioOK {
-			a.Session.Notice("audio: TV sound plays in the lounge (/tvmute)")
-		}
-		if a.alinks != nil {
-			a.Session.Notice("audio links: /play plays the newest, /play N or /play list for others, /stop stops")
-		}
-		if a.videos != nil {
-			a.Session.Notice("video links: /play takes over the screen like the TV; Esc or /stop ends it")
-		}
+		a.openHelp()
 		return false, true
 	}
 	a.Session.Notice(fmt.Sprintf("unknown command: %s", cmd))
@@ -1578,8 +1543,14 @@ func (a *App) confirmUpload() bool {
 			attr ansi.Attr
 		}{" It becomes your BBS avatar, everywhere here.", th.DialogOK}
 	}
+	var hints hintLine
 	for i, ln := range lines {
 		if ln.text == "" {
+			continue
+		}
+		if i == len(lines)-1 { // the key line; its actions are clickable
+			hints = drawHints(frame, 2, 1+i, truncate(ln.text, w-4), ln.attr,
+				hint{"[Enter] start upload", enterKey}, hint{"[Esc] cancel", escKey})
 			continue
 		}
 		frame.PrintAt(2, 1+i, []byte(truncate(ln.text, w-4)), ln.attr)
@@ -1601,6 +1572,9 @@ func (a *App) confirmUpload() bool {
 		}
 		if !ok {
 			continue
+		}
+		if hk, ok := hints.hit(k, frame.X, frame.Y); ok {
+			k = hk
 		}
 		switch k.Type {
 		case ansi.KeyEnter:
@@ -1629,6 +1603,19 @@ func (a *App) openRoster(users []string) {
 	roster := NewRosterModal(a.modalFrame, users, a.Session)
 	roster.Truecolor = a.tvColorTrue()
 	roster.Theme = a.theme()
+	roster.Self = a.selfName()
+	if a.Ignores != nil {
+		// I toggles through what /ignore and /unignore do (their notices
+		// are waiting in the chat when the panel closes).
+		roster.Ignored = func(name string) bool { return a.Ignores.Hidden(name, "") }
+		roster.ToggleIgnore = func(name string) {
+			if a.Ignores.Hidden(name, "") {
+				a.handleUnignore([]string{name})
+			} else {
+				a.handleIgnore([]string{name})
+			}
+		}
+	}
 	a.modal = roster
 	_ = ansi.ClearScreen(a.Conn)
 	a.dirty = true
@@ -1656,6 +1643,21 @@ func (a *App) closeModal() {
 	a.modal = nil
 	a.modalFrame = nil
 	a.forceFullRedraw()
+}
+
+// afterModal closes m and acts on what was picked in it: a room to join
+// or leave, or someone to message (the /msg waits in the input line).
+func (a *App) afterModal(m modalView) (exit bool) {
+	a.closeModal()
+	switch m := m.(type) {
+	case *ChannelsModal:
+		return a.applyChannelChoice(m)
+	case *RosterModal:
+		if m.Msg != "" {
+			a.inputLine.SetValue("/msg " + m.Msg + " ")
+		}
+	}
+	return false
 }
 
 // openImageViewer opens the /img modal showing the queued bitmaps.
@@ -1698,16 +1700,13 @@ func (a *App) ApplyTheme(t *theme.Theme) {
 	// Frame fills (used on Clear and as default Print attr).
 	a.headerFrame.SetFill(t.HeaderStats)
 	a.actionFrame.SetFill(t.TopActionBar)
-	a.bottomActionFrame.SetFill(t.BottomActionBar)
 
-	// Action bars.
+	// Buttons.
 	a.actionBar.BarAttr = t.TopActionBar
 	a.actionBar.ButtonAttr = t.TopActionPill
 	a.actionBar.HighlightAttr = t.TopActionHighlight
+	a.actionBar.ShadowAttr = t.TopActionShadow
 	a.header.CloseAttr = t.CloseButton
-	a.bottomActionBar.BarAttr = t.BottomActionBar
-	a.bottomActionBar.ButtonAttr = t.BottomActionPill
-	a.bottomActionBar.HighlightAttr = t.BottomActionHighlight
 
 	// Header (MOTD strip).
 	a.header.StatsAttr = t.HeaderStats
@@ -1765,7 +1764,7 @@ func orDefault(t *theme.Theme) *theme.Theme {
 // Used when transitioning out of any modal.
 func (a *App) forceFullRedraw() {
 	_ = ansi.ClearScreen(a.Conn)
-	for _, f := range []*ansi.Frame{a.headerFrame, a.actionFrame, a.bgAnimFrame, a.transcriptFrame, a.fgAnimFrame, a.bottomActionFrame, a.inputFrame} {
+	for _, f := range []*ansi.Frame{a.headerFrame, a.actionFrame, a.bgAnimFrame, a.transcriptFrame, a.fgAnimFrame, a.inputFrame} {
 		f.ForceRedraw()
 	}
 	a.transcriptComp.ForceRedraw()
@@ -1817,11 +1816,17 @@ func (a *App) draw() {
 	a.refreshHeader()
 	a.refreshActionBar()
 	a.header.Render()
+	a.actionBar.Pressed = a.pressName
 	a.actionBar.Render()
+	if a.pressName != "" && !a.pressDrawn {
+		// The pushed-in face is in this frame; hold it pressHold from now.
+		a.pressDrawn = true
+		a.pressUntil = time.Now().Add(pressHold)
+	}
+	a.transcript.Reserve = 0
 	if a.loungeActive() {
-		// TV lounge mode paints the video, the top hint strip, and popups into
-		// the three transcript layers, and owns the bottom action frame (it
-		// renders the caption bar there instead of the command pills).
+		// TV lounge mode paints the video, the top hint strip, popups and
+		// the caption bar (on the last row) into the three transcript layers.
 		a.drawLounge()
 	} else {
 		// Always render the transcript: the bg-anim layer shows through any
@@ -1830,7 +1835,6 @@ func (a *App) draw() {
 		a.transcript.Truecolor = a.tvColorTrue()
 		a.transcript.SixelLive = a.sixelLive()
 		a.transcript.Render(a.Session.Messages())
-		a.bottomActionBar.Render()
 	}
 	a.inputLine.Render()
 }
@@ -1859,13 +1863,14 @@ func (a *App) refreshHeader() {
 	}
 }
 
-// refreshActionBar rebuilds both the top blue and bottom magenta button
-// bars. The top bar carries the high-frequency hotkeys; the bottom bar
-// carries the verbose chat commands so they don't duplicate each other.
+// refreshActionBar rebuilds the button row: Who, Rooms, Images,
+// Settings, Help, Quit. The typed commands (/me, /msg, /join, /theme, ...)
+// have no buttons; Help lists them.
 //
-// /img gets a [N] count when there are queued images, plus a Highlight
-// flag (yellow pill) when there are unread ones, plus a 500ms flash so
-// it's hard to miss.
+// Attention: Images gets a [N] count when there are queued images, and is
+// highlighted and flashes (500 ms) while some are unread; Who counts and
+// flashes unread PMs; Rooms counts and flashes unread lines on joined
+// rooms not being viewed.
 func (a *App) refreshActionBar() {
 	imgN := 0
 	unread := 0
@@ -1878,58 +1883,26 @@ func (a *App) refreshActionBar() {
 		// inline, so they count but never flash.
 		imgN += a.images.readyCount()
 	}
-	imgLabel := "/img"
-	if imgN > 0 {
-		imgLabel = fmt.Sprintf("/img [%d]", imgN)
-	}
-	imgBtn := ActionButton{Label: imgLabel}
-	if unread > 0 {
-		imgBtn.Highlight = true
-		// 500ms flash: hide on the off-phase.
-		if (time.Now().UnixNano() / 1000000/500)%2 == 1 {
-			imgBtn.Hidden = true
-		}
-	}
-
 	flashOff := (time.Now().UnixNano()/1000000/500)%2 == 1
-	buttons := []ActionButton{
-		{Label: "/who"},
-		imgBtn,
+	badge := func(label string, n int, flash bool, optional bool) ActionButton {
+		b := ActionButton{Label: label, optional: optional}
+		if n > 0 {
+			b.Label = fmt.Sprintf("%s [%d]", label, n)
+		}
+		if flash {
+			b.Highlight, b.Hidden, b.optional = true, flashOff, false
+		}
+		return b
 	}
-	// Unread PMs: a flashing /r pill (replying is the natural next step).
-	if a.unreadPM > 0 {
-		buttons = append(buttons, ActionButton{Label: fmt.Sprintf("/r [%d]", a.unreadPM), Highlight: true, Hidden: flashOff})
-	}
-	chanBtn := ActionButton{Label: "/channels"}
-	if n := a.unreadChannels(); n > 0 {
-		chanBtn = ActionButton{Label: fmt.Sprintf("/channels [%d]", n), Highlight: true, Hidden: flashOff}
-	}
-	buttons = append(buttons,
-		chanBtn,
-		// /settings covers the avatar too; /avatar still works typed.
-		ActionButton{Label: "/settings"},
-		ActionButton{Label: "/help", optional: true},
-		ActionButton{Label: "Tab user", optional: true},
-		ActionButton{Label: "Esc exit"},
-	)
-	a.actionBar.Buttons = fitButtons(buttons, a.Width)
-
-	// Bottom bar focuses on the commands that ARE NOT in the top bar so
-	// the two rows don't duplicate each other. /theme leads when users
-	// may pick one.
-	var bottom []ActionButton
-	if a.UserThemes {
-		bottom = append(bottom, ActionButton{Label: "/theme"})
-	}
-	a.bottomActionBar.Buttons = append(bottom, []ActionButton{
-		{Label: "/join"},
-		{Label: "/part"},
-		{Label: "/me"},
-		{Label: "/msg"},
-		{Label: "/r"},
-		{Label: "/clear"},
-		{Label: "/quit"},
-	}...)
+	unreadRooms := a.unreadChannels()
+	a.actionBar.Buttons = fitButtons([]ActionButton{
+		badge("Who", a.unreadPM, a.unreadPM > 0, true),
+		badge("Rooms", unreadRooms, unreadRooms > 0, true),
+		badge("Images", imgN, unread > 0, false),
+		{Label: "Settings", optional: true},
+		{Label: "Help", optional: true},
+		{Label: "Quit Esc"},
+	}, a.Width)
 }
 
 // composeInto writes the current UI frame to w. The render loop composes
@@ -1971,9 +1944,6 @@ func (a *App) composeInto(w io.Writer) error {
 		sixelForced = true
 	}
 	if err := a.transcriptComp.Render(w); err != nil {
-		return err
-	}
-	if err := a.bottomActionFrame.Render(w); err != nil {
 		return err
 	}
 	if err := a.inputFrame.Render(w); err != nil {

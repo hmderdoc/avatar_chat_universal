@@ -23,7 +23,8 @@ type rosterEntry struct {
 
 // RosterModal is the "Who's Here" overlay. List of users on the left, the
 // currently-selected user's avatar + name + host on the right. Up/Down
-// moves the selection; Esc closes.
+// moves the selection; M closes it to message the selected person, I
+// ignores or unignores them; Esc closes.
 type RosterModal struct {
 	Frame *ansi.Frame
 
@@ -31,12 +32,23 @@ type RosterModal struct {
 	selected int
 	closed   bool
 
+	// Self is our own name: M and I do nothing on it.
+	Self string
+	// Msg names the person picked with M, set when the modal closes; the
+	// App starts "/msg <name> " in the input line.
+	Msg string
+	// Ignored reports someone's ignore state and ToggleIgnore flips it;
+	// both nil when there is no ignore list (no I key then).
+	Ignored      func(name string) bool
+	ToggleIgnore func(name string)
+
 	// Truecolor paints handle styles in 24-bit (else nearest of 16).
 	Truecolor bool
 
 	Theme *theme.Theme
 
-	list listGeom // where Render put the rows, for clicks
+	list  listGeom // where Render put the rows, for clicks
+	hints hintLine // the key line's actions, for clicks
 }
 
 // NewRosterModal builds a modal from the WHO results plus the session's
@@ -115,9 +127,31 @@ func (m *RosterModal) HandleKey(k ansi.Key) bool {
 		case 'q', 'Q':
 			m.closed = true
 			return true
+		case 'm', 'M':
+			if e, ok := m.current(); ok && !strings.EqualFold(e.Name, m.Self) {
+				m.Msg = e.Name
+				m.closed = true
+				return true
+			}
+		case 'i', 'I':
+			if e, ok := m.current(); ok && m.ToggleIgnore != nil && !strings.EqualFold(e.Name, m.Self) {
+				m.ToggleIgnore(e.Name)
+			}
 		}
 	}
 	return false
+}
+
+func (m *RosterModal) current() (rosterEntry, bool) {
+	if m.selected < 0 || m.selected >= len(m.entries) {
+		return rosterEntry{}, false
+	}
+	return m.entries[m.selected], true
+}
+
+// ignored reports whether name is on the ignore list.
+func (m *RosterModal) ignored(name string) bool {
+	return m.Ignored != nil && m.Ignored(name)
 }
 
 // Closed reports whether the modal has been dismissed.
@@ -207,15 +241,37 @@ func (m *RosterModal) Render() {
 		if entry.Host != "" {
 			writeClipped(f, nameX, 4, "BBS:  ", entry.Host, labelAttr, textAttr, labelW)
 		}
+		if m.Ignored != nil && !strings.EqualFold(entry.Name, m.Self) {
+			state := "no"
+			if m.ignored(entry.Name) {
+				state = "yes"
+			}
+			writeClipped(f, nameX, 6, "Ignored: ", state, labelAttr, textAttr, labelW)
+		}
 	}
 
-	// Help line at bottom.
-	help := " Up/Down move    Esc close "
+	// Key line at bottom; its actions are clickable.
+	ignoreHint := ""
+	if m.ToggleIgnore != nil {
+		ignoreHint = "I ignore"
+		if e, ok := m.current(); ok && m.ignored(e.Name) {
+			ignoreHint = "I unignore"
+		}
+	}
+	help := " Up/Down move   M message   "
+	if ignoreHint != "" {
+		help += ignoreHint + "   "
+	}
+	help += "Esc close "
 	hx := (f.W - len(help)) / 2
 	if hx < 1 {
 		hx = 1
 	}
-	f.PrintAt(hx, f.H-2, []byte(truncate(help, f.W-2)), th.ModalHint)
+	hints := []hint{{"M message", charKey('m')}, {"Esc close", escKey}}
+	if ignoreHint != "" {
+		hints = append(hints, hint{ignoreHint, charKey('i')})
+	}
+	m.hints = drawHints(f, hx, f.H-2, truncate(help, f.W-2), th.ModalHint, hints...)
 }
 
 func truncate(s string, w int) string {
@@ -251,11 +307,14 @@ func padRight(s string, w int) string {
 	return s + strings.Repeat(" ", w-len(s))
 }
 
-// HandleMouse: the wheel moves the selection, a click picks a row, the
-// [X] is Esc.
+// HandleMouse: the wheel moves the selection, a click picks a row, a
+// click on a key-line action does its key, the [X] is Esc.
 func (m *RosterModal) HandleMouse(k ansi.Key) bool {
 	if closeHit(k, m.Frame.X, m.Frame.Y) {
 		return m.HandleKey(ansi.Key{Type: ansi.KeyEsc})
+	}
+	if hk, ok := m.hints.hit(k, m.Frame.X, m.Frame.Y); ok {
+		return m.HandleKey(hk)
 	}
 	if idx, ok := m.list.pick(k); ok {
 		m.selected = idx

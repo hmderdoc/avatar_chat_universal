@@ -77,33 +77,6 @@ func TestWheelScrollsTranscript(t *testing.T) {
 	}
 }
 
-func TestClickPills(t *testing.T) {
-	app := mouseApp(t, io.Discard)
-	pillX := func(bar *ActionBar, label string) int {
-		for _, p := range bar.pills {
-			if p.label == label {
-				return p.x0 + 1
-			}
-		}
-		t.Fatalf("no pill %q", label)
-		return 0
-	}
-	app.handleKey(click(pillX(app.bottomActionBar, "/msg"), app.bottomActionFrame.Y))
-	if app.inputLine.Value() != "/msg " {
-		t.Fatalf("input = %q", app.inputLine.Value())
-	}
-	if exit, _ := app.handleKey(click(pillX(app.bottomActionBar, "/quit"), app.bottomActionFrame.Y)); !exit {
-		t.Fatal("/quit pill didn't exit")
-	}
-	if exit, _ := app.handleKey(click(pillX(app.actionBar, "Esc exit"), app.actionFrame.Y)); !exit {
-		t.Fatal("Esc pill didn't exit")
-	}
-	app.handleKey(click(pillX(app.actionBar, "/channels"), app.actionFrame.Y))
-	if _, ok := app.modal.(*ChannelsModal); !ok {
-		t.Fatal("/channels pill didn't open the list")
-	}
-}
-
 func TestChannelsClickSelectsThenJoins(t *testing.T) {
 	f := ansi.NewFrame(0, 0, 80, 24, 0)
 	m := NewChannelsModal(f, []chat.RoomInfo{{Name: "main", Current: true}, {Name: "art"}, {Name: "tv"}})

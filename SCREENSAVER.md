@@ -200,7 +200,7 @@ Activity should be visible without being intrusive. If you actually
 want to read the chat, press any key and the screensaver dismisses
 normally.
 
-The ticker uses the theme's `bottom_action_bar` palette so it visually
+The ticker uses the theme's `strip_bar` palette so it visually
 "belongs" with the chat chrome.
 
 ---

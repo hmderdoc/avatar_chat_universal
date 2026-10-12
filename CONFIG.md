@@ -174,18 +174,18 @@ while displayed. Charset auto-converts based on `output_charset`.
 ## Chat slash commands
 
 These aren't config keys, but are the runtime user-facing commands. See
-also the on-screen action bars and `/help`.
+also the buttons under the header and `/help`.
 
 | Command                       | What it does                                                                  |
 | ----------------------------- | ----------------------------------------------------------------------------- |
-| `/help` / `/?`                | Show available commands.                                                      |
+| `/help` / `/?`                | Open the Help panel: the commands and keys in short sections (only the features this system has on). Up/Down, PgUp/PgDn and the wheel scroll it; Esc or `[X]` closes. |
 | `/quit` / `/q` / `/exit` / `/bye` | Disconnect and exit the door.                                              |
 | `/me <action>`                | Broadcast an action message ("alice waves").                                  |
 | `/msg <user> <text>` / `/m`   | Send a private message. To a standalone web user (the bundled server's page), it goes to their own web mailbox, so it never lands with a BBS user of the same name. |
 | `/r <text>` / `/reply`        | Reply to the last private sender, to their web mailbox when they have one.    |
-| `/who`                        | Open the roster modal listing everyone in the channel.                        |
-| `/channels` / `/list`         | Room list: your joined channels with unread counts, then every public room the server registers, with user counts. Enter joins or switches, `L` leaves. |
-| `/join <channel>` / `/j`      | Switch to another channel. The one you leave stays joined: its new messages count as unread (top-bar `/channels [N]`). |
+| `/who`                        | Open the roster listing everyone in the channel. `M` closes it with `/msg <name> ` in the input line for the selected person; `I` ignores or unignores them (as `/ignore` / `/unignore`; the panel shows whether they are ignored). |
+| `/channels` / `/list`         | Rooms panel: your joined channels with unread counts (the one you're in marked "here"), then every public room the server registers, with user counts. Enter joins or switches, `L` leaves, `J` asks for a room name and joins (or creates) it. |
+| `/join <channel>` / `/j`      | Switch to another channel. The one you leave stays joined: its new messages count as unread (the Rooms button's `[N]`). |
 | `/part` / `/p`                | Leave the current channel and go back to the one you were in before; parting the last one exits the door. |
 | `/clear`                      | Clear the local transcript view.                                              |
 | `/img`                        | Full-screen viewer: BITMAP art first, then pictures from image links (zoomed to the screen). |
@@ -421,10 +421,13 @@ a hosted BBS while direct links work.
   word (an optional `@`, any case; the same rule as the website) is drawn in
   the theme's `bubble_mention` colours with a `mention_edge` bar down its
   left side.
-- **PMs.** Each PM received since you last sent a line counts on a flashing
-  `/r [N]` pill in the top bar.
+- **PMs.** Each PM received since you last sent a line counts on the Who
+  button, which flashes (`Who [N]`). `/r` replies.
 - **Other channels.** Messages on joined channels you aren't viewing count on
-  a flashing `/channels [N]` pill. A mention there rings the bell too.
+  the Rooms button, which flashes (`Rooms [N]`). A mention there rings the
+  bell too.
+- **Pictures.** The Images button counts the pictures `/img` pages through
+  (`Images [N]`) and flashes while some haven't been viewed.
 - **Bell.** A PM or a mention sends the terminal bell, at most once every 3
   seconds.
 
@@ -432,8 +435,18 @@ a hosted BBS while direct links work.
 | ------ | ------- | --------------------------------------------- |
 | `bell` | `true`  | Ring BEL on an incoming PM or mention of you. |
 
-On a narrow bar the badges push out `/help` and `Tab user` first, never
-`Esc exit`.
+## Buttons
+
+Under the header is one row of raised buttons: **Who** (`/who`),
+**Rooms** (`/channels`), **Images** (`/img`), **Settings** (`/settings`),
+**Help** (`/help`) and **Quit Esc** (what Esc does: ends a playing video
+first, otherwise exits). Each is a coloured face with a half-block shadow;
+a click shows it pressed for a moment, then runs it. The other commands
+(`/me`, `/msg`, `/r`, `/join`, `/part`, `/clear`, `/theme`, ...) have no
+button and work typed; `/help` lists them, and the theme is also in
+`/settings` (`c`/`C`). All six fit at 80 columns; on a narrower screen
+Help, then Settings, then Rooms, then Who drop out (never one with a count
+flashing), never Images or Quit.
 
 ---
 
@@ -442,7 +455,7 @@ On a narrow bar the badges push out `/help` and `Tab user` first, never
 | Key             | What it does                                                                          |
 | --------------- | ------------------------------------------------------------------------------------- |
 | `Tab`           | Tab-complete the username at the cursor (cycles through matches on repeated presses). |
-| `Esc`           | Exit the door.                                                                        |
+| `Esc`           | Exit the door (stops a playing video first). Same as the Quit button.                 |
 | `PgUp` / `PgDn` | Scroll the transcript history.                                                        |
 | Arrow Up / Down | Scroll through your message history while editing the input line.                     |
 
@@ -462,15 +475,17 @@ pills along the bottom of the selector.
 With it on:
 
 - The wheel scrolls the chat (3 rows a notch), moves the selection in
-  `/who` and `/channels`, and pages through `/img`.
-- Clicking a top or bottom pill runs it; `/join`, `/part`, `/me`, `/msg`
-  and `/r` start the command in the input line instead.
+  `/who` and `/channels`, scrolls `/help`, and pages through `/img`.
+- Clicking a button presses it and runs it (see "Buttons").
+- In every panel, the actions on its key line are clickable too: a click on
+  `M message`, `J join by name`, `Esc close`, `S save` and so on does that
+  key.
 - Clicking a speaker's name starts `/msg <name> `.
 - Clicking an inline picture opens it in `/img`; clicking a `► … /play`
   line plays it; clicking a link card prints its full URL.
 - In `/channels`, a click selects a row and a second click joins it.
 - The `[X]` at the top left of every panel closes it as Esc does; the one
-  at the left of the chat screen's first row is the `Esc exit` pill.
+  at the left of the chat screen's first row does what Esc (Quit) does.
 - In `/settings`, clicking a letter opens the colour grid for it; in the
   grid, clicking a swatch uses it.
 

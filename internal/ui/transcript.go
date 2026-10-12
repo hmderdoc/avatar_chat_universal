@@ -28,6 +28,11 @@ type Transcript struct {
 	// oldest row.
 	Scroll int
 
+	// Reserve is how many rows at the bottom of the frame Render leaves
+	// for something drawn over them (the TV lounge's caption bar): the
+	// newest line sits above them.
+	Reserve int
+
 	SelfName string
 
 	// Theme drives bubble + header colors. Required; the App fills this
@@ -201,7 +206,8 @@ func (t *Transcript) Render(messages []*chat.Message) {
 		tops[i] = total
 		total += b.height()
 	}
-	if oldest := total - t.Frame.H; t.Scroll > oldest {
+	viewH := t.Frame.H - t.Reserve
+	if oldest := total - viewH; t.Scroll > oldest {
 		t.Scroll = oldest
 	}
 	if t.Scroll < 0 {
@@ -209,10 +215,10 @@ func (t *Transcript) Render(messages []*chat.Message) {
 	}
 	// Strip row shown at frame row 0. A short transcript stays
 	// bottom-aligned, so this goes negative.
-	top := total - t.Scroll - t.Frame.H
+	top := total - t.Scroll - viewH
 	for i, b := range blocks {
 		y := tops[i] - top
-		if y >= t.Frame.H || y+b.height() <= 0 {
+		if y >= viewH || y+b.height() <= 0 {
 			continue
 		}
 		t.renderBlock(b, y)

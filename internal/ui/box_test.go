@@ -148,7 +148,7 @@ func TestModalBoxes(t *testing.T) {
 		cm.Render()
 		g := frameGrid(app.modalFrame)
 		checkBox(t, tag+" channels", g, 0, 0, W, usable, false)
-		if !strings.Contains(rowText(g, usable-2), "Esc close") || !strings.Contains(rowText(g, 0), "Channels") {
+		if !strings.Contains(rowText(g, usable-2), "Esc close") || !strings.Contains(rowText(g, 0), "Rooms") {
 			t.Errorf("%s channels: help %q title %q", tag, rowText(g, usable-2), rowText(g, 0))
 		}
 
@@ -164,6 +164,15 @@ func TestModalBoxes(t *testing.T) {
 		checkBox(t, tag+" roster", g, 0, 0, W, usable, false)
 		if !strings.Contains(rowText(g, usable-2), "Esc close") || !strings.Contains(rowText(g, 0), "Who's Here") {
 			t.Errorf("%s roster: help %q", tag, rowText(g, usable-2))
+		}
+		app.closeModal()
+
+		app.openHelp()
+		app.modal.Render()
+		g = frameGrid(app.modalFrame)
+		checkBox(t, tag+" help", g, 0, 0, W, usable, false)
+		if !strings.Contains(rowText(g, usable-2), "Esc close") || !strings.Contains(rowText(g, 0), "Help") {
+			t.Errorf("%s help: keys %q", tag, rowText(g, usable-2))
 		}
 		app.closeModal()
 
@@ -416,40 +425,6 @@ func TestSettingsShowsNoHex(t *testing.T) {
 	}
 	if !strings.Contains(rowText(frameGrid(p.frame), 11), "Enter pick") {
 		t.Fatal("info line doesn't mention Enter")
-	}
-}
-
-// The bottom bar leads with /theme when users may pick one; the old
-// history pill is gone (PgUp still scrolls).
-func TestBottomBarTheme(t *testing.T) {
-	app := mouseApp(t, &bytes.Buffer{})
-	app.refreshActionBar()
-	for _, b := range app.bottomActionBar.Buttons {
-		if b.Label == "/theme" || strings.Contains(b.Label, "PgUp") {
-			t.Fatalf("bottom bar has %q without user themes", b.Label)
-		}
-	}
-	app.handleKey(ansi.Key{Type: ansi.KeyPgUp})
-	if app.transcript.Scroll == 0 {
-		t.Fatal("PgUp no longer scrolls")
-	}
-
-	app, _ = themeApp(t, "")
-	app.refreshActionBar()
-	if app.bottomActionBar.Buttons[0].Label != "/theme" {
-		t.Fatalf("first pill %q", app.bottomActionBar.Buttons[0].Label)
-	}
-	app.bottomActionBar.Render()
-	x0 := app.bottomActionBar.pills[0].x0
-	app.handleKey(click(x0+1, app.bottomActionFrame.Y))
-	found := false
-	for _, m := range app.Session.Messages() {
-		if strings.Contains(m.Str, "themes: ") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("/theme pill didn't list the themes")
 	}
 }
 

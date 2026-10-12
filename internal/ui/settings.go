@@ -88,6 +88,8 @@ type settingsPanel struct {
 	// it is applied and stored only on S.
 	theme        *theme.Theme
 	themeChanged bool
+
+	hints hintLine // the key line's actions, for clicks
 }
 
 func newSettingsPanel(name string, style *nickstyle.Style) *settingsPanel {
@@ -163,6 +165,11 @@ func (a *App) runSettings() settingsResult {
 			if ok {
 				k = key
 				break
+			}
+		}
+		if p.frame != nil {
+			if hk, ok := p.hints.hit(k, p.frame.X, p.frame.Y); ok {
+				k = hk // a click on "S save" or "Esc cancel"
 			}
 		}
 		if k.Type == ansi.KeyEsc {
@@ -431,7 +438,7 @@ func (a *App) drawSettings(p *settingsPanel, av avatar.Avatar) {
 	if p.changed || p.themeChanged {
 		keys = "S save   Esc cancel (unsaved changes)"
 	}
-	f.PrintAt(3, h-2, []byte(truncate(keys, w-4)), hot)
+	p.hints = drawHints(f, 3, h-2, truncate(keys, w-4), hot, hint{"S save", charKey('s')}, hint{"Esc cancel", escKey})
 	_ = f.Render(a.Conn)
 	_ = a.parkCursor(a.Conn)
 }

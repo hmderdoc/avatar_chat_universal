@@ -111,3 +111,21 @@ func TestLintFlagsMistakes(t *testing.T) {
 		t.Fatalf("problems = %q", got)
 	}
 }
+
+// A theme written for the old bottom bar still loads: its bar and pill
+// colours carry over to the strips, its highlight is ignored, and Lint
+// doesn't call them unknown.
+func TestRetiredKeysLoad(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "old.ini")
+	os.WriteFile(p, []byte("bottom_action_bar = white|bgred\nbottom_action_pill = black|bgbrown\nbottom_action_highlight = white|bgblue\n"), 0o644)
+	th, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if th.StripBar != ansi.White|ansi.BgRed || th.StripPill != ansi.Black|ansi.BgBrown {
+		t.Fatalf("strip %v / %v", th.StripBar, th.StripPill)
+	}
+	if got, _ := Lint(p); len(got) != 0 {
+		t.Fatalf("lint %q", got)
+	}
+}

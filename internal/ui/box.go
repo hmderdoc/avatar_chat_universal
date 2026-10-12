@@ -1,16 +1,18 @@
 package ui
 
 import (
+	"strings"
+
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
 	"github.com/hmderdoc/avatar_chat_universal/internal/theme"
 )
 
-// Modal boxes: every panel (/who, /channels, /settings, the colour grid,
-// the /img viewer, the upload dialog) is framed with a single-line box in
-// the theme's modal_frame colour, with the "[X]" dismiss button on the
-// top edge at the left and the title after it. A left click on the [X]
-// does what Esc does there. Contents stay inside the box: rows 1..H-2,
-// columns 1..W-2.
+// Modal boxes: every panel (/who, /channels, /help, /settings, the colour
+// grid, the /img viewer, the upload dialog) is framed with a single-line
+// box in the theme's modal_frame colour, with the "[X]" dismiss button on
+// the top edge at the left and the title after it. A left click on the
+// [X] does what Esc does there. Contents stay inside the box: rows
+// 1..H-2, columns 1..W-2.
 
 // Columns of "[X]" on a box's top edge (x1 exclusive).
 const (
@@ -59,4 +61,58 @@ func boxTitle(f *ansi.Frame, title string, attr ansi.Attr) {
 func closeHit(k ansi.Key, x, y int) bool {
 	return k.Type == ansi.KeyMouse && !k.Release && k.Button == ansi.MouseLeft &&
 		k.Y == y && k.X >= x+closeX0 && k.X < x+closeX1
+}
+
+// Key lines: the action names on a panel's key line ("M message", "Esc
+// close") are clickable too. drawHints prints the line and records where
+// each named action landed, like the bar's buttons; a click on one does its
+// key.
+
+// hint is one action on a key line: its text as printed and its key.
+type hint struct {
+	label string
+	key   ansi.Key
+}
+
+// hintSpan is where a hint landed: frame columns x0..x1-1 of row y.
+type hintSpan struct {
+	x0, x1, y int
+	key       ansi.Key
+}
+
+type hintLine []hintSpan
+
+func charKey(r rune) ansi.Key { return ansi.Key{Type: ansi.KeyChar, Rune: r} }
+
+var (
+	escKey   = ansi.Key{Type: ansi.KeyEsc}
+	enterKey = ansi.Key{Type: ansi.KeyEnter}
+)
+
+// drawHints prints text (already clipped) at (x, y) of f in attr and
+// returns the spans of the hints found in it; a hint cut off by the clip
+// isn't clickable.
+func drawHints(f *ansi.Frame, x, y int, text string, attr ansi.Attr, hints ...hint) hintLine {
+	putStr(f, x, y, text, attr)
+	var out hintLine
+	for _, h := range hints {
+		if i := strings.Index(text, h.label); i >= 0 {
+			out = append(out, hintSpan{x0: x + i, x1: x + i + len(h.label), y: y, key: h.key})
+		}
+	}
+	return out
+}
+
+// hit maps a left press on a frame drawn at screen column fx, row fy to
+// the key of the hint under it.
+func (l hintLine) hit(k ansi.Key, fx, fy int) (ansi.Key, bool) {
+	if k.Type != ansi.KeyMouse || k.Release || k.Button != ansi.MouseLeft {
+		return ansi.Key{}, false
+	}
+	for _, s := range l {
+		if k.Y == fy+s.y && k.X >= fx+s.x0 && k.X < fx+s.x1 {
+			return s.key, true
+		}
+	}
+	return ansi.Key{}, false
 }

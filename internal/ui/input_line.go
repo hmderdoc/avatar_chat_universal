@@ -7,9 +7,9 @@ import (
 	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
 )
 
-// InputLine is a single-line edit buffer rendered into a Frame. The cursor
-// is implicit — we paint a colored block one cell to the right of the last
-// character in the buffer. Up/Down arrows walk a small ring of previously
+// InputLine is a single-line edit buffer rendered into a Frame. Left/Right,
+// Home/End move the edit cursor; typing inserts at it, Backspace and Delete
+// remove either side of it. Up/Down arrows walk a small ring of previously
 // submitted lines (history), matching the JS door's input behaviour.
 type InputLine struct {
 	Frame *ansi.Frame
@@ -21,7 +21,9 @@ type InputLine struct {
 	TextAttr   ansi.Attr
 	CursorAttr ansi.Attr
 
-	buf []rune
+	buf    []rune
+	pos    int // edit cursor: index in buf the next typed rune goes to
+	scroll int // index in buf of the first visible rune once the line overflows
 
 	history    []string // most-recent last
 	historyMax int
@@ -37,7 +39,8 @@ type InputLine struct {
 	// resets it.
 	tabMatches []string
 	tabIdx     int
-	tabAnchor  int // start position (in i.buf) of the word being completed
+	tabAnchor  int    // start position (in i.buf) of the word being completed
+	tabTail    []rune // text after the cursor, kept behind each completion
 }
 
 func NewInputLine(f *ansi.Frame, prompt string) *InputLine {
@@ -63,6 +66,7 @@ func (i *InputLine) HandleKey(k ansi.Key) (submit bool, cancel bool) {
 		i.tabMatches = nil
 		i.tabIdx = 0
 	}
+	i.pos = max(0, min(i.pos, len(i.buf)))
 
 	switch k.Type {
 	case ansi.KeyEnter:
@@ -73,9 +77,26 @@ func (i *InputLine) HandleKey(k ansi.Key) (submit bool, cancel bool) {
 	case ansi.KeyEsc:
 		return false, true
 	case ansi.KeyBackspace:
-		if len(i.buf) > 0 {
-			i.buf = i.buf[:len(i.buf)-1]
+		if i.pos > 0 {
+			i.buf = append(i.buf[:i.pos-1], i.buf[i.pos:]...)
+			i.pos--
 		}
+	case ansi.KeyDelete:
+		if i.pos < len(i.buf) {
+			i.buf = append(i.buf[:i.pos], i.buf[i.pos+1:]...)
+		}
+	case ansi.KeyLeft:
+		if i.pos > 0 {
+			i.pos--
+		}
+	case ansi.KeyRight:
+		if i.pos < len(i.buf) {
+			i.pos++
+		}
+	case ansi.KeyHome:
+		i.pos = 0
+	case ansi.KeyEnd:
+		i.pos = len(i.buf)
 	case ansi.KeyTab:
 		i.handleTab()
 	case ansi.KeyUp:
@@ -87,7 +108,10 @@ func (i *InputLine) HandleKey(k ansi.Key) (submit bool, cancel bool) {
 			return false, false
 		}
 		if k.Rune >= 0x20 && k.Rune < 0x7F && len(i.buf) < i.MaxLength {
-			i.buf = append(i.buf, k.Rune)
+			i.buf = append(i.buf, 0)
+			copy(i.buf[i.pos+1:], i.buf[i.pos:])
+			i.buf[i.pos] = k.Rune
+			i.pos++
 		}
 	}
 	return false, false
@@ -96,7 +120,7 @@ func (i *InputLine) HandleKey(k ansi.Key) (submit bool, cancel bool) {
 // tabWords is how many trailing words handleTab tries as one name.
 const tabWords = 4
 
-// handleTab does prefix-completion against the last word in the buffer.
+// handleTab does prefix-completion against the word before the cursor.
 // First press: find all candidates whose lower-case form starts with the
 // last word (or the last few, for names with spaces); replace them with the
 // first match. Subsequent Tab presses
@@ -108,14 +132,14 @@ func (i *InputLine) handleTab() {
 	// Already cycling — advance to next match.
 	if len(i.tabMatches) > 0 {
 		i.tabIdx = (i.tabIdx + 1) % len(i.tabMatches)
-		i.buf = append(i.buf[:i.tabAnchor], []rune(i.tabMatches[i.tabIdx])...)
+		i.complete(i.tabMatches[i.tabIdx])
 		return
 	}
 	// Starts of the last few words, nearest first. Names can hold spaces
 	// ("Beta Tester"), so the trailing words are tried as one prefix too,
 	// longest first.
 	space := func(r rune) bool { return r == ' ' || r == '\t' }
-	end := len(i.buf)
+	end := i.pos
 	var starts []int
 	for s := end; len(starts) < tabWords; {
 		for s > 0 && !space(i.buf[s-1]) {
@@ -151,7 +175,15 @@ func (i *InputLine) handleTab() {
 	i.tabMatches = matches
 	i.tabIdx = 0
 	i.tabAnchor = start
-	i.buf = append(i.buf[:start], []rune(matches[0])...)
+	i.tabTail = append([]rune(nil), i.buf[end:]...)
+	i.complete(matches[0])
+}
+
+// complete puts name in place of the word being completed, keeping the
+// text after it, and leaves the cursor just past the name.
+func (i *InputLine) complete(name string) {
+	i.buf = append(append(i.buf[:i.tabAnchor], []rune(name)...), i.tabTail...)
+	i.pos = len(i.buf) - len(i.tabTail)
 }
 
 // historyPrev replaces buf with an earlier history entry. The first call
@@ -170,6 +202,7 @@ func (i *InputLine) historyPrev() {
 		return
 	}
 	i.buf = append(i.buf[:0], []rune(i.history[i.historyIdx])...)
+	i.pos = len(i.buf)
 }
 
 // historyNext walks forward toward the in-progress line. At the end of the
@@ -181,11 +214,13 @@ func (i *InputLine) historyNext() {
 	if i.historyIdx < len(i.history)-1 {
 		i.historyIdx++
 		i.buf = append(i.buf[:0], []rune(i.history[i.historyIdx])...)
+		i.pos = len(i.buf)
 		return
 	}
 	// past the newest entry — restore scratch and exit history mode.
 	i.historyIdx = -1
 	i.buf = append(i.buf[:0], i.scratch...)
+	i.pos = len(i.buf)
 }
 
 // PushHistory records a submitted line into the history ring. Duplicates
@@ -212,6 +247,7 @@ func (i *InputLine) Value() string { return string(i.buf) }
 // SetValue replaces the buffer, leaving the cursor at its end.
 func (i *InputLine) SetValue(s string) {
 	i.buf = append(i.buf[:0], []rune(s)...)
+	i.pos = len(i.buf)
 	i.historyIdx = -1
 	i.scratch = i.scratch[:0]
 }
@@ -219,37 +255,42 @@ func (i *InputLine) SetValue(s string) {
 // Reset empties the buffer.
 func (i *InputLine) Reset() {
 	i.buf = i.buf[:0]
+	i.pos, i.scroll = 0, 0
 	i.historyIdx = -1
 	i.scratch = i.scratch[:0]
 }
 
 // view computes the visible slice of the buffer plus the column the
-// cursor should park at, applying horizontal scrolling once the buffer
-// outgrows the available text width. The trick is to reserve one column
-// for the cursor when overflowing so it sits *after* the last typed char
-// instead of on top of it -- otherwise the most recent character feels
-// "swallowed" and typing feels boxed-in at the right edge.
+// cursor should park at. Once the buffer outgrows the text width the line
+// scrolls horizontally just enough to keep the cursor in view; at the end
+// of the line one column stays free for the cursor so it sits *after* the
+// last typed char instead of on top of it.
 func (i *InputLine) view() (cursorCol int, visible []rune) {
 	promptLen := len(i.Prompt)
 	maxText := i.Frame.W - promptLen
 	if maxText < 1 {
 		return promptLen, nil
 	}
+	pos := max(0, min(i.pos, len(i.buf)))
 	if len(i.buf) < maxText {
-		return promptLen + len(i.buf), i.buf
+		i.scroll = 0
+		return promptLen + pos, i.buf
 	}
-	// Overflow: keep one column reserved for the cursor so the user can
-	// see what they just typed.
-	show := maxText - 1
-	if show < 0 {
-		show = 0
+	if pos < i.scroll {
+		i.scroll = pos
 	}
-	return promptLen + show, i.buf[len(i.buf)-show:]
+	if pos > i.scroll+maxText-1 {
+		i.scroll = pos - (maxText - 1)
+	}
+	// Don't leave blank columns at the right once the line overflows.
+	i.scroll = max(0, min(i.scroll, len(i.buf)-(maxText-1)))
+	end := min(len(i.buf), i.scroll+maxText)
+	return promptLen + pos - i.scroll, i.buf[i.scroll:end]
 }
 
 // CursorCol returns the 0-based column within the frame where the next
-// typed character should appear. Long buffers scroll horizontally; the
-// cursor stays parked one column past the rightmost visible char.
+// typed character should appear. Long buffers scroll horizontally to keep
+// the cursor in view.
 func (i *InputLine) CursorCol() int {
 	col, _ := i.view()
 	if col >= i.Frame.W {

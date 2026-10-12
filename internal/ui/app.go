@@ -1768,6 +1768,9 @@ func (a *App) forceFullRedraw() {
 		f.ForceRedraw()
 	}
 	a.transcriptComp.ForceRedraw()
+	if a.imageViewer != nil {
+		a.imageViewer.ForceRedraw()
+	}
 	a.dirty = true
 }
 

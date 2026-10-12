@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -378,7 +380,11 @@ func run() error {
 	app.TVAvatars = cfg.TVAvatars
 	app.Bell = cfg.Bell
 	if cfg.Images {
-		app.EnableImages(imageConfig(cfg, *dataDir, probe))
+		ic := imageConfig(cfg, *dataDir, probe, cols, rows)
+		if ic.Sixel {
+			logLine(*dataDir, fmt.Sprintf("sixel cells: %dx%d px on a %dx%d screen (0 = assumed 8x16)", ic.CellW, ic.CellH, cols, rows))
+		}
+		app.EnableImages(ic)
 	}
 	if cfg.LinkPreviews {
 		app.EnableLinkPreviews(linkPreviewConfig(cfg, *dataDir))
@@ -1147,7 +1153,7 @@ func linkPreviewConfig(cfg *config.Config, dataDir string) ui.LinkPreviewConfig 
 
 // imageConfig builds the inline-picture settings: fetch limits and cache
 // from the config, sixel and cell size from the terminal probe.
-func imageConfig(cfg *config.Config, dataDir string, probe *termprobe.Result) ui.ImageConfig {
+func imageConfig(cfg *config.Config, dataDir string, probe *termprobe.Result, cols, rows int) ui.ImageConfig {
 	ic := ui.ImageConfig{Fetcher: imageFetcher(cfg, dataDir), NSFWKeywords: nsfwKeywords(cfg)}
 	switch strings.ToLower(cfg.ImageSixel) {
 	case "on", "true", "yes":
@@ -1158,6 +1164,30 @@ func imageConfig(cfg *config.Config, dataDir string, probe *termprobe.Result) ui
 	}
 	if probe != nil {
 		ic.CellW, ic.CellH = probe.CellW, probe.CellH
+		if ic.CellW <= 0 || ic.CellH <= 0 {
+			ic.CellW, ic.CellH = cellFromGeometry(probe.Raw, cols, rows)
+		}
 	}
 	return ic
+}
+
+var sixelGeometry = regexp.MustCompile(`\x1b\[\?2;0;(\d{1,5});(\d{1,5})S`)
+
+// cellFromGeometry works the cell size out of the XTSMGRAPHICS reply
+// (CSI ? 2 ; 0 ; width ; height S, the sixel area in pixels) and the
+// screen's size in characters, for terminals that answer that but not
+// CSI 16 t / 14 t (SyncTERM, fTelnet). 0, 0 when it doesn't give a sane
+// cell, and the pictures assume 8x16.
+func cellFromGeometry(raw []byte, cols, rows int) (int, int) {
+	m := sixelGeometry.FindSubmatch(raw)
+	if m == nil || cols <= 0 || rows <= 0 {
+		return 0, 0
+	}
+	w, _ := strconv.Atoi(string(m[1]))
+	h, _ := strconv.Atoi(string(m[2]))
+	cw, ch := w/cols, h/rows
+	if cw < 4 || cw > 64 || ch < 6 || ch > 128 || ch < cw {
+		return 0, 0
+	}
+	return cw, ch
 }

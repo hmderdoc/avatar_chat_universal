@@ -33,3 +33,21 @@ func TestOfferHandleColorsOnce(t *testing.T) {
 		t.Fatal("colours cleared, never offered: want the offer")
 	}
 }
+
+func TestCellFromGeometry(t *testing.T) {
+	// fTelnet's reply on a 150x67 screen: 9x16 cells.
+	raw := []byte("\x1b[?2;0;1356;1081S\x1b[=67;84;101;114;109;1;208c")
+	if w, h := cellFromGeometry(raw, 150, 67); w != 9 || h != 16 {
+		t.Errorf("150x67 = %dx%d, want 9x16", w, h)
+	}
+	if w, h := cellFromGeometry(raw, 0, 0); w != 0 || h != 0 {
+		t.Errorf("no screen size = %dx%d, want 0x0", w, h)
+	}
+	if w, h := cellFromGeometry([]byte("\x1b[?1;2c"), 80, 25); w != 0 || h != 0 {
+		t.Errorf("no geometry = %dx%d", w, h)
+	}
+	// Nonsense (a cell wider than tall) falls back to the default.
+	if w, h := cellFromGeometry([]byte("\x1b[?2;0;1600;100S"), 80, 25); w != 0 || h != 0 {
+		t.Errorf("insane = %dx%d", w, h)
+	}
+}

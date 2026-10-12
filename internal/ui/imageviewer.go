@@ -31,9 +31,17 @@ type ImageViewer struct {
 	width   int
 	height  int
 
+	// drawn is which picture (index and size) is on screen. A picture is a
+	// full clear plus its whole sixel, so it is written only when it changes,
+	// not on every frame the chat asks for (that flickered).
+	drawn string
+
 	closed bool
 	hints  hintLine // "Esc close" on the footer, for clicks
 }
+
+// ForceRedraw makes the next Render write the picture again.
+func (v *ImageViewer) ForceRedraw() { v.drawn = "" }
 
 // NewImageViewer builds a viewer for the supplied list of images. The
 // initial selection is the most recent (last in the list); navigation
@@ -261,6 +269,11 @@ func (v *ImageViewer) renderRaster(w io.Writer, e *imageEntry) error {
 	if bodyH < 1 {
 		bodyH = 1
 	}
+	sig := fmt.Sprintf("%d %dx%d", v.index, v.width, v.height)
+	if sig == v.drawn {
+		return nil
+	}
+	v.drawn = sig
 	pic := v.zoom(e, v.width-2, bodyH)
 	b := e.img.Bounds()
 	header := fmt.Sprintf("Image %d/%d | %s | %dx%d | %s", v.index+1, v.count(), e.from, b.Dx(), b.Dy(), e.url)
@@ -268,7 +281,9 @@ func (v *ImageViewer) renderRaster(w io.Writer, e *imageEntry) error {
 	x0 := 1
 	if pic != nil {
 		x0 = 1 + (v.width-2-pic.Cols)/2
-		for r := 0; r < pic.Rows; r++ {
+		// With a sixel, its box stays background: the cell version would
+		// show around a sixel drawn at a smaller cell size than the screen's.
+		for r := 0; r < pic.Rows && pic.Sixel == nil; r++ {
 			for c := 0; c < pic.Cols; c++ {
 				cell := pic.Cells[r*pic.Cols+c]
 				if cell.True {

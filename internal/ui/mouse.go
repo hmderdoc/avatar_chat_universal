@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"time"
@@ -315,8 +316,11 @@ func (a *App) probeSize(now time.Time) {
 		return
 	}
 	a.lastSizeProbe = now
-	_, _ = a.Conn.Write([]byte(ansi.SizeProbe))
-	// A terminal without CSI u leaves the cursor in the far corner; the
-	// next frame parks it again.
-	a.dirty = true
+	// A terminal without CSI u leaves the cursor in the far corner, so put
+	// it back here. Not by a redraw: the /img viewer re-sends its whole
+	// picture on each frame, which flickered every probe.
+	var b bytes.Buffer
+	b.WriteString(ansi.SizeProbe)
+	_ = a.restCursor(&b)
+	_, _ = a.Conn.Write(b.Bytes())
 }

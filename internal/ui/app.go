@@ -1921,13 +1921,13 @@ func (a *App) composeInto(w io.Writer) error {
 		if err := a.imageViewer.Render(w); err != nil {
 			return err
 		}
-		return a.parkCursor(w)
+		return a.restCursor(w)
 	}
 	if a.modal != nil {
 		if err := a.modalFrame.Render(w); err != nil {
 			return err
 		}
-		return a.parkCursor(w)
+		return a.restCursor(w)
 	}
 	if err := a.headerFrame.Render(w); err != nil {
 		return err
@@ -1956,9 +1956,23 @@ func (a *App) composeInto(w io.Writer) error {
 	// BBS client does local echo (which Mac Terminal/iTerm/etc. often do for
 	// SSH sessions without telnet IAC negotiation), the next typed character
 	// lands on top of our input line instead of below the drawn area.
-	col := a.inputFrame.X + a.inputLine.CursorCol() + 1 // 1-based
-	row := a.inputFrame.Y + 1
+	return a.restCursor(w)
+}
+
+// restCursor moves the terminal cursor to cursorSpot.
+func (a *App) restCursor(w io.Writer) error {
+	col, row := a.cursorSpot()
 	return ansi.MoveCursor(w, col, row)
+}
+
+// cursorSpot is where the terminal cursor rests between frames (1-based):
+// the input caret, or the left of the input row while a panel is up.
+func (a *App) cursorSpot() (col, row int) {
+	row = a.inputFrame.Y + 1
+	if a.imageViewer != nil || a.modal != nil {
+		return 1, row
+	}
+	return a.inputFrame.X + a.inputLine.CursorCol() + 1, row
 }
 
 // parkCursor puts the terminal cursor where the chat screen keeps it, at

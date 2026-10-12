@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -144,9 +145,14 @@ func TestProbeSizeWaitsForFrame(t *testing.T) {
 		t.Fatal("probed mid-frame")
 	}
 	app.pendingOff = len(app.pending)
+	app.dirty = false
 	app.probeSize(now.Add(2 * time.Second))
-	if out.String() != ansi.SizeProbe {
-		t.Fatalf("wrote %q", out.String())
+	// The probe, then the cursor back to its rest spot; no redraw asked.
+	if want := ansi.SizeProbe + fmt.Sprintf("\x1b[%d;%dH", app.inputFrame.Y+1, app.inputFrame.X+app.inputLine.CursorCol()+1); out.String() != want {
+		t.Fatalf("wrote %q, want %q", out.String(), want)
+	}
+	if app.dirty {
+		t.Fatal("a probe asked for a redraw")
 	}
 }
 

@@ -257,6 +257,10 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Fixed
 
+- door: a sixel picture showed with its cell version around it. The box is
+  sized for an assumed cell size, so on a terminal with bigger cells the
+  sixel came out smaller than the box; while sixels are drawn, the box
+  is now left as the bubble's background under them.
 - door: a stray "7" under the cursor (and an "8" in the far corner) on
   BBS terminals without DECSC. The size probe saved and restored the
   cursor with ESC 7 / ESC 8, which those terminals print; it now uses

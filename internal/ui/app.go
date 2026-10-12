@@ -1828,6 +1828,7 @@ func (a *App) draw() {
 		// transparent cells in the transcript (gutters between bubbles), so
 		// chat stays visible while idle animations play behind it.
 		a.transcript.Truecolor = a.tvColorTrue()
+		a.transcript.SixelLive = a.sixelLive()
 		a.transcript.Render(a.Session.Messages())
 		a.bottomActionBar.Render()
 	}

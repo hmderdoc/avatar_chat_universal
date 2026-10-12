@@ -134,6 +134,18 @@ func TestApp_SixelBlitOnlyWhenNeeded(t *testing.T) {
 	if again := frame(); strings.Contains(again, "\x1bP") {
 		t.Fatal("unchanged frame re-sent the sixel")
 	}
+	// Under a drawn sixel the cells are the bubble's background, not the
+	// cell version (which showed around a sixel smaller than its box).
+	if rs := app.transcript.SixelRegions; len(rs) != 1 {
+		t.Fatalf("%d sixel regions, want 1", len(rs))
+	} else {
+		r := rs[0]
+		for _, at := range [][2]int{{0, 0}, {r.Pic.Cols - 1, r.Pic.Rows - 1}} {
+			if c := app.transcriptFrame.CellAt(r.X+at[0], r.Y+at[1]); c.Char != ' ' || c.True {
+				t.Fatalf("cell %v under the sixel = %+v, want the bubble background", at, c)
+			}
+		}
+	}
 	// A new message moves the picture up: it is sent again at its new place.
 	say("and another line")
 	if moved := frame(); strings.Count(moved, dcs) != 1 {

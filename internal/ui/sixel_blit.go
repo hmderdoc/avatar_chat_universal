@@ -30,11 +30,16 @@ func (a *App) EnableLinkPreviews(cfg LinkPreviewConfig) {
 // while a screensaver, the TV lounge or a modal covers the transcript (the
 // pixels would fight it; the cell version shows instead).
 func (a *App) sixelRegions() []sixelRegion {
-	if a.images == nil || !a.images.cfg.Sixel || a.idleAnim != nil || a.loungeActive() ||
-		a.modal != nil || a.imageViewer != nil {
+	if !a.sixelLive() {
 		return nil
 	}
 	return a.transcript.SixelRegions
+}
+
+// sixelLive reports whether sixel pictures are drawn this frame.
+func (a *App) sixelLive() bool {
+	return a.images != nil && a.images.cfg.Sixel && a.idleAnim == nil && !a.loungeActive() &&
+		a.modal == nil && a.imageViewer == nil
 }
 
 func sixelSignature(regions []sixelRegion) string {

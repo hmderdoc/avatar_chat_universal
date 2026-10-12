@@ -52,6 +52,12 @@ type Transcript struct {
 	// carry a sixel version, in frame coordinates, for the App to blit
 	// over their cells.
 	SixelRegions []sixelRegion
+	// SixelLive is set by the App when this frame's sixels will be drawn.
+	// A wholly visible sixel picture then leaves its cells as the bubble's
+	// background instead of the cell version: the box is sized for an
+	// assumed cell size, so on a terminal with bigger cells the cell
+	// version showed around the (smaller) sixel.
+	SixelLive bool
 	// Hits lists, after Render, the clickable boxes in frame coordinates:
 	// speakers, pictures, audio/video lines and link cards.
 	Hits []hit
@@ -369,6 +375,13 @@ func (t *Transcript) paintPictures(b *block, textX, bodyY int) {
 			paintVeil(t.Frame, t.Theme, textX, y0, s.cols, s.rows)
 			continue
 		}
+		sixel := s.pic.Sixel != nil && y0 >= 0 && y0+s.pic.Rows <= t.Frame.H
+		if sixel {
+			t.SixelRegions = append(t.SixelRegions, sixelRegion{X: textX, Y: y0, Pic: s.pic, URL: s.url})
+			if t.SixelLive {
+				continue
+			}
+		}
 		for r := 0; r < s.pic.Rows; r++ {
 			y := y0 + r
 			if y < 0 || y >= t.Frame.H {
@@ -382,9 +395,6 @@ func (t *Transcript) paintPictures(b *block, textX, bodyY int) {
 					t.Frame.SetCell(textX+c, y, cell.Char, cell.Attr)
 				}
 			}
-		}
-		if s.pic.Sixel != nil && y0 >= 0 && y0+s.pic.Rows <= t.Frame.H {
-			t.SixelRegions = append(t.SixelRegions, sixelRegion{X: textX, Y: y0, Pic: s.pic, URL: s.url})
 		}
 	}
 }

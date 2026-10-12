@@ -278,6 +278,15 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Fixed
 
+- door: the /img viewer flickered every couple of seconds: each size probe
+  asked for a redraw, and the viewer re-sent its whole picture on every
+  frame. The probe now puts the cursor back itself, and the viewer writes
+  its picture only when it changes.
+- door: sixel pictures on SyncTERM and fTelnet assumed 8x16 cells, as they
+  answer neither CSI 16 t nor 14 t. The cell size now comes from their
+  XTSMGRAPHICS sixel area divided by the screen in characters (logged in
+  termprobe.log), and the /img viewer no longer draws the cell version
+  under its sixel.
 - door: a sixel picture showed with its cell version around it. The box is
   sized for an assumed cell size, so on a terminal with bigger cells the
   sixel came out smaller than the box; while sixels are drawn, the box

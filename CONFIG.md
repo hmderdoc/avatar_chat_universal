@@ -470,7 +470,7 @@ With it on:
   line plays it; clicking a link card prints its full URL.
 - In `/channels`, a click selects a row and a second click joins it.
 - The `[X]` at the top left of every panel closes it as Esc does; the one
-  at the left end of the top bar is the `Esc exit` pill.
+  at the left of the chat screen's first row is the `Esc exit` pill.
 - In `/settings`, clicking a letter opens the colour grid for it; in the
   grid, clicking a swatch uses it.
 

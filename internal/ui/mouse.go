@@ -163,6 +163,8 @@ func (a *App) handleMouse(k ansi.Key) (exit bool) {
 	}
 	a.markActive()
 	switch {
+	case k.Y == a.headerFrame.Y && a.header.CloseHit(k.X):
+		return a.clickPill("[X]")
 	case k.Y == a.actionFrame.Y:
 		if label, ok := a.actionBar.LabelAt(k.X); ok {
 			return a.clickPill(label)

@@ -25,6 +25,23 @@ type Header struct {
 	// scroll (which we may add later).
 	StatsDuration time.Duration
 	MotdDuration  time.Duration
+
+	// Close puts the "[X]" dismiss button at the left end, in CloseAttr,
+	// before the text; CloseHit reports a click on it.
+	Close     bool
+	CloseAttr ansi.Attr
+}
+
+// headerCloseX0 and headerCloseX1 are the columns of the header's [X]
+// (x1 exclusive).
+const (
+	headerCloseX0 = 1
+	headerCloseX1 = 4
+)
+
+// CloseHit reports whether column x is on the [X].
+func (h *Header) CloseHit(x int) bool {
+	return h.Close && x >= headerCloseX0 && x < headerCloseX1
 }
 
 // time package import added below
@@ -58,10 +75,15 @@ func (h *Header) Render() {
 	for x := 0; x < h.Frame.W; x++ {
 		h.Frame.SetCell(x, 0, ' ', attr)
 	}
-	if len(text) > h.Frame.W-1 {
-		text = text[:h.Frame.W-1]
+	x := 0
+	if h.Close {
+		h.Frame.PrintAt(headerCloseX0, 0, []byte("[X]"), h.CloseAttr)
+		x = headerCloseX1
 	}
-	h.Frame.PrintAt(0, 0, []byte(text), attr)
+	if len(text) > h.Frame.W-1-x {
+		text = text[:max(0, h.Frame.W-1-x)]
+	}
+	h.Frame.PrintAt(x, 0, []byte(text), attr)
 }
 
 // Status is a thin wrapper for a one-line status bar at the bottom.
@@ -146,21 +168,9 @@ type ActionBar struct {
 	// keep working; setting it updates BarAttr.
 	Attr ansi.Attr
 
-	// Close puts the "[X]" dismiss button at the left end, before the
-	// pills, in CloseAttr; a click on it reports the label "[X]". It takes
-	// closeW columns from the pills.
-	Close     bool
-	CloseAttr ansi.Attr
-	// CloseHidden blanks the [X] (keeping its columns, so the pills stay
-	// put) while a panel drawn over the bar has its own.
-	CloseHidden bool
-
 	// pills is where Render drew each visible button, for mouse clicks.
 	pills []pillSpan
 }
-
-// closeW is the columns the "[X]" and its gap take on an ActionBar.
-const closeW = len("[X]") + 2
 
 type pillSpan struct {
 	x0, x1 int // columns, x1 exclusive
@@ -203,13 +213,6 @@ func (a *ActionBar) Render() {
 		return
 	}
 	x := 1
-	if a.Close {
-		if !a.CloseHidden {
-			a.Frame.PrintAt(x, 0, []byte("[X]"), a.CloseAttr)
-			a.pills = append(a.pills, pillSpan{x0: x, x1: x + 3, label: "[X]"})
-		}
-		x += closeW
-	}
 	for i, btn := range a.Buttons {
 		if i > 0 {
 			x += 2 // gap between pills, rendered in bar bg

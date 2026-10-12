@@ -11,7 +11,7 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 - door: **an `[X]` dismiss button** at the top left of every panel
   (`/who`, `/channels`, `/settings`, the colour grid, `/img`, the avatar
-  upload dialog) and at the left end of the chat screen's top bar. A
+  upload dialog) and at the left of the chat screen's first row (the header). A
   click is Esc: the panel closes (unsaved `/settings` edits are dropped,
   as with Esc) and on the chat screen it does what the `Esc exit` pill
   does. Keys are unchanged.
@@ -257,6 +257,10 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Fixed
 
+- door: with a panel up, the cursor was left after the box's bottom-right
+  corner, so a terminal that ignores the no-wrap mode (or echoes keys)
+  scrolled garbage rows in at the bottom. It now waits on the input row,
+  as on the chat screen.
 - First run: the avatar picker's Enter often arrives as CR LF, and the
   LF answered the "Press C to colour your name" prompt as a skip. Keys
   typed ahead are now dropped before it.

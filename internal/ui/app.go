@@ -304,6 +304,9 @@ func (a *App) layout() {
 	a.header = NewHeader(a.headerFrame)
 	a.header.StatsAttr = th.HeaderStats
 	a.header.MotdAttr = th.HeaderMotd
+	// The [X] at the left end does what Esc exit does.
+	a.header.Close = true
+	a.header.CloseAttr = th.CloseButton
 	a.actionBar = NewActionBar(a.actionFrame)
 	a.bottomActionBar = NewActionBar(a.bottomActionFrame)
 	selfName := ""
@@ -330,8 +333,6 @@ func (a *App) layout() {
 	a.actionBar.BarAttr = th.TopActionBar
 	a.actionBar.ButtonAttr = th.TopActionPill
 	a.actionBar.HighlightAttr = th.TopActionHighlight
-	a.actionBar.Close = true
-	a.actionBar.CloseAttr = th.CloseButton
 	a.bottomActionBar.BarAttr = th.BottomActionBar
 	a.bottomActionBar.ButtonAttr = th.BottomActionPill
 	a.bottomActionBar.HighlightAttr = th.BottomActionHighlight
@@ -1586,6 +1587,7 @@ func (a *App) confirmUpload() bool {
 	if err := frame.Render(a.Conn); err != nil {
 		return false
 	}
+	_ = a.parkCursor(a.Conn)
 	// The avatar action paused the mouse for the transfer; the [X] needs it.
 	if a.mousePaused {
 		a.setMouse(true)
@@ -1702,7 +1704,7 @@ func (a *App) ApplyTheme(t *theme.Theme) {
 	a.actionBar.BarAttr = t.TopActionBar
 	a.actionBar.ButtonAttr = t.TopActionPill
 	a.actionBar.HighlightAttr = t.TopActionHighlight
-	a.actionBar.CloseAttr = t.CloseButton
+	a.header.CloseAttr = t.CloseButton
 	a.bottomActionBar.BarAttr = t.BottomActionBar
 	a.bottomActionBar.ButtonAttr = t.BottomActionPill
 	a.bottomActionBar.HighlightAttr = t.BottomActionHighlight
@@ -1909,8 +1911,7 @@ func (a *App) refreshActionBar() {
 		ActionButton{Label: "Tab user", optional: true},
 		ActionButton{Label: "Esc exit"},
 	)
-	// The [X] at the left end does what Esc exit does.
-	a.actionBar.Buttons = fitButtons(buttons, a.Width-closeW)
+	a.actionBar.Buttons = fitButtons(buttons, a.Width)
 
 	// Bottom bar focuses on the commands that ARE NOT in the top bar so
 	// the two rows don't duplicate each other. /theme leads when users
@@ -1943,10 +1944,16 @@ func (a *App) composeInto(w io.Writer) error {
 		a.bellPending = false
 	}
 	if a.imageViewer != nil {
-		return a.imageViewer.Render(w)
+		if err := a.imageViewer.Render(w); err != nil {
+			return err
+		}
+		return a.parkCursor(w)
 	}
 	if a.modal != nil {
-		return a.modalFrame.Render(w)
+		if err := a.modalFrame.Render(w); err != nil {
+			return err
+		}
+		return a.parkCursor(w)
 	}
 	if err := a.headerFrame.Render(w); err != nil {
 		return err
@@ -1981,6 +1988,15 @@ func (a *App) composeInto(w io.Writer) error {
 	col := a.inputFrame.X + a.inputLine.CursorCol() + 1 // 1-based
 	row := a.inputFrame.Y + 1
 	return ansi.MoveCursor(w, col, row)
+}
+
+// parkCursor puts the terminal cursor where the chat screen keeps it, at
+// the left of the input row, while a panel is up, so the reserved row below
+// takes any stray newline. Left where the panel's last write ended (often
+// the box's bottom-right corner), a terminal that ignores the no-wrap mode,
+// or a client echoing keys, runs past the edge and scrolls the screen.
+func (a *App) parkCursor(w io.Writer) error {
+	return ansi.MoveCursor(w, 1, a.inputFrame.Y+1)
 }
 
 // renderBlocking composes the current frame and writes all of it to the conn

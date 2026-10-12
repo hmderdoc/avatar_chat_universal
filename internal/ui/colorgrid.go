@@ -241,6 +241,7 @@ func (a *App) pickColour(p *settingsPanel) {
 	}()
 	for {
 		_ = g.draw(th, a.Charset, a.Width, a.Height).Render(a.Conn)
+		_ = a.parkCursor(a.Conn)
 		var k ansi.Key
 		for {
 			key, ok, err := a.Input.Next(200 * time.Millisecond)

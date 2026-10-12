@@ -281,25 +281,20 @@ func TestCloseButtonClicks(t *testing.T) {
 	}
 }
 
-// The chat screen's [X] sits left of the top bar's pills and is Esc exit.
+// The chat screen's [X] is at the left of the first row and is Esc exit.
 func TestChatCloseButton(t *testing.T) {
 	app := mouseApp(t, &bytes.Buffer{})
-	f := app.actionFrame
+	f := app.headerFrame
 	if got := string([]byte{f.CellAt(1, 0).Char, f.CellAt(2, 0).Char, f.CellAt(3, 0).Char}); got != "[X]" {
-		t.Fatalf("top bar starts %q", got)
+		t.Fatalf("first row starts %q", got)
 	}
 	if f.CellAt(2, 0).Attr != app.theme().CloseButton {
 		t.Fatal("[X] not in close_button")
 	}
-	labels := ""
 	for _, p := range app.actionBar.pills {
-		labels += p.label + ","
-	}
-	if !strings.HasPrefix(labels, "[X],/who,") || !strings.Contains(labels, "Esc exit") {
-		t.Fatalf("pills %s", labels)
-	}
-	if buttonsWidth(app.actionBar.Buttons)+closeW > app.Width {
-		t.Fatal("pills overflow the bar")
+		if p.label == "[X]" {
+			t.Fatal("the top bar still has an [X]")
+		}
 	}
 	if exit, _ := app.handleKey(click(2, f.Y)); !exit {
 		t.Fatal("[X] didn't exit")
@@ -310,6 +305,28 @@ func TestChatCloseButton(t *testing.T) {
 	if exit, _ := app.handleKey(click(2, f.Y)); exit {
 		t.Fatal("[X] exited over a busy video")
 	}
+}
+
+// With a panel up, the cursor ends on the input row like the chat screen,
+// not after the box's bottom-right corner.
+func TestPanelParksCursor(t *testing.T) {
+	app := mouseApp(t, &bytes.Buffer{})
+	app.openRoster([]string{"alice"})
+	var out bytes.Buffer
+	if err := app.composeInto(&out); err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("\x1b[%d;1H", app.inputFrame.Y+1)
+	if !strings.HasSuffix(out.String(), want) {
+		t.Fatalf("frame ends %q, want %q", tail(out.String(), 12), want)
+	}
+}
+
+func tail(s string, n int) string {
+	if len(s) > n {
+		return s[len(s)-n:]
+	}
+	return s
 }
 
 func TestColourGridNavigation(t *testing.T) {
@@ -445,31 +462,5 @@ func TestImageViewerBoxCharset(t *testing.T) {
 	_ = app.imageViewer.Render(&out)
 	if !strings.Contains(out.String(), "┌") || bytes.IndexByte(out.Bytes(), boxTL) >= 0 {
 		t.Fatalf("empty /img box not in UTF-8: %q", out.String()[:40])
-	}
-}
-
-// While /settings covers the bar, the bar's [X] is blank and unclickable,
-// and the pills don't move.
-func TestActionBarCloseHidden(t *testing.T) {
-	f := ansi.NewFrame(0, 0, 40, 1, ansi.White|ansi.BgBlack)
-	bar := NewActionBar(f)
-	bar.Close = true
-	bar.Buttons = []ActionButton{{Label: "/who"}}
-	bar.Render()
-	shown, _ := bar.LabelAt(2)
-	at := -1
-	for x := 0; x < 40; x++ {
-		if l, ok := bar.LabelAt(x); ok && l == "/who" {
-			at = x
-			break
-		}
-	}
-	bar.CloseHidden = true
-	bar.Render()
-	if _, ok := bar.LabelAt(2); shown != "[X]" || ok {
-		t.Fatalf("[X] shown=%q, still clickable when hidden=%v", shown, ok)
-	}
-	if l, ok := bar.LabelAt(at); !ok || l != "/who" {
-		t.Fatalf("pills moved when the [X] was hidden")
 	}
 }

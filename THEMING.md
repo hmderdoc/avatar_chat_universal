@@ -183,7 +183,7 @@ click treats as Esc; the upload dialog gets the same box.
 | `modal_ok`     | `lightgreen\|bgblack`  | Info line in `/settings`                        |
 | `viewer_bar`   | `white\|bgblue`        | `/img` header and footer on the box edges       |
 | `modal_frame`  | `yellow`               | The box around each panel and dialog (foreground only, drawn on the panel's background) |
-| `close_button` | `lightred\|bgblack`    | The `[X]` at the top left of each panel and of the chat screen's top bar |
+| `close_button` | `lightred\|bgblack`    | The `[X]` at the top left of each panel and of the chat screen's first row |
 
 ### Dialogs
 

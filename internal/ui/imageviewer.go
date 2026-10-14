@@ -74,7 +74,7 @@ func (v *ImageViewer) count() int { return len(v.images) + len(v.rasters) }
 // HandleKey routes navigation. Returns true when the modal should close.
 func (v *ImageViewer) HandleKey(k ansi.Key) bool {
 	switch k.Type {
-	case ansi.KeyEsc:
+	case ansi.KeyEsc, ansi.KeyEnter:
 		v.closed = true
 		return true
 	case ansi.KeyLeft, ansi.KeyPgUp:
@@ -105,12 +105,12 @@ func (v *ImageViewer) HandleKey(k ansi.Key) bool {
 		case 'q', 'Q':
 			v.closed = true
 			return true
-		case 'n', 'N', ' ':
+		case 'n', 'N', ' ', ']':
 			if v.index < v.count()-1 {
 				v.index++
 				v.scrollY = 0
 			}
-		case 'p', 'P':
+		case 'p', 'P', '[':
 			if v.index > 0 {
 				v.index--
 				v.scrollY = 0

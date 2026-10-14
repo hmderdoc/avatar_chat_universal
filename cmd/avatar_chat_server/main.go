@@ -10,6 +10,10 @@
 // it also serves the standalone web chat page and its WebSocket, and with
 // -upstream (upstream) it hosts no chat itself but relays web users to
 // another chat server: see WEB.md.
+//
+// Chat history, the room registry and TV state are kept in -store (store),
+// chatserver-store.json by default, saved a few seconds after a change and
+// on SIGINT/SIGTERM; -store off keeps them in memory only.
 package main
 
 import (
@@ -23,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/avatar"
 	"github.com/hmderdoc/avatar_chat_universal/internal/chatmedia"
@@ -69,6 +74,12 @@ func main() {
 	flag.IntVar(&mcfg.MaxStoreMB, "max-store-mb", mcfg.MaxStoreMB, "total attachment storage, MB; uploads are refused when full")
 	flag.IntVar(&mcfg.PerIPPerHour, "uploads-per-hour", mcfg.PerIPPerHour, "uploads allowed per remote address per hour (0 = unlimited)")
 	flag.StringVar(&mcfg.DenyFile, "deny", "", "file of IP addresses and CIDR ranges to refuse, chat, web and media alike (re-read when it changes)")
+	storePath := flag.String("store", "chatserver-store.json", "file the chat history, room registry and TV state are saved in (\"\" or \"off\" keeps them in memory only)")
+	maxHistory := flag.Int("max-history", chatserver.DefaultMaxHistory, "messages kept per channel history; older ones are dropped (0 = no cap)")
+	rateBurst := flag.Int("rate-burst", chatserver.DefaultRateBurst, "chat messages one web user (with -rate-tcp, any connection) may send in a burst (0 turns flood control off)")
+	ratePerSec := flag.Float64("rate-per-sec", chatserver.DefaultRatePerSec, "chat messages per second one connection may keep sending after the burst (0 turns flood control off)")
+	rateTCP := flag.Bool("rate-tcp", false, "flood control on TCP connections (doors, bridges) too, not only web users")
+	bbsNameDays := flag.Int("bbs-name-days", int(chatserver.DefaultNameRetention/(24*time.Hour)), "days a name a door or bridge used stays refused to new web users (0 = only while connected)")
 	flag.Parse()
 
 	// The INI fills in what the command line left at its default; an
@@ -145,6 +156,20 @@ func main() {
 		num("web-claims-per-ip-day", &wc.ClaimsPerIPDay, "web_claims_per_ip_day")
 		num("media-proxy-max-mb", &wc.MediaProxyMaxMB, "media_proxy_max_mb")
 		num("media-streams", &wc.MediaStreams, "media_streams")
+		str("store", storePath, "store")
+		num("max-history", maxHistory, "max_history")
+		num("rate-burst", rateBurst, "rate_burst")
+		num("bbs-name-days", bbsNameDays, "bbs_name_days")
+		if v, ok := keys["rate_tcp"]; ok && !set["rate-tcp"] {
+			*rateTCP = iniBool(v)
+		}
+		if v, ok := keys["rate_per_sec"]; ok && !set["rate-per-sec"] {
+			f, err := strconv.ParseFloat(v, 64)
+			if err != nil {
+				log.Fatalf("config: rate_per_sec = %q is not a number", v)
+			}
+			*ratePerSec = f
+		}
 		if v, ok := keys["web_create_rooms"]; ok && !set["web-create-rooms"] {
 			wc.CreateRooms = iniBool(v)
 		}
@@ -206,6 +231,19 @@ func main() {
 		srv = chatserver.New(*addr)
 		srv.Logger = logger
 		srv.Deny = deny
+		srv.MaxHistory = *maxHistory
+		srv.RateBurst = *rateBurst
+		srv.RatePerSec = *ratePerSec
+		srv.RateTCP = *rateTCP
+		srv.NameRetention = time.Duration(*bbsNameDays) * 24 * time.Hour
+		if p := strings.Trim(strings.TrimSpace(*storePath), `"`); p != "" && !strings.EqualFold(p, "off") {
+			srv.StorePath = p
+			if err := srv.LoadStore(); err != nil {
+				// Don't save over a file that couldn't be read.
+				logger.Printf("%v; NOT SAVING the store this run", err)
+				srv.StorePath = ""
+			}
+		}
 	}
 
 	if wc.Addr != "" {
@@ -283,8 +321,9 @@ func iniBool(v string) bool {
 	return false
 }
 
-// loadWebINI reads the web listener's keys from the top of the INI or its
-// [web] or [websocket] section, lower-cased.
+// loadWebINI reads the web listener's and the chat server's keys from the
+// top of the INI or its [web], [websocket] or [server] section,
+// lower-cased.
 func loadWebINI(path string) (map[string]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -303,7 +342,7 @@ func loadWebINI(path string) (map[string]string, error) {
 			section = strings.ToLower(strings.TrimSpace(line[1 : len(line)-1]))
 			continue
 		}
-		if section != "" && section != "websocket" && section != "web" {
+		if section != "" && section != "websocket" && section != "web" && section != "server" {
 			continue
 		}
 		k, v, ok := strings.Cut(line, "=")

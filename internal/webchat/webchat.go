@@ -195,7 +195,14 @@ func New(cfg Config) *Server {
 	}
 	s.rooms = &roomList{srv: s, ttl: 30 * time.Second}
 	s.claims = newClaims(cfg.ClaimsFile, cfg.ClaimsPerIPDay, func() time.Time { return s.now() })
+	s.claims.reserved = s.bbsName
 	return s
+}
+
+// bbsName: the name is a door's or bridge's on the local chat server. In
+// relay mode the upstream's connections can't be seen, so nothing is.
+func (s *Server) bbsName(name string) bool {
+	return s.cfg.Upstream == "" && s.Chat != nil && s.Chat.BBSName(name)
 }
 
 // Config returns the settings in use, defaults filled in.

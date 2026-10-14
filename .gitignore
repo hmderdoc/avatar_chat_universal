@@ -46,3 +46,6 @@ moebius_chat/*.ans
 .vscode/
 *.swp
 *~
+
+# avatar_chat_server store snapshot (and its .tmp / .bad-* files)
+chatserver-store.json*

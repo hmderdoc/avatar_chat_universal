@@ -97,7 +97,7 @@ func NewRosterModal(frame *ansi.Frame, names []string, sess *chat.Session) *Rost
 // HandleKey processes a key press; returns true if the modal wants to close.
 func (m *RosterModal) HandleKey(k ansi.Key) bool {
 	switch k.Type {
-	case ansi.KeyEsc:
+	case ansi.KeyEsc, ansi.KeyEnter:
 		m.closed = true
 		return true
 	case ansi.KeyUp:
@@ -210,7 +210,7 @@ func (m *RosterModal) Render() {
 		}
 		// Pad full row width so highlight extends, then paint the name in
 		// its handle style (the selected row keeps the highlight colours).
-		line := marker + " " + truncate(entry.Name, listW-4)
+		line := marker + " " + truncate(ansi.ToCP437(entry.Name, false), listW-4)
 		line = padRight(line, listW)
 		f.PrintAt(1, row, []byte(line), attr)
 		if idx != m.selected {
@@ -290,6 +290,7 @@ func truncate(s string, w int) string {
 func writeClipped(f *ansi.Frame, x, y int, label, value string, labelAttr, valueAttr ansi.Attr, maxW int) {
 	col := x
 	end := x + maxW
+	value = ansi.ToCP437(value, false)
 	for i := 0; i < len(label) && col < end; i++ {
 		f.SetCell(col, y, label[i], labelAttr)
 		col++

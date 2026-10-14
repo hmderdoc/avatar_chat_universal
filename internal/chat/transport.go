@@ -74,13 +74,25 @@ func (c *Conn) Open(ctx context.Context) error {
 	c.tcp = tcp
 	c.wbuf = bufio.NewWriter(tcp)
 	c.closed = false
+	pipe := readPipe{tcp: tcp, responses: c.responses, updates: c.updates, readErr: c.readErr}
 	c.mu.Unlock()
 
-	go c.readLoop()
+	go c.readLoop(pipe)
 	return nil
 }
 
-// IsAlive reports whether the underlying socket is currently connected.
+// readPipe is one connection's socket and channels. The read loop keeps its
+// own copy so a loop outliving its connection (Close then Open) can't close
+// or feed the next connection's channels.
+type readPipe struct {
+	tcp       net.Conn
+	responses chan *Packet
+	updates   chan *Packet
+	readErr   chan error
+}
+
+// IsAlive reports whether the underlying socket is currently connected. It
+// turns false when the server hangs up, not only after Close.
 func (c *Conn) IsAlive() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -127,24 +139,35 @@ func (c *Conn) Send(p *Packet) error {
 
 // Updates returns the channel of asynchronous UPDATE packets. The chat layer
 // drains it from its main poll loop.
-func (c *Conn) Updates() <-chan *Packet { return c.updates }
+func (c *Conn) Updates() <-chan *Packet {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.updates
+}
 
-// readLoop is the single goroutine that owns the read side of c.tcp. It
+// readLoop is the single goroutine that owns the read side of p.tcp. It
 // classifies inbound packets and dispatches them to responses/updates, or
-// auto-replies to PINGs.
-func (c *Conn) readLoop() {
+// auto-replies to PINGs. When the socket ends it marks the connection
+// closed, so IsAlive reports the drop and the caller reconnects.
+func (c *Conn) readLoop(p readPipe) {
 	defer func() {
+		c.mu.Lock()
+		if c.tcp == p.tcp && !c.closed {
+			c.closed = true
+			_ = p.tcp.Close()
+		}
+		c.mu.Unlock()
 		// On exit, close updates so the chat layer's range loop terminates.
-		close(c.updates)
-		close(c.responses)
+		close(p.updates)
+		close(p.responses)
 	}()
 
-	r := bufio.NewReaderSize(c.tcp, MaxPacket)
+	r := bufio.NewReaderSize(p.tcp, MaxPacket)
 	for {
 		line, err := r.ReadBytes('\n')
 		if err != nil {
 			select {
-			case c.readErr <- err:
+			case p.readErr <- err:
 			default:
 			}
 			return
@@ -161,11 +184,11 @@ func (c *Conn) readLoop() {
 			// Malformed packet — log and skip. Don't kill the connection.
 			continue
 		}
-		c.dispatch(&pkt)
+		c.dispatch(p, &pkt)
 	}
 }
 
-func (c *Conn) dispatch(pkt *Packet) {
+func (c *Conn) dispatch(p readPipe, pkt *Packet) {
 	switch pkt.Func {
 	case "PING":
 		_ = c.sendPong()
@@ -178,28 +201,28 @@ func (c *Conn) dispatch(pkt *Packet) {
 		// oldest entry to make room — newest is most likely to be the
 		// one we care about.
 		select {
-		case c.responses <- pkt:
+		case p.responses <- pkt:
 		default:
 			select {
-			case <-c.responses:
+			case <-p.responses:
 			default:
 			}
 			select {
-			case c.responses <- pkt:
+			case p.responses <- pkt:
 			default:
 			}
 		}
 		return
 	case "UPDATE":
 		select {
-		case c.updates <- pkt:
+		case p.updates <- pkt:
 		default:
 			// Updates buffer full; drop oldest. (TODO: log / instrument)
 			select {
-			case <-c.updates:
+			case <-p.updates:
 			default:
 			}
-			c.updates <- pkt
+			p.updates <- pkt
 		}
 		return
 	}
@@ -217,9 +240,15 @@ func (c *Conn) sendPong() error {
 // AwaitResponse — otherwise a previous fire-and-forget WRITE/PUSH could
 // leave a stale RESPONSE that gets returned instead of yours.
 func (c *Conn) DrainResponses() {
+	c.mu.Lock()
+	responses := c.responses
+	c.mu.Unlock()
 	for {
 		select {
-		case <-c.responses:
+		case _, ok := <-responses:
+			if !ok {
+				return // closed with the connection: nothing more will come
+			}
 		default:
 			return
 		}

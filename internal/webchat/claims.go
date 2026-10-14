@@ -19,6 +19,11 @@ import (
 // the same name and no key, or the wrong one, is refused, so it can never
 // read that name's mailbox or its history.
 //
+// A name a door or bridge uses on the local chat server (or used lately:
+// chatserver.Server.BBSName) is not given to a new browser, so a guest
+// can't pass as a BBS user to the doors or receive their PMs. A browser
+// already holding it keeps it.
+//
 // The file is one claim per line, "<sha256 hex> <name>", so a sysop frees
 // a name by deleting its line (the server re-reads the file when it
 // changes). A browser whose storage was cleared loses its name until then.
@@ -29,13 +34,16 @@ type claimResult int
 const (
 	claimOK claimResult = iota
 	claimTaken
-	claimLimit // this address made too many new claims today
+	claimLimit    // this address made too many new claims today
+	claimReserved // a door or bridge uses this name
 	claimError
 )
 
 type claims struct {
 	path   string
 	perDay int // new claims per address per day
+	// reserved, when set, reports a name no new claim may take.
+	reserved func(name string) bool
 
 	mu      sync.Mutex
 	byName  map[string]string // lowercase name -> sha256 hex
@@ -107,6 +115,9 @@ func (c *claims) claim(name, key, ip string) claimResult {
 			return claimOK
 		}
 		return claimTaken
+	}
+	if c.reserved != nil && c.reserved(name) {
+		return claimReserved
 	}
 	if day := c.now().UTC().Format("2006-01-02"); day != c.day {
 		c.day, c.newBy = day, map[string]int{}

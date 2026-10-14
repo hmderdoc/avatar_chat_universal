@@ -1,7 +1,9 @@
 package ansi
 
 import (
+	"bytes"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -47,6 +49,10 @@ const (
 	// KeyMouse is a mouse report (after EnableMouse): X/Y are the 0-based
 	// cell, Button the xterm button code (see the Mouse* constants).
 	KeyMouse
+	// KeyPaste is text the terminal pasted with bracketed paste on
+	// (PasteOn): all of it in Text, line breaks included, so a paste of
+	// several lines isn't taken as several Enters.
+	KeyPaste
 )
 
 // Mouse button codes in Key.Button. Wheel events come as presses.
@@ -67,6 +73,23 @@ const (
 	MouseOff = "\x1b[?1006l\x1b[?1000l"
 )
 
+// PasteOn asks the terminal to bracket pasted text (DECSET 2004), which
+// the decoder delivers as one KeyPaste; PasteOff undoes it. A terminal
+// without it ignores both and pastes as typing, as before.
+const (
+	PasteOn  = "\x1b[?2004h"
+	PasteOff = "\x1b[?2004l"
+)
+
+// Bracketed paste markers, and how long a paste may take to finish
+// before what has arrived is delivered anyway.
+const (
+	pasteStart   = "\x1b[200~"
+	pasteEnd     = "\x1b[201~"
+	pasteTimeout = 2 * time.Second
+	pasteMax     = 64 * 1024
+)
+
 // SizeProbe parks the cursor at the far corner, asks where it is and puts
 // it back; the reply decodes as KeyResize. The cursor is hidden for the
 // trip so the jump doesn't flash (the chat UI always shows it). The save
@@ -82,6 +105,8 @@ type Key struct {
 	// Cols / Rows are populated only when Type == KeyResize.
 	Cols int
 	Rows int
+	// Text is the pasted text, for KeyPaste.
+	Text string
 	// Mouse fields, for KeyMouse. Release is set for a button release
 	// (SGR 'm', or X10 button 3, which doesn't say which button).
 	X, Y    int
@@ -93,12 +118,18 @@ type Key struct {
 // handles xterm/VT100 escape sequences for arrow keys, function keys,
 // Home/End/PgUp/PgDn, Delete/Insert, and the SS3-prefixed variants.
 //
-// A bare ESC press is reported only after the poll timeout elapses with no
-// follow-up byte, matching the convention used by avatar_chat.js:2554.
+// A bare ESC press is reported only once escWait passes with no follow-up
+// byte, matching the convention used by avatar_chat.js:2554. The wait runs
+// from the last byte received, not from the start of the poll, so an arrow
+// key whose bytes arrive split isn't taken for Esc.
 type Input struct {
 	reader  io.Reader // kept so callers can grab raw access via Pause/Resume
 	bytes   chan byte
 	pending []byte
+	// lastByte is when the newest pending byte arrived.
+	lastByte time.Time
+	// pasteSince is when a bracketed paste began; zero outside one.
+	pasteSince time.Time
 
 	mu        sync.Mutex
 	closed    bool
@@ -116,6 +147,11 @@ type Input struct {
 	// after it are only a mouse report once we've asked for reports.
 	x10 atomic.Bool
 }
+
+// escWait is how long a lone ESC waits for the rest of a sequence before it
+// counts as the Esc key: long enough for a sequence split across telnet
+// packets, short enough that Esc still feels immediate.
+const escWait = 75 * time.Millisecond
 
 // SetMouse tells the decoder whether mouse reporting is on, so it reads
 // the X10 form; the SGR form is always decoded.
@@ -227,6 +263,7 @@ func (in *Input) isClosed() (bool, error) {
 func (in *Input) Next(timeout time.Duration) (Key, bool, error) {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
+	escTried := false // the flush after escWait found no key; wait for bytes
 
 	for {
 		// 1) Drain whatever's already in the channel (non-blocking).
@@ -238,6 +275,7 @@ func (in *Input) Next(timeout time.Duration) (Key, bool, error) {
 					goto decode
 				}
 				in.pending = append(in.pending, b)
+				in.lastByte = time.Now()
 				continue
 			default:
 			}
@@ -247,6 +285,27 @@ func (in *Input) Next(timeout time.Duration) (Key, bool, error) {
 
 		// 2) Now check the closed state.
 		closed, closedErr := in.isClosed()
+
+		// Bracketed paste: everything up to the end marker is one key.
+		if in.pasteSince.IsZero() && bytes.HasPrefix(in.pending, []byte(pasteStart)) {
+			in.pending = in.pending[len(pasteStart):]
+			in.pasteSince = time.Now()
+		}
+		if !in.pasteSince.IsZero() {
+			if k, ok := in.takePaste(closed); ok {
+				return k, true, nil
+			}
+			select {
+			case b, ok := <-in.bytes:
+				if ok {
+					in.pending = append(in.pending, b)
+					in.lastByte = time.Now()
+				}
+				continue
+			case <-deadline.C:
+				return Key{}, false, nil
+			}
+		}
 
 		// 3) Try to decode. When closed, force-flush so trailing bytes
 		//    (like a bare ESC) deliver instead of waiting forever.
@@ -260,15 +319,31 @@ func (in *Input) Next(timeout time.Duration) (Key, bool, error) {
 			return Key{}, false, closedErr
 		}
 
-		// 5) Block for one byte or the poll timeout. After timeout, give the
-		//    decoder one last shot with escFlush=true.
+		// 5) Block for one byte or the poll timeout. Once a lone ESC has
+		//    waited escWait for a follow-up byte, give the decoder one last
+		//    shot with escFlush=true.
+		var escDone <-chan time.Time
+		if len(in.pending) > 0 && in.pending[0] == 0x1B && !escTried {
+			escDone = time.After(escWait - time.Since(in.lastByte))
+		}
 		select {
 		case b, ok := <-in.bytes:
 			if !ok {
 				continue // back to drain → decode → maybe surface close
 			}
 			in.pending = append(in.pending, b)
+			in.lastByte = time.Now()
+			escTried = false
+		case <-escDone:
+			if k, n, ok := tryDecodeMouse(in.pending, true, in.x10.Load()); ok {
+				in.pending = in.pending[n:]
+				return k, true, nil
+			}
+			escTried = true
 		case <-deadline.C:
+			if len(in.pending) > 0 && in.pending[0] == 0x1B && time.Since(in.lastByte) < escWait {
+				return Key{}, false, nil // the rest of a sequence may be on its way
+			}
 			if k, n, ok := tryDecodeMouse(in.pending, true, in.x10.Load()); ok {
 				in.pending = in.pending[n:]
 				return k, true, nil
@@ -276,6 +351,24 @@ func (in *Input) Next(timeout time.Duration) (Key, bool, error) {
 			return Key{}, false, nil
 		}
 	}
+}
+
+// takePaste delivers a bracketed paste once its end marker is in, or what
+// has arrived when it runs too long, too large or the input closed.
+func (in *Input) takePaste(closed bool) (Key, bool) {
+	if i := bytes.Index(in.pending, []byte(pasteEnd)); i >= 0 {
+		k := Key{Type: KeyPaste, Text: string(in.pending[:i])}
+		in.pending = in.pending[i+len(pasteEnd):]
+		in.pasteSince = time.Time{}
+		return k, true
+	}
+	if closed || len(in.pending) >= pasteMax || time.Since(in.pasteSince) > pasteTimeout {
+		k := Key{Type: KeyPaste, Text: string(in.pending)}
+		in.pending = in.pending[:0]
+		in.pasteSince = time.Time{}
+		return k, true
+	}
+	return Key{}, false
 }
 
 // tryDecode looks at the head of buf and returns (Key, bytes-consumed, ok).
@@ -389,9 +482,9 @@ func decodeCSI(buf []byte) (Key, int, bool) {
 	case 'B':
 		return Key{Type: KeyDown}, consumed, true
 	case 'C':
-		return Key{Type: KeyRight}, consumed, true
+		return Key{Type: KeyRight, Ctrl: wordMod(params)}, consumed, true
 	case 'D':
-		return Key{Type: KeyLeft}, consumed, true
+		return Key{Type: KeyLeft, Ctrl: wordMod(params)}, consumed, true
 	case 'H':
 		return Key{Type: KeyHome}, consumed, true
 	case 'F':
@@ -505,6 +598,12 @@ func parsePos(s string) (rows, cols int) {
 	rows = atoiSafe(s[:semi])
 	cols = atoiSafe(s[semi+1:])
 	return rows, cols
+}
+
+// wordMod reports whether an arrow's xterm modifier parameter ("1;5" for
+// Ctrl, "1;3" for Alt) asks for a word move; Key.Ctrl carries it.
+func wordMod(params string) bool {
+	return strings.HasSuffix(params, ";5") || strings.HasSuffix(params, ";3")
 }
 
 func atoiSafe(s string) int {

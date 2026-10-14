@@ -165,3 +165,103 @@ func TestApp_ArrowKeysMoveInputCursor(t *testing.T) {
 		t.Fatalf("caret col = %d, want %d", col, want)
 	}
 }
+
+func TestSplitRecipient(t *testing.T) {
+	known := []string{"Beta Tester", "Beta", "bob", "Disk McHardy"}
+	for _, tc := range []struct{ rest, name, body string }{
+		{" bob hi there", "bob", "hi there"},
+		{` "Beta Tester" hi`, "Beta Tester", "hi"},
+		{" beta tester  hi", "beta tester", "hi"},
+		{" Beta hi", "Beta", "hi"},
+		{" Disk McHardy yo", "Disk McHardy", "yo"},
+		{" stranger hello", "stranger", "hello"},
+		{` "Two Words" x`, "Two Words", "x"},
+		{" bob", "bob", ""},
+		{"", "", ""},
+	} {
+		name, body := splitRecipient(tc.rest, known)
+		if name != tc.name || body != tc.body {
+			t.Errorf("splitRecipient(%q) = %q, %q; want %q, %q", tc.rest, name, body, tc.name, tc.body)
+		}
+	}
+	if got := msgPrefix("Beta Tester"); got != `/msg "Beta Tester" ` {
+		t.Errorf("msgPrefix = %q", got)
+	}
+	if got := msgPrefix("bob"); got != "/msg bob " {
+		t.Errorf("msgPrefix = %q", got)
+	}
+}
+
+func TestCtrlEditingKeys(t *testing.T) {
+	ctrl := func(r rune) ansi.Key { return ansi.Key{Type: ansi.KeyChar, Rune: r, Ctrl: true} }
+	i := &InputLine{MaxLength: 500, historyIdx: -1}
+	i.SetValue("hello big world")
+	i.HandleKey(ctrl(0x17)) // Ctrl-W
+	if got := i.Value(); got != "hello big " {
+		t.Fatalf("Ctrl-W = %q", got)
+	}
+	i.HandleKey(ctrl(0x01)) // Ctrl-A
+	i.HandleKey(ansi.Key{Type: ansi.KeyRight})
+	i.HandleKey(ctrl(0x0B)) // Ctrl-K
+	if got := i.Value(); got != "h" || i.pos != 1 {
+		t.Fatalf("Ctrl-K = %q pos %d", got, i.pos)
+	}
+	i.SetValue("abc")
+	i.HandleKey(ctrl(0x01))
+	i.HandleKey(ctrl(0x05)) // Ctrl-E
+	if i.pos != 3 {
+		t.Fatalf("Ctrl-E pos %d", i.pos)
+	}
+	i.HandleKey(ctrl(0x15)) // Ctrl-U
+	if i.Value() != "" || i.pos != 0 {
+		t.Fatalf("Ctrl-U = %q", i.Value())
+	}
+}
+
+// Esc with a half-typed line clears it; only Esc on an empty line quits.
+func TestApp_EscClearsBeforeQuitting(t *testing.T) {
+	sess := chat.NewSession(nil, &chat.Nick{Name: "alice"}, "main")
+	app := NewApp(io.Discard, ansi.NewInput(strings.NewReader("")), sess, 80, 25, ansi.CharsetCP437)
+	app.inputLine.SetValue("half a thought")
+	if exit, _ := app.handleKey(ansi.Key{Type: ansi.KeyEsc}); exit {
+		t.Fatal("Esc with text quit")
+	}
+	if app.inputLine.Value() != "" {
+		t.Fatalf("line not cleared: %q", app.inputLine.Value())
+	}
+	if exit, _ := app.handleKey(ansi.Key{Type: ansi.KeyEsc}); !exit {
+		t.Fatal("Esc on an empty line didn't quit")
+	}
+}
+
+func TestPasteIsOneLine(t *testing.T) {
+	i := &InputLine{MaxLength: 20, historyIdx: -1}
+	i.SetValue("ab")
+	i.HandleKey(ansi.Key{Type: ansi.KeyLeft})
+	if cut := i.Paste("x\r\n/quit\ty"); cut {
+		t.Fatal("cut too early")
+	}
+	if got := i.Value(); got != "ax /quit yb" || i.pos != 10 {
+		t.Fatalf("paste = %q pos %d", got, i.pos)
+	}
+	if cut := i.Paste("0123456789abc"); !cut || len(i.Value()) != 20 {
+		t.Fatalf("over-long paste: cut=%v len=%d", cut, len(i.Value()))
+	}
+}
+
+func TestWordMoves(t *testing.T) {
+	i := &InputLine{MaxLength: 500, historyIdx: -1}
+	i.SetValue("one two  three")
+	i.HandleKey(ansi.Key{Type: ansi.KeyLeft, Ctrl: true})
+	if i.pos != 9 {
+		t.Fatalf("word left pos %d", i.pos)
+	}
+	i.HandleKey(ansi.Key{Type: ansi.KeyLeft, Ctrl: true})
+	if i.pos != 4 {
+		t.Fatalf("word left again pos %d", i.pos)
+	}
+	i.HandleKey(ansi.Key{Type: ansi.KeyRight, Ctrl: true})
+	if i.pos != 7 {
+		t.Fatalf("word right pos %d", i.pos)
+	}
+}

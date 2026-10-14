@@ -26,7 +26,9 @@ defaults shown below.
 
 To self-host, run `avatar_chat_server -addr :10088` and point `host`/`port`
 at it. The protocol is the same as `futureland.today:10088`, so the JS
-`avatar_chat` door interoperates against either. See
+`avatar_chat` door interoperates against either. It keeps history in
+`chatserver-store.json` across restarts and limits how fast a web user
+may post. See
 [INSTALL.md](INSTALL.md#self-hosting-the-chat-server). The same server can
 put a web chat page in front of your chat or someone else's: see
 [WEB.md](WEB.md).

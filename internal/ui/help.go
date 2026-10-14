@@ -68,8 +68,18 @@ func (a *App) helpSections() []helpSection {
 		tv = append(tv, "video links: /play takes over the screen like the TV; Esc or /stop ends it")
 	}
 
+	keys := []string{
+		"Left/Right, Home/End move in the line (Ctrl-Left/Right by word); Ctrl-A/Ctrl-E start/end",
+		"Ctrl-W deletes a word, Ctrl-U the line, Ctrl-K to the end; a pasted block lands in the line as one line",
+		"Up/Down recall lines you sent; Tab completes a name (again for the next match)",
+		"PgUp/PgDn scroll back; End (at the end of the line) returns to the latest; Home on an empty line goes to the oldest",
+		"Esc clears the line, and quits on an empty one; Ctrl-X quits; Ctrl-L repaints the screen",
+		`/msg "Two Words" hi messages a name with a space; commands work in any case`,
+	}
+
 	out := []helpSection{
 		{"Commands", cmds},
+		{"Keys", keys},
 		{"Rooms and people", []string{
 			"/join keeps the old channel joined (unread counts in /channels); /part leaves it",
 			"/ignore <name> hides someone's lines; /ignore lists; /unignore <name> undoes it",

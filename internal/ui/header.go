@@ -81,6 +81,7 @@ func (h *Header) Render() {
 		h.Frame.PrintAt(headerCloseX0, 0, []byte("[X]"), h.CloseAttr)
 		x = headerCloseX1
 	}
+	text = ansi.ToCP437(text, false)
 	if len(text) > h.Frame.W-1-x {
 		text = text[:max(0, h.Frame.W-1-x)]
 	}

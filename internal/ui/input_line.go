@@ -86,11 +86,20 @@ func (i *InputLine) HandleKey(k ansi.Key) (submit bool, cancel bool) {
 			i.buf = append(i.buf[:i.pos], i.buf[i.pos+1:]...)
 		}
 	case ansi.KeyLeft:
-		if i.pos > 0 {
+		if k.Ctrl {
+			i.pos = i.wordStart()
+		} else if i.pos > 0 {
 			i.pos--
 		}
 	case ansi.KeyRight:
-		if i.pos < len(i.buf) {
+		if k.Ctrl {
+			for i.pos < len(i.buf) && i.buf[i.pos] == ' ' {
+				i.pos++
+			}
+			for i.pos < len(i.buf) && i.buf[i.pos] != ' ' {
+				i.pos++
+			}
+		} else if i.pos < len(i.buf) {
 			i.pos++
 		}
 	case ansi.KeyHome:
@@ -105,6 +114,7 @@ func (i *InputLine) HandleKey(k ansi.Key) (submit bool, cancel bool) {
 		i.historyNext()
 	case ansi.KeyChar:
 		if k.Ctrl {
+			i.ctrlKey(k.Rune)
 			return false, false
 		}
 		if k.Rune >= 0x20 && k.Rune < 0x7F && len(i.buf) < i.MaxLength {
@@ -115,6 +125,38 @@ func (i *InputLine) HandleKey(k ansi.Key) (submit bool, cancel bool) {
 		}
 	}
 	return false, false
+}
+
+// ctrlKey applies the usual line-editing control keys: Ctrl-A/Ctrl-E to the
+// start/end, Ctrl-U clears the line, Ctrl-K deletes to the end, Ctrl-W
+// deletes the word before the cursor.
+func (i *InputLine) ctrlKey(r rune) {
+	switch r {
+	case 0x01: // Ctrl-A
+		i.pos = 0
+	case 0x05: // Ctrl-E
+		i.pos = len(i.buf)
+	case 0x15: // Ctrl-U
+		i.buf, i.pos = i.buf[:0], 0
+	case 0x0B: // Ctrl-K
+		i.buf = i.buf[:i.pos]
+	case 0x17: // Ctrl-W
+		j := i.wordStart()
+		i.buf = append(i.buf[:j], i.buf[i.pos:]...)
+		i.pos = j
+	}
+}
+
+// wordStart is where the word before the cursor begins.
+func (i *InputLine) wordStart() int {
+	j := i.pos
+	for j > 0 && i.buf[j-1] == ' ' {
+		j--
+	}
+	for j > 0 && i.buf[j-1] != ' ' {
+		j--
+	}
+	return j
 }
 
 // tabWords is how many trailing words handleTab tries as one name.
@@ -240,6 +282,34 @@ func (i *InputLine) PushHistory(line string) {
 	i.historyIdx = -1
 	i.scratch = i.scratch[:0]
 }
+
+// Paste inserts pasted text at the cursor as one line: line breaks and
+// tabs become spaces, and what can't be typed is left out, as when typing.
+// It reports whether the text had to be cut at MaxLength.
+func (i *InputLine) Paste(text string) (cut bool) {
+	text = strings.ReplaceAll(text, "\r\n", " ")
+	var add []rune
+	for _, r := range text {
+		switch {
+		case r == '\r' || r == '\n' || r == '\t':
+			add = append(add, ' ')
+		case r >= 0x20 && r < 0x7F:
+			add = append(add, r)
+		}
+	}
+	if room := i.MaxLength - len(i.buf); len(add) > room {
+		add, cut = add[:max(0, room)], true
+	}
+	i.pos = max(0, min(i.pos, len(i.buf)))
+	tail := append([]rune(nil), i.buf[i.pos:]...)
+	i.buf = append(append(i.buf[:i.pos], add...), tail...)
+	i.pos += len(add)
+	i.tabMatches = nil
+	return cut
+}
+
+// AtEnd reports whether the cursor is past the last character.
+func (i *InputLine) AtEnd() bool { return i.pos >= len(i.buf) }
 
 // Value returns the current buffer as a string.
 func (i *InputLine) Value() string { return string(i.buf) }

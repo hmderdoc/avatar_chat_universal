@@ -163,6 +163,14 @@ type App struct {
 	// ServerAddr is shown in the header stats line ("...| host:port").
 	ServerAddr string
 
+	// tooSmall is set while the terminal is below minCols x minRows; the
+	// screen then only says so (tooSmallShown once it has).
+	tooSmall, tooSmallShown bool
+
+	// InputMaxLength caps a typed line (the door ini's input_max_length;
+	// 0 keeps the input line's default).
+	InputMaxLength int
+
 	lastMotdRefresh time.Time
 
 	modalFrame  *ansi.Frame
@@ -313,6 +321,9 @@ func (a *App) layout() {
 		selfName = a.Session.Self.Name
 	}
 	a.transcript = NewTranscript(a.transcriptFrame, selfName)
+	if a.Session != nil && a.Session.Self != nil {
+		a.transcript.SelfHost = a.Session.Self.Host
+	}
 	a.transcript.Theme = th
 	a.transcript.Images = a.images
 	a.transcript.Cards = a.cards
@@ -320,11 +331,21 @@ func (a *App) layout() {
 		a.transcript.AudioLabel = a.mediaLabel // survive a re-layout (theme, resize)
 	}
 	a.inputLine = NewInputLine(a.inputFrame, "> ")
+	if a.InputMaxLength > 0 {
+		a.inputLine.MaxLength = a.InputMaxLength
+	}
 	a.inputLine.PromptAttr = th.InputPrompt
 	a.inputLine.TextAttr = th.InputText
 	a.inputLine.CursorAttr = th.InputCursor
 	a.inputLine.CompletionProvider = func() []string {
-		return a.Session.KnownNicks()
+		nicks := a.Session.KnownNicks()
+		out := nicks[:0]
+		for _, n := range nicks {
+			if !strings.EqualFold(n, a.selfName()) {
+				out = append(out, n)
+			}
+		}
+		return out
 	}
 
 	// Button attrs come from the theme (defaults to "futurewave"): faces
@@ -401,6 +422,15 @@ func (a *App) unreadChannels() int {
 	return a.Session.UnreadTotal()
 }
 
+// SetInputMaxLength caps a typed line at n characters (n <= 0 keeps the
+// default), now and after any re-layout.
+func (a *App) SetInputMaxLength(n int) {
+	a.InputMaxLength = n
+	if n > 0 && a.inputLine != nil {
+		a.inputLine.MaxLength = n
+	}
+}
+
 func (a *App) selfName() string {
 	if a.Session != nil && a.Session.Self != nil {
 		return a.Session.Self.Name
@@ -411,7 +441,7 @@ func (a *App) selfName() string {
 // fromOther reports whether m is a real message from someone else (not a
 // notice, not our own line echoed locally).
 func (a *App) fromOther(m *chat.Message) bool {
-	return m != nil && m.Nick != nil && m.Nick.Name != "" && !strings.EqualFold(m.Nick.Name, a.selfName())
+	return m != nil && m.Nick != nil && m.Nick.Name != "" && (a.Session == nil || !chat.SameUser(a.Session.Self, m.Nick))
 }
 
 // markActive records that something happened (input or new message), exits
@@ -711,6 +741,9 @@ func maxInt(a, b int) int {
 type reconnectState struct {
 	nextAttempt time.Time
 	delay       time.Duration
+	lostAt      time.Time  // when the drop was noticed
+	dialing     chan error // the background dial's result; nil when idle
+	failed      bool       // a retry has failed and said so
 }
 
 // Run is the main loop: drain chat updates, read keys, render. Returns when
@@ -730,6 +763,10 @@ func (a *App) Run(ctx context.Context) error {
 		a.setMouse(true)
 		defer a.setMouse(false)
 	}
+	// Pastes arrive bracketed, as one KeyPaste: several lines go into the
+	// input line instead of each being sent.
+	_, _ = a.Conn.Write([]byte(ansi.PasteOn))
+	defer a.Conn.Write([]byte(ansi.PasteOff))
 	a.lastSizeProbe = time.Now()
 	if err := ansi.ShowCursor(a.Conn); err != nil {
 		return err
@@ -770,7 +807,7 @@ func (a *App) Run(ctx context.Context) error {
 
 		// Maybe-reconnect: if the chat connection died, try to bring it
 		// back up with exponential backoff (1s, 2s, 4s, ... capped at 30s).
-		if !a.Session.IsAlive() {
+		if !a.Session.IsAlive() || reconnect.dialing != nil {
 			a.tryReconnect(ctx, &reconnect)
 		}
 
@@ -812,8 +849,13 @@ func (a *App) Run(ctx context.Context) error {
 			return err
 		}
 		if ok {
+			// The key that wakes the screensaver only wakes it: it isn't
+			// typed, and an Esc doesn't quit.
+			woke := a.idleAnim != nil && key.Type != ansi.KeyResize && key.Type != ansi.KeyPaste
 			a.markActive()
-			if exit, err := a.handleKey(key); err != nil {
+			if woke {
+				a.dirty = true
+			} else if exit, err := a.handleKey(key); err != nil {
 				return err
 			} else if exit {
 				return nil
@@ -934,6 +976,35 @@ func (a *App) handleKey(k ansi.Key) (exit bool, err error) {
 		return false, nil
 	}
 
+	// End at the end of the line (or an empty one) goes back to the latest
+	// messages; Home on an empty line goes to the oldest. Otherwise they
+	// move the input cursor.
+	if k.Type == ansi.KeyEnd && a.inputLine.AtEnd() && (a.transcript.Scroll > 0 || a.loungeActive() && a.tvShowTranscript) {
+		if a.loungeActive() {
+			a.hideLoungeHistory()
+		} else {
+			a.transcript.Scroll = 0
+		}
+		a.dirty = true
+		return false, nil
+	}
+	if k.Type == ansi.KeyHome && a.inputLine.Value() == "" && !a.loungeActive() {
+		a.transcript.Scroll = 1 << 30 // Render clamps it to the oldest row
+		a.dirty = true
+		return false, nil
+	}
+	if k.Type == ansi.KeyPaste {
+		if a.inputLine.Paste(k.Text) {
+			a.Session.Notice(fmt.Sprintf("paste cut to %d characters", a.inputLine.MaxLength))
+		}
+		a.dirty = true
+		return false, nil
+	}
+	if k.Type == ansi.KeyChar && k.Ctrl && k.Rune == 0x0C { // Ctrl-L: repaint the whole screen
+		a.forceFullRedraw()
+		a.dirty = true
+		return false, nil
+	}
 	if k.Type == ansi.KeyChar && k.Ctrl && k.Rune == 0x18 { // Ctrl-X
 		return true, nil
 	}
@@ -972,6 +1043,38 @@ func (a *App) handleKey(k ansi.Key) (exit bool, err error) {
 	return false, nil
 }
 
+// splitRecipient splits the text after /msg into the recipient and the
+// body. A name with spaces is either quoted ("Beta Tester" hi) or, unquoted,
+// the longest known name the text starts with; otherwise it's the first
+// word. The body keeps the user's own spacing.
+func splitRecipient(rest string, known []string) (name, body string) {
+	rest = strings.TrimLeft(rest, " \t")
+	if strings.HasPrefix(rest, `"`) {
+		if end := strings.Index(rest[1:], `"`); end >= 0 {
+			return strings.TrimSpace(rest[1 : end+1]), strings.TrimLeft(rest[end+2:], " \t")
+		}
+	}
+	for _, k := range known {
+		if strings.Contains(k, " ") && len(k) > len(name) && len(rest) > len(k) &&
+			strings.EqualFold(rest[:len(k)], k) && rest[len(k)] == ' ' {
+			name = rest[:len(k)]
+		}
+	}
+	if name == "" {
+		name, _, _ = strings.Cut(rest, " ")
+	}
+	return name, strings.TrimLeft(rest[len(name):], " \t")
+}
+
+// msgPrefix is the input line that starts a PM to name, quoted when the
+// name has spaces.
+func msgPrefix(name string) string {
+	if strings.ContainsAny(name, " \t") {
+		name = `"` + name + `"`
+	}
+	return "/msg " + name + " "
+}
+
 // handleSlashCommand intercepts /-prefixed input. Returns (exit, handled).
 // If handled is true, the message should NOT be sent to chat.
 func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
@@ -982,7 +1085,7 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 	if len(parts) == 0 {
 		return false, false
 	}
-	cmd := parts[0]
+	cmd := strings.ToLower(parts[0]) // caps lock is common on BBS terminals
 	switch cmd {
 	case "/quit", "/q", "/exit", "/bye":
 		return true, true
@@ -996,19 +1099,12 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 			a.Session.Notice(fmt.Sprintf("/me failed: %v", err))
 		}
 		return false, true
-	case "/msg", "/m":
-		if len(parts) < 3 {
-			a.Session.Notice("usage: /msg <user> <text>")
+	case "/msg", "/m", "/pm", "/tell", "/whisper", "/private":
+		recipient, body := splitRecipient(text[len(cmd):], a.Session.KnownNicks())
+		if recipient == "" || strings.TrimSpace(body) == "" {
+			a.Session.Notice(`usage: /msg <user> <text>  (quote a name with spaces: /msg "Beta Tester" hi)`)
 			return false, true
 		}
-		recipient := parts[1]
-		// Find where the message body starts in the original input so we
-		// preserve the user's exact spacing/punctuation.
-		bodyStart := len(cmd) + 1 + len(parts[1]) + 1
-		if bodyStart > len(text) {
-			bodyStart = len(text)
-		}
-		body := text[bodyStart:]
 		if err := a.Session.SendPrivate(recipient, body); err != nil {
 			a.Session.Notice(fmt.Sprintf("/msg failed: %v", err))
 		}
@@ -1049,7 +1145,7 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		}
 		a.openRoster(users)
 		return false, true
-	case "/img":
+	case "/img", "/image", "/pic":
 		a.openImageViewer()
 		return false, true
 	case "/join", "/j":
@@ -1169,7 +1265,7 @@ func (a *App) handleSlashCommand(text string) (exit bool, handled bool) {
 		a.openHelp()
 		return false, true
 	}
-	a.Session.Notice(fmt.Sprintf("unknown command: %s", cmd))
+	a.Session.Notice(fmt.Sprintf("unknown command: %s (/help lists them)", cmd))
 	return false, true
 }
 
@@ -1374,42 +1470,56 @@ func (a *App) handleTunerCmd(parts []string) {
 	}
 }
 
-// tryReconnect attempts to bring the chat session back up. The first time
-// the connection drops it logs a notice into the transcript; subsequent
-// retries are silent until success or final failure. Backoff doubles up
-// to 30s between attempts.
+// tryReconnect brings the chat session back up. The dial runs in the
+// background so typing, scrolling and quitting keep working while a dead
+// host times out; resubscribing and the catch-up run here once it lands.
+// The drop and the first failed retry are noted in the transcript, then
+// nothing until it's back. Backoff doubles up to 30s between attempts.
 func (a *App) tryReconnect(ctx context.Context, st *reconnectState) {
 	now := time.Now()
+	if st.dialing != nil {
+		select {
+		case err := <-st.dialing:
+			st.dialing = nil
+			if err == nil {
+				err = a.Session.Resume(st.lostAt)
+			}
+			if err != nil {
+				st.delay *= 2
+				if st.delay > 30*time.Second {
+					st.delay = 30 * time.Second
+				}
+				st.nextAttempt = now.Add(st.delay)
+				if !st.failed {
+					st.failed = true
+					a.Session.Notice(fmt.Sprintf("reconnect failed (%v), still trying", err))
+				}
+				a.dirty = true
+				return
+			}
+			*st = reconnectState{}
+			a.Session.Notice("reconnected")
+			a.dirty = true
+		default:
+		}
+		return
+	}
 	if !st.nextAttempt.IsZero() && now.Before(st.nextAttempt) {
 		return
 	}
-	first := st.delay == 0
-	if first {
+	if st.delay == 0 {
 		st.delay = time.Second
-		a.Session.OnNotice = func(string) {} // suppress notice spam during reconnect
+		st.lostAt = now
 		a.Session.Notice("connection lost, reconnecting...")
 		a.dirty = true
 	}
-	if err := a.Session.Reconnect(ctx); err != nil {
-		st.delay *= 2
-		if st.delay > 30*time.Second {
-			st.delay = 30 * time.Second
-		}
-		st.nextAttempt = now.Add(st.delay)
-		a.Session.Notice(fmt.Sprintf("reconnect failed (%v), retrying in %v", err, st.delay))
-		a.dirty = true
-		return
-	}
-	// Success.
-	st.delay = 0
-	st.nextAttempt = time.Time{}
-	a.Session.OnNotice = func(text string) {
-		a.Session.Notice(text)
-		a.dirty = true
-	}
-	a.Session.Notice("reconnected")
-	a.dirty = true
+	done := make(chan error, 1)
+	st.dialing = done
+	go func() { done <- a.Session.Redial(ctx) }()
 }
+
+// reconnecting reports whether the chat connection is down.
+func (a *App) reconnecting() bool { return a.Session != nil && !a.Session.IsAlive() }
 
 // openAvatarManager runs the unified /avatar UI: pick from library,
 // upload, disable, or future-editor. The OnAvatarPick callback owns the
@@ -1654,7 +1764,7 @@ func (a *App) afterModal(m modalView) (exit bool) {
 		return a.applyChannelChoice(m)
 	case *RosterModal:
 		if m.Msg != "" {
-			a.inputLine.SetValue("/msg " + m.Msg + " ")
+			a.inputLine.SetValue(msgPrefix(m.Msg))
 		}
 	}
 	return false
@@ -1861,6 +1971,9 @@ func (a *App) refreshHeader() {
 	}
 	a.header.StatsText = fmt.Sprintf("Avatar Chat | %s | users %d | joined %d | %s",
 		channel, users, joined, addr)
+	if a.reconnecting() {
+		a.header.StatsText = fmt.Sprintf("Avatar Chat | %s | reconnecting... | %s", channel, addr)
+	}
 	if a.Session != nil {
 		a.header.MotdText = a.Session.MotdText()
 	}
@@ -1919,6 +2032,14 @@ func (a *App) composeInto(w io.Writer) error {
 			return err
 		}
 		a.bellPending = false
+	}
+	if a.tooSmall {
+		if !a.tooSmallShown {
+			a.tooSmallShown = true
+			_, err := fmt.Fprintf(w, "\x1b[0m\x1b[2J\x1b[HWindow too small: chat needs %dx%d.\r\nMake it bigger to continue.", minCols, minRows)
+			return err
+		}
+		return nil
 	}
 	if a.imageViewer != nil {
 		if err := a.imageViewer.Render(w); err != nil {

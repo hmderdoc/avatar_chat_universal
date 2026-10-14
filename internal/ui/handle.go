@@ -33,6 +33,7 @@ func paintHandle(f *ansi.Frame, x, y int, name string, style *nickstyle.Style, b
 	if maxW <= 0 {
 		return 0
 	}
+	name = ansi.ToCP437(name, false)
 	if style.Wire() == nil {
 		if len(name) > maxW {
 			name = name[:maxW]

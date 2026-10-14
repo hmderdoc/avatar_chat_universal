@@ -9,6 +9,19 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ### Added
 
+- server: **history survives a restart.** `avatar_chat_server` saves its
+  store (history, room registry, TV state) to `-store`
+  (`chatserver-store.json`) a few seconds after changes and on shutdown,
+  and loads it at startup; `-max-history` (1000) caps each history list.
+- server: **flood control** for web users: per-connection limit on chat
+  messages (`-rate-burst` 10, `-rate-per-sec` 1); over it the page gets a
+  "slow down" ERROR. Doors and bridges (TCP) only with `-rate-tcp`.
+- server: **leave notices** when a connection drops, as if it had
+  unsubscribed (not while the same user is still on another connection).
+- server: a name a door or bridge uses (or used within `-bbs-name-days`,
+  90) can't be claimed by a new web user.
+- server: a packet line over 131072 bytes drops the TCP connection.
+
 - door: **raised buttons under the header**: Who, Rooms, Images,
   Settings, Help and Quit Esc on one row, each a coloured face with a
   half-block shadow (CP437 and UTF-8). A click shows the button pressed

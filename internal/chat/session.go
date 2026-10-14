@@ -105,7 +105,7 @@ func peerOf(n *Nick) Nick {
 
 // ignored reports whether m is from someone the user ignores.
 func (s *Session) ignored(m *Message) bool {
-	if s.Ignore == nil || m == nil || m.Nick == nil || s.isSelfName(m.Nick.Name) {
+	if s.Ignore == nil || m == nil || m.Nick == nil || s.isSelf(m.Nick) {
 		return false
 	}
 	return s.Ignore(m.Nick.Name, m.Str)
@@ -120,7 +120,7 @@ func (s *Session) Refilter() {
 	s.mu.Lock()
 	kept := s.messages[:0]
 	for _, m := range s.messages {
-		if m.Nick != nil && !s.isSelfName(m.Nick.Name) && s.Ignore(m.Nick.Name, m.Str) {
+		if m.Nick != nil && !s.isSelf(m.Nick) && s.Ignore(m.Nick.Name, m.Str) {
 			continue
 		}
 		kept = append(kept, m)
@@ -344,6 +344,13 @@ func (s *Session) rememberNick(n *Nick) {
 	}
 	key := strings.ToLower(n.Name)
 	s.mu.Lock()
+	// A web guest using the name of a BBS user we know doesn't take over
+	// that name: its avatar, host and style stay the BBS user's, and a PM
+	// to the name still reaches the BBS user.
+	if prev, ok := s.peers[key]; ok && prev.Mailbox == "" && peerOf(n).Mailbox != "" {
+		s.mu.Unlock()
+		return
+	}
 	s.nickNames[key] = n.Name
 	if n.Avatar != "" {
 		s.avatarCache[key] = n.Avatar
@@ -514,15 +521,19 @@ func (s *Session) IsAlive() bool {
 	return s.Client.IsAlive()
 }
 
-// Reconnect tears down the current TCP connection, dials again, and
-// re-subscribes to the configured channel and our personal mailbox. The
-// local message buffer is preserved so the user doesn't lose history.
-// Returns the freshly-opened updates channel so the App can re-bind its
-// drain loop.
-func (s *Session) Reconnect(ctx context.Context) error {
-	if err := s.Client.Reconnect(ctx); err != nil {
-		return err
-	}
+// Redial drops the current TCP connection and dials again. It only touches
+// the socket, so it may run off the main loop while the screen stays live;
+// call Resume on the main loop once it succeeds.
+func (s *Session) Redial(ctx context.Context) error {
+	return s.Client.Reconnect(ctx)
+}
+
+// Resume re-subscribes to every joined channel and our personal mailbox
+// after Redial, shows what was said in the viewed channel while we were
+// gone, and refreshes the roster. lostAt is when the drop was noticed; it
+// bounds the catch-up when none of our messages are in the recent history.
+// The local message buffer is preserved so the user doesn't lose history.
+func (s *Session) Resume(lostAt time.Time) error {
 	for _, ch := range s.Joined() {
 		if err := s.Client.Subscribe("chat", s.locMessages(ch)); err != nil {
 			return fmt.Errorf("resubscribe %s: %v", ch, err)
@@ -531,7 +542,95 @@ func (s *Session) Reconnect(ctx context.Context) error {
 	if s.Self != nil && s.Self.Name != "" {
 		_ = s.Client.Subscribe("chat", s.locMessages(s.Self.Name))
 	}
+	s.catchUp(lostAt)
+	s.announceRoster(s.Channel)
 	return nil
+}
+
+// mailboxCount is how much of our mailbox history LoadMailbox reads.
+const mailboxCount = 50
+
+// LoadMailbox shows the private messages that reached our mailbox's
+// history after since (epoch ms): the ones sent while no door of ours was
+// running. It returns how many it showed.
+func (s *Session) LoadMailbox(since int64) int {
+	if s.Self == nil || s.Self.Name == "" {
+		return 0
+	}
+	var hist []*Message
+	if err := s.Client.Slice("chat", s.locHistory(s.Self.Name), -mailboxCount, nil, LockRead, &hist); err != nil {
+		return 0
+	}
+	var waiting []*Message
+	for _, m := range hist {
+		if m != nil && m.Nick != nil && !s.isSelf(m.Nick) && m.Time > since {
+			waiting = append(waiting, m)
+		}
+	}
+	if len(waiting) == 0 {
+		return 0
+	}
+	what := "private messages"
+	if len(waiting) == 1 {
+		what = "private message"
+	}
+	s.appendNotice(fmt.Sprintf("\x01y%d %s while you were away:", len(waiting), what))
+	for _, m := range waiting {
+		s.handleUpdate(&Packet{Oper: "WRITE", Location: s.locMessages(s.Self.Name), Data: mustJSON(m)})
+	}
+	return len(waiting)
+}
+
+// catchUpCount is how much of the viewed channel's history Resume reads.
+const catchUpCount = 100
+
+// msgKey identifies a message across the live feed and history.
+func msgKey(m *Message) string {
+	name := ""
+	if m.Nick != nil {
+		name = m.Nick.Name
+	}
+	return fmt.Sprintf("%s\x00%d\x00%s", name, m.Time, m.Str)
+}
+
+// catchUp shows the messages that reached the viewed channel's history
+// after the newest one we already have, or, when none of ours is in that
+// stretch, the ones sent since lostAt.
+func (s *Session) catchUp(lostAt time.Time) {
+	var hist []*Message
+	if err := s.Client.Slice("chat", s.locHistory(s.Channel), -catchUpCount, nil, LockRead, &hist); err != nil {
+		s.appendNotice(fmt.Sprintf("couldn't load missed messages: %v", err))
+		return
+	}
+	have := map[string]bool{}
+	s.mu.Lock()
+	for _, m := range s.messages {
+		if m.Nick != nil {
+			have[msgKey(m)] = true
+		}
+	}
+	s.mu.Unlock()
+	start := -1
+	for i, m := range hist {
+		if m != nil && have[msgKey(m)] {
+			start = i + 1
+		}
+	}
+	since := lostAt.UnixNano() / 1000000
+	for i, m := range hist {
+		if m == nil || have[msgKey(m)] {
+			continue
+		}
+		if start >= 0 && i < start || start < 0 && m.Time < since {
+			continue
+		}
+		s.handleUpdate(&Packet{Oper: "WRITE", Location: s.locMessages(s.Channel), Data: mustJSON(m)})
+	}
+}
+
+func mustJSON(v interface{}) json.RawMessage {
+	b, _ := json.Marshal(v)
+	return b
 }
 
 // Close unsubscribes and disconnects.
@@ -637,6 +736,11 @@ func (s *Session) sendPrivateTo(recipient string, peer Nick, text string) error 
 	if s.OnMessage != nil {
 		s.OnMessage(&local)
 	}
+	// Nobody reading that mailbox: say so, so a PM to a mistyped or
+	// offline name isn't taken as delivered.
+	if who, err := s.Client.Who("chat", loc); err == nil && len(who) == 0 {
+		s.appendNotice(fmt.Sprintf("%s isn't online; they'll see it next time they're here.", recipient))
+	}
 	return nil
 }
 
@@ -732,7 +836,7 @@ func (s *Session) handleUpdate(pkt *Packet) {
 		}
 
 		// Track most recent PM sender so /r works.
-		if msg.Private && msg.Nick != nil && !s.isSelfName(msg.Nick.Name) {
+		if msg.Private && msg.Nick != nil && !s.isSelf(msg.Nick) {
 			p := peerOf(msg.Nick)
 			s.mu.Lock()
 			s.lastReply = msg.Nick.Name
@@ -765,9 +869,12 @@ func (s *Session) handleUpdate(pkt *Packet) {
 			s.OnMessage(&msg)
 		}
 	case "SUBSCRIBE":
-		var info struct{ Nick string `json:"nick"` }
+		var info struct {
+			Nick   string `json:"nick"`
+			System string `json:"system"`
+		}
 		_ = json.Unmarshal(pkt.Data, &info)
-		if info.Nick != "" && !s.isSelfName(info.Nick) {
+		if info.Nick != "" && !s.isSelfPresence(info.Nick, info.System) {
 			// \x02j marks this notice for the green-glow L→R sweep
 			// effect that the transcript renderer animates for ~2s.
 			if !s.ignoredName(info.Nick) {
@@ -778,9 +885,12 @@ func (s *Session) handleUpdate(pkt *Packet) {
 			s.mu.Unlock()
 		}
 	case "UNSUBSCRIBE":
-		var info struct{ Nick string `json:"nick"` }
+		var info struct {
+			Nick   string `json:"nick"`
+			System string `json:"system"`
+		}
 		_ = json.Unmarshal(pkt.Data, &info)
-		if info.Nick != "" && !s.isSelfName(info.Nick) {
+		if info.Nick != "" && !s.isSelfPresence(info.Nick, info.System) {
 			// \x02l marks this for the red-glow R→L sweep effect.
 			if !s.ignoredName(info.Nick) {
 				s.appendNotice("\x02l" + info.Nick + " has left.")
@@ -820,6 +930,29 @@ func (s *Session) appendNotice(text string) {
 // command results / errors into the transcript instead of a status bar.
 func (s *Session) Notice(text string) {
 	s.appendNotice(text)
+}
+
+// SameUser reports whether n is the user self describes. The name alone
+// isn't enough: a web guest can take a BBS user's name, but web messages
+// carry a name@origin mailbox and door messages never do; and a user of
+// the same name on another BBS has another host.
+func SameUser(self, n *Nick) bool {
+	if self == nil || n == nil || !strings.EqualFold(self.Name, n.Name) || n.Mailbox != "" {
+		return false
+	}
+	return n.Host == "" || self.Host == "" || strings.EqualFold(n.Host, self.Host)
+}
+
+// isSelf reports whether n is us (see SameUser).
+func (s *Session) isSelf(n *Nick) bool { return SameUser(s.Self, n) }
+
+// isSelfPresence reports whether a SUBSCRIBE/UNSUBSCRIBE by nick from
+// system is our own door's.
+func (s *Session) isSelfPresence(nick, system string) bool {
+	if !s.isSelfName(nick) {
+		return false
+	}
+	return system == "" || s.Self.Host == "" || strings.EqualFold(system, s.Self.Host)
 }
 
 func (s *Session) isSelfName(name string) bool {
@@ -882,6 +1015,12 @@ func (s *Session) JoinChannel(channel string, historyCount int) error {
 	if known := s.joinedName(channel); known != "" {
 		channel = known
 	} else {
+		if strings.Contains(channel, ".") {
+			return fmt.Errorf("room names can't contain dots")
+		}
+		if s.isMailbox(channel) {
+			return fmt.Errorf("%s is a user's private mailbox, not a room (use /msg)", channel)
+		}
 		if err := s.Client.Subscribe("chat", s.locMessages(channel)); err != nil {
 			return err
 		}
@@ -1018,6 +1157,33 @@ type RoomInfo struct {
 // roomListCap bounds the WHO round trips a /channels listing makes.
 const roomListCap = 40
 
+// isMailbox reports whether name, which isn't a registered public room, is
+// a user's private mailbox: a name we've seen someone use, or a channel
+// whose own namesake is subscribed to it. A member's PMs live in
+// channels.<alias>, so joining it as a room would show them to anyone.
+func (s *Session) isMailbox(name string) bool {
+	if keys, err := s.Client.Keys("chat", "public_channels"); err == nil {
+		for _, k := range keys {
+			if strings.EqualFold(k, name) {
+				return false
+			}
+		}
+	}
+	s.mu.Lock()
+	_, seen := s.nickNames[strings.ToLower(name)]
+	s.mu.Unlock()
+	if seen {
+		return true
+	}
+	entries, _ := s.Client.Who("chat", s.locMessages(name))
+	for _, e := range entries {
+		if strings.EqualFold(e.Nick, name) {
+			return true
+		}
+	}
+	return false
+}
+
 // Rooms lists the joined channels plus every public room the server
 // registers under public_channels (the registry the web chat writes when a
 // room is created), with live user counts. The MOTD channel is hidden.
@@ -1083,7 +1249,7 @@ func (s *Session) handleBackground(channel, leaf string, pkt *Packet) {
 	if err := json.Unmarshal(pkt.Data, &msg); err != nil {
 		return
 	}
-	if msg.Nick == nil || msg.Nick.Name == "" || s.isSelfName(msg.Nick.Name) || IsTunerMarker(msg.Str) {
+	if msg.Nick == nil || msg.Nick.Name == "" || s.isSelf(msg.Nick) || IsTunerMarker(msg.Str) {
 		return
 	}
 	s.rememberNick(msg.Nick)

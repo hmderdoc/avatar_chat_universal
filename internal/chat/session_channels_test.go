@@ -213,3 +213,87 @@ func TestMentionsName(t *testing.T) {
 		t.Error("missed the second occurrence")
 	}
 }
+
+// A member's PMs live in channels.<alias>, so /join <alias> must not open
+// them as a room, whether or not the joiner has seen that name talk.
+func TestSession_JoinRefusesAMailbox(t *testing.T) {
+	addr := startServer(t)
+	alice := connect(t, addr, "alice", "main")
+	// Bob's door, nick set as main.go does, is subscribed to channels.Bob.messages.
+	c := chat.NewClient(addr)
+	c.Nick = "Bob"
+	bob := chat.NewSession(c, &chat.Nick{Name: "Bob"}, "main")
+	if err := bob.Connect(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { bob.Close() })
+	if err := alice.JoinChannel("Bob", 50); err == nil || !strings.Contains(err.Error(), "mailbox") {
+		t.Fatalf("joining a member's mailbox: err = %v", err)
+	}
+	if err := alice.JoinChannel("a.b", 50); err == nil {
+		t.Fatal("joined a name with a dot")
+	}
+	if err := alice.JoinChannel("lobby", 50); err != nil {
+		t.Fatalf("joining a new room: %v", err)
+	}
+}
+
+// A web guest who takes a door user's name is not that user: the door user
+// doesn't see the guest's lines as their own, and a PM to the name still
+// reaches the door user, not the guest's web mailbox.
+func TestSession_WebGuestCantTakeADoorUsersName(t *testing.T) {
+	addr := startServer(t)
+	alice := connect(t, addr, "alice", "main")
+	alice.Self.Host = "AliceBBS"
+	bob := connect(t, addr, "bob", "main")
+	if err := alice.Send("the real alice"); err != nil {
+		t.Fatal(err)
+	}
+	if !cycleUntil(bob, func() bool { return transcriptHas(bob, "the real alice") }) {
+		t.Fatal("alice's line not delivered")
+	}
+	guest := chat.NewSession(chat.NewClient(addr), &chat.Nick{Name: "alice", Host: "Web", Mailbox: chat.MailboxFor("alice", "Web")}, "main")
+	if err := guest.Connect(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { guest.Close() })
+	if err := guest.Send("i am alice too"); err != nil {
+		t.Fatal(err)
+	}
+	if !cycleUntil(bob, func() bool { return transcriptHas(bob, "i am alice too") }) {
+		t.Fatal("guest line not delivered to bob")
+	}
+	if !cycleUntil(alice, func() bool { return transcriptHas(alice, "i am alice too") }) {
+		t.Fatal("the door user took the guest's line for their own echo")
+	}
+	if err := bob.SendPrivate("alice", "for the real one"); err != nil {
+		t.Fatal(err)
+	}
+	if !cycleUntil(alice, func() bool { return transcriptHas(alice, "for the real one") }) {
+		t.Fatal("PM to the name went to the web guest")
+	}
+	if chat.SameUser(alice.Self, &chat.Nick{Name: "Alice", Host: "Web", Mailbox: chat.MailboxFor("alice", "Web")}) {
+		t.Fatal("a web nick counted as the door user")
+	}
+	if !chat.SameUser(alice.Self, &chat.Nick{Name: "Alice", Host: "alicebbs"}) {
+		t.Fatal("own nick not recognised")
+	}
+}
+
+// A PM to a name nobody is reading says so.
+func TestSession_PMToOfflineNameSaysSo(t *testing.T) {
+	addr := startServer(t)
+	alice := connect(t, addr, "alice", "main")
+	if err := alice.SendPrivate("nobody", "hello?"); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, m := range alice.Messages() {
+		if m.Nick == nil && strings.Contains(m.Str, "nobody isn't online") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("no offline notice")
+	}
+}

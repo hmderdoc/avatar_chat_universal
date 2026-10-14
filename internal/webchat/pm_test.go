@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/hmderdoc/avatar_chat_universal/internal/chat"
+	"github.com/hmderdoc/avatar_chat_universal/internal/chatserver"
 )
 
 // claimAs claims nick with key and returns the CLAIM reply's data.
@@ -264,4 +265,76 @@ func TestForgedMailboxAndTargets(t *testing.T) {
 	// Before a claim nothing goes anywhere.
 	fresh := dialWS(t, f.ws, nil)
 	refusedWS(t, fresh, `{"scope":"chat","func":"QUERY","oper":"WRITE","location":"channels.bob.messages","data":{"str":"x"}}`, "claim a nickname first")
+}
+
+// A name a door uses on the local chat server can't be claimed by a new
+// browser, connected or (within the retention) not; a browser that held
+// it first keeps it.
+func TestClaimRefusesDoorName(t *testing.T) {
+	f := startFront(t, false, nil, nil)
+	keep := dialWS(t, f.ws, nil)
+	if r := claimAs(t, keep, "Early Bird", strings.Repeat("e", 40)); !strings.Contains(r, `"ok":true`) {
+		t.Fatalf("early claim: %s", r)
+	}
+
+	d := door(t, f.tcp, "Sysop Sam")
+	early := door(t, f.tcp, "early bird")
+	_, _ = d.Who("chat", mainLoc) // the SUBSCRIBEs have landed
+	_, _ = early.Who("chat", mainLoc)
+
+	ws := dialWS(t, f.ws, nil)
+	r := claimAs(t, ws, "SYSOP SAM", strings.Repeat("g", 40))
+	if !strings.Contains(r, `"reason":"taken"`) || !strings.Contains(r, `"detail":"bbs"`) {
+		t.Fatalf("door's name: %s", r)
+	}
+	again := dialWS(t, f.ws, nil)
+	if r := claimAs(t, again, "Early Bird", strings.Repeat("e", 40)); !strings.Contains(r, `"ok":true`) {
+		t.Fatalf("holder lost its name to a door: %s", r)
+	}
+
+	// Gone, but seen lately: still refused.
+	d.Close()
+	time.Sleep(100 * time.Millisecond)
+	ws2 := dialWS(t, f.ws, nil)
+	if r := claimAs(t, ws2, "sysop sam", strings.Repeat("h", 40)); !strings.Contains(r, `"reason":"taken"`) {
+		t.Fatalf("recent door name: %s", r)
+	}
+	// Web users' own names never count as a door's.
+	ws3 := dialWS(t, f.ws, nil)
+	subscribe(t, ws3, "webonly")
+	next(t, ws3, "RESPONSE", "SUBSCRIBE")
+	if f.chat.BBSName("webonly") {
+		t.Fatal("a web user's name was recorded as a door's")
+	}
+}
+
+// A browser that floods the room gets the chat server's "slow down"
+// ERROR (by default, unlike a door), and a browser that goes away is
+// announced as leaving.
+func TestWebFloodAndLeave(t *testing.T) {
+	f := startFront(t, false, nil, nil)
+	d := door(t, f.tcp, "watcher")
+	ws := dialWS(t, f.ws, nil)
+	subscribe(t, ws, "flooder")
+	next(t, ws, "RESPONSE", "SUBSCRIBE")
+	update(t, d, "SUBSCRIBE")
+	for i := 0; i < chatserver.DefaultRateBurst+2; i++ {
+		put(t, ws, `{"scope":"chat","func":"QUERY","oper":"WRITE","location":"`+mainLoc+`","data":{"str":"spam"}}`)
+	}
+	if p := next(t, ws, "ERROR", ""); !strings.Contains(string(p.Data), "slow down") {
+		t.Fatalf("flood: %s", p.Data)
+	}
+	// The door, sending as much, is not limited.
+	for i := 0; i < chatserver.DefaultRateBurst+5; i++ {
+		if err := d.Write("chat", mainLoc, map[string]string{"str": "door"}, chat.LockWrite); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := d.Who("chat", mainLoc); err != nil {
+		t.Fatalf("door after a burst: %v", err) // a queued ERROR would surface here
+	}
+	ws.Close()
+	if u := update(t, d, "UNSUBSCRIBE"); !strings.Contains(string(u.Data), `"flooder"`) {
+		t.Fatalf("leave notice: %s", u.Data)
+	}
 }

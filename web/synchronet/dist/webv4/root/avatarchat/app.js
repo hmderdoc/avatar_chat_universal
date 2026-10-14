@@ -191,7 +191,25 @@
        (webprefs record), as the page was served. */
     var joinedRooms = Array.isArray(pageConfig.joinedRooms) ? pageConfig.joinedRooms.slice() : [];
     var messageContainer = document.getElementById('avatar-chat-messages');
-    var form = document.getElementById('avatar-chat-form');
+    /* Following the room: pinned while the reader is at the bottom; only
+       scrolling up unpins, their own send pins again. readingAnchor is the
+       first visible message (and its offset) while they read history. */
+    var SCROLL_PIN_GAP = 32;
+    var scrollPinned = true;
+    var lastScrollTop = 0;
+    var readingAnchor = null;
+    var pendingScrollFrame = 0;
+    var contentObserver = null;
+    /* The last transcript markup and the view it was for: an unchanged
+       transcript is left alone, so playing media, a selection and revealed
+       pictures survive the reconcile tick. */
+    var renderedHtml = null;
+    var renderedViewKey = '';
+    var revealedMedia = {}; /* message key + picture URL -> revealed */
+    var hiddenUnread = 0;
+    var titleBase = document.title;
+    var textSendBusy = false;
+    var form =document.getElementById('avatar-chat-form');
     var fileInput = document.getElementById('avatar-chat-file');
     var attachButton = document.getElementById('avatar-chat-attach');
     var drawButton = document.getElementById('avatar-chat-draw');
@@ -1631,6 +1649,7 @@
             if (html.length) {
                 el.innerHTML = html;
                 el.classList.add('is-ready');
+                applyReveals(el);
             } else {
                 el.remove();
             }
@@ -1655,6 +1674,7 @@
             }).then(function () {
                 delete cardWaiting[url];
                 fillCards(messageContainer, url);
+                onContentResized();
             });
         });
     }
@@ -2952,9 +2972,25 @@
         var previousSender = '';
         var previousTime = 0;
         var groupWindow = 120000;
+        var keyCounts = {};
+        var viewKey = currentViewKey();
+        var anchor;
+        var previousTop;
+
+        /* another room or thread opens at its newest message */
+        if (viewKey !== renderedViewKey) {
+            renderedViewKey = viewKey;
+            renderedHtml = null;
+            scrollPinned = true;
+            readingAnchor = null;
+        }
 
         if (!messages.length) {
-            messageContainer.innerHTML = '<div class="avatar-chat-empty">No messages yet. Say hello.</div>';
+            html = '<div class="avatar-chat-empty">No messages yet. Say hello.</div>';
+            if (html !== renderedHtml) {
+                messageContainer.innerHTML = html;
+                renderedHtml = html;
+            }
             return;
         }
 
@@ -2964,20 +3000,15 @@
                 displaySender = 'Image';
             }
             var isSystem = !displaySender;
-            var isSelf = !!message.isSelf;
+            var isSelf = isOwnMessage(message, displaySender);
+            var mkeyAttr = ' data-mkey="' + escapeAttr(messageKey(message, keyCounts)) + '"';
             var sameGroup = displaySender === previousSender && Math.abs((message.timestamp || 0) - previousTime) < groupWindow;
             var avatarInitial = displaySender ? displaySender.charAt(0).toUpperCase() : '?';
-
-            if (!isSelf && pageConfig.userAlias) {
-                isSelf =
-                    normalizeUpper(displaySender) === normalizeUpper(pageConfig.userAlias) &&
-                    (!message.system || !pageConfig.systemName || normalizeUpper(message.system) === normalizeUpper(pageConfig.systemName));
-            }
 
             var actorAttrs = buildActorAttrs(message, isSelf);
 
             if (isSystem) {
-                html += '<div class="avatar-chat-system">' + escapeHtml(message.text || '') + '</div>';
+                html += '<div class="avatar-chat-system"' + mkeyAttr + '>' + escapeHtml(message.text || '') + '</div>';
                 previousSender = '';
                 previousTime = 0;
                 return;
@@ -3023,9 +3054,9 @@
             }
 
             if (message.kind === 'bitmap' && message.bitmapKey) {
-                html += '<div class="avatar-chat-bubble avatar-chat-bitmap-bubble">' + renderBitmapBubble(message) + '</div>';
+                html += '<div class="avatar-chat-bubble avatar-chat-bitmap-bubble"' + mkeyAttr + '>' + renderBitmapBubble(message) + '</div>';
             } else {
-                html += '<div class="avatar-chat-bubble' + (!isSelf && mentionsMe(message.text || '') && activeView.type !== 'private' ? ' is-mention' : '') + '">' +
+                html += '<div class="avatar-chat-bubble' + (!isSelf && mentionsMe(message.text || '') && activeView.type !== 'private' ? ' is-mention' : '') + '"' + mkeyAttr + '>' +
                     renderRichText(message.text || '') + '</div>';
             }
             previousSender = displaySender;
@@ -3036,19 +3067,197 @@
             html += '</div></div>';
         }
 
+        if (html === renderedHtml) {
+            /* nothing changed: keep the DOM, finish what is still loading */
+            hydrateRichText(messageContainer);
+            renderEmbeddedAvatars(messageContainer);
+            fetchMissingAvatars(messageContainer);
+            renderAvatarFallbacks(messageContainer);
+            scrollToBottom();
+            return;
+        }
+
+        anchor = scrollPinned ? null : captureScrollAnchor();
+        previousTop = messageContainer.scrollTop;
         messageContainer.innerHTML = html;
+        renderedHtml = html;
+        applyReveals(messageContainer);
         hydrateRichText(messageContainer);
         renderEmbeddedAvatars(messageContainer);
         renderEmbeddedBitmaps(messageContainer);
         fetchMissingAvatars(messageContainer);
         renderAvatarFallbacks(messageContainer);
-        scrollToBottom();
+        if (scrollPinned) {
+            scrollToBottom();
+        } else {
+            /* the raw offset is the fallback when the anchor was evicted */
+            messageContainer.scrollTop = previousTop;
+            restoreScrollAnchor(anchor);
+            readingAnchor = captureScrollAnchor();
+        }
+        observeContent();
     }
 
-    function scrollToBottom() {
-        requestAnimationFrame(function () {
-            messageContainer.scrollTop = messageContainer.scrollHeight;
+    function currentViewKey() {
+        return activeView.type === 'private' ? 'private|' + currentPrivateThreadKey() : 'channel|' + normalizeUpper(activeView.name);
+    }
+
+    function isOwnMessage(message, displaySender) {
+        if (message.isSelf) {
+            return true;
+        }
+        return !!pageConfig.userAlias &&
+            normalizeUpper(displaySender) === normalizeUpper(pageConfig.userAlias) &&
+            (!message.system || !pageConfig.systemName || normalizeUpper(message.system) === normalizeUpper(pageConfig.systemName));
+    }
+
+    /* A message's place in the transcript that survives a rebuild (and the
+       200-message cap evicting the oldest): who, when and how it starts,
+       numbered when that repeats. */
+    function messageKey(message, counts) {
+        var base = String(message.timestamp || 0) + '|' + String(message.sender || '') + '|' +
+            String(message.system || '') + '|' + String(message.text || '').slice(0, 64);
+        counts[base] = (counts[base] || 0) + 1;
+        return base + '#' + counts[base];
+    }
+
+    /* A picture revealed once stays revealed when the transcript is rebuilt. */
+    function revealKey(el) {
+        var owner = el.closest ? el.closest('[data-mkey]') : null;
+        return (owner ? owner.getAttribute('data-mkey') : '') + '|' + (el.getAttribute('href') || el.getAttribute('src') || '');
+    }
+
+    function applyReveals(root) {
+        root.querySelectorAll('.is-veiled').forEach(function (el) {
+            if (revealedMedia[revealKey(el)]) {
+                el.classList.remove('is-veiled');
+            }
         });
+    }
+
+    function bottomGap() {
+        return Math.max(0, messageContainer.scrollHeight - messageContainer.clientHeight - messageContainer.scrollTop);
+    }
+
+    function jumpToBottom() {
+        messageContainer.scrollTop = messageContainer.scrollHeight;
+    }
+
+    /* Only while pinned. A second frame catches avatars and pictures that
+       settle their size in between. */
+    function scrollToBottom() {
+        if (!scrollPinned) {
+            return;
+        }
+        if (pendingScrollFrame) {
+            cancelAnimationFrame(pendingScrollFrame);
+        }
+        pendingScrollFrame = requestAnimationFrame(function () {
+            pendingScrollFrame = 0;
+            if (!scrollPinned) {
+                return;
+            }
+            jumpToBottom();
+            requestAnimationFrame(function () {
+                if (scrollPinned) {
+                    jumpToBottom();
+                }
+            });
+        });
+    }
+
+    /* Reaching the bottom pins; scrolling up away from it unpins. A downward
+       scroll that stops short leaves the pin alone: the pane can shrink
+       under a pinned reader (keyboard, upload chip) with no scroll event,
+       and nudging down through that gap is not asking to stop following. */
+    function onMessageScroll() {
+        var top = messageContainer.scrollTop;
+        var scrolledUp = top < lastScrollTop;
+
+        lastScrollTop = top;
+        if (bottomGap() <= SCROLL_PIN_GAP) {
+            scrollPinned = true;
+            readingAnchor = null;
+        } else if (scrolledUp && scrollPinned) {
+            scrollPinned = false;
+            if (pendingScrollFrame) {
+                cancelAnimationFrame(pendingScrollFrame);
+                pendingScrollFrame = 0;
+            }
+            readingAnchor = captureScrollAnchor();
+        } else if (!scrollPinned) {
+            readingAnchor = captureScrollAnchor();
+        }
+    }
+
+    function captureScrollAnchor() {
+        var top = messageContainer.getBoundingClientRect().top;
+        var nodes = messageContainer.querySelectorAll('[data-mkey]');
+        var rect;
+        var i;
+
+        for (i = 0; i < nodes.length; i += 1) {
+            rect = nodes[i].getBoundingClientRect();
+            if (rect.bottom > top) {
+                return { key: nodes[i].getAttribute('data-mkey'), delta: rect.top - top };
+            }
+        }
+        return null;
+    }
+
+    function restoreScrollAnchor(anchor) {
+        var nodes;
+        var i;
+
+        if (!anchor) {
+            return false;
+        }
+        nodes = messageContainer.querySelectorAll('[data-mkey]');
+        for (i = 0; i < nodes.length; i += 1) {
+            if (nodes[i].getAttribute('data-mkey') === anchor.key) {
+                messageContainer.scrollTop += nodes[i].getBoundingClientRect().top - messageContainer.getBoundingClientRect().top - anchor.delta;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /* Pictures, cards and avatars grow after a render, and the pane itself
+       shrinks for the keyboard or an upload chip: keep the bottom in view
+       while pinned, the reader's message in place otherwise. */
+    function onContentResized() {
+        if (scrollPinned) {
+            jumpToBottom();
+        } else if (readingAnchor) {
+            restoreScrollAnchor(readingAnchor);
+        }
+    }
+
+    function observeContent() {
+        var i;
+
+        if (!contentObserver) {
+            return;
+        }
+        contentObserver.disconnect();
+        contentObserver.observe(messageContainer);
+        for (i = 0; i < messageContainer.children.length; i += 1) {
+            contentObserver.observe(messageContainer.children[i]);
+        }
+    }
+
+    /* Messages that arrive while the tab is hidden count in its title. */
+    function noteHiddenMessage(message) {
+        var sender = message.sender || message.bitmapFromName || '';
+
+        if (!document.hidden || !sender || isOwnMessage(message, sender)) {
+            return;
+        }
+        if (!hiddenUnread) {
+            titleBase = document.title;
+        }
+        hiddenUnread += 1;
+        document.title = '(' + hiddenUnread + ') ' + titleBase;
     }
 
     function applyRoomSummaries(summaries, serverTime) {
@@ -3534,6 +3743,7 @@
                         messages.shift();
                     }
                     unreadChannels[normalizeUpper(payload.channel || currentPublicChannel)] = 0;
+                    noteHiddenMessage(payload);
                     renderMessages();
                 } else {
                     unreadChannels[normalizeUpper(payload.channel || currentPublicChannel)] = (unreadChannels[normalizeUpper(payload.channel || currentPublicChannel)] || 0) + 1;
@@ -3584,6 +3794,7 @@
                         messages.shift();
                     }
                     unreadPrivate[threadKey] = 0;
+                    noteHiddenMessage(payload);
                     renderMessages();
                 } else {
                     unreadPrivate[threadKey] = (unreadPrivate[threadKey] || 0) + 1;
@@ -4094,6 +4305,28 @@
         if (veiled) {
             event.preventDefault();
             veiled.classList.remove('is-veiled');
+            revealedMedia[revealKey(veiled)] = true;
+        }
+    });
+
+    messageContainer.addEventListener('scroll', onMessageScroll, { passive: true });
+    if (window.ResizeObserver) {
+        contentObserver = new ResizeObserver(onContentResized);
+        observeContent();
+    } else {
+        /* no ResizeObserver: pictures loading and the window resizing are
+           what move the bottom */
+        messageContainer.addEventListener('load', onContentResized, true);
+        window.addEventListener('resize', onContentResized);
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', onContentResized);
+        }
+    }
+
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden && hiddenUnread) {
+            hiddenUnread = 0;
+            document.title = titleBase;
         }
     });
 
@@ -4730,15 +4963,29 @@
                 return;
             }
 
+            /* Enter again while the POST is out would send it twice */
+            if (!pendingUpload && textSendBusy) {
+                return;
+            }
+
             outgoing = pendingUpload ? pendingUpload.payload : text;
             if (pendingUpload) {
                 ansiUploadBusy = true;
                 ansiUploadMessage = 'Sending ' + pendingUpload.fileName + '...';
                 ansiUploadMessageType = 'busy';
                 renderAnsiUploadState();
+            } else {
+                textSendBusy = true;
             }
+            /* speaking follows the room again */
+            scrollPinned = true;
+            readingAnchor = null;
+            scrollToBottom();
 
             sendActiveMessage(outgoing).then(function (response) {
+                if (!pendingUpload) {
+                    textSendBusy = false;
+                }
                 if (response && response.error) {
                     if (pendingUpload) {
                         ansiUploadBusy = false;
@@ -4751,11 +4998,15 @@
                 }
                 if (pendingUpload) {
                     clearPendingAnsiUpload();
-                } else {
+                } else if (trimText(input.value) === text) {
+                    /* (unless they already typed the next one) */
                     input.value = '';
                 }
                 scheduleHistoryRefresh();
             }).catch(function () {
+                if (!pendingUpload) {
+                    textSendBusy = false;
+                }
                 if (pendingUpload) {
                     ansiUploadBusy = false;
                     ansiUploadMessage = '';

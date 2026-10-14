@@ -240,14 +240,21 @@ func (p *policy) slice(pkt *packet) string {
 
 // claim handles SOCKET CLAIM {nick, key} and returns the reply, a SOCKET
 // CLAIM packet with {ok, nick} or {ok: false, reason: "invalid" | "taken"
-// | "limit" | "error" | "fixed"}.
+// | "limit" | "error" | "fixed"}. A name a door or bridge uses is
+// "taken" with detail "bbs", so pages that only know "taken" still say
+// the right thing.
 func (p *policy) claim(raw json.RawMessage) []byte {
 	var in struct {
 		Nick string `json:"nick"`
 		Key  string `json:"key"`
 	}
+	detail := ""
 	reply := func(ok bool, reason string) []byte {
-		data, _ := json.Marshal(map[string]interface{}{"ok": ok, "nick": p.nick, "reason": reason})
+		out := map[string]interface{}{"ok": ok, "nick": p.nick, "reason": reason}
+		if detail != "" {
+			out["detail"] = detail
+		}
+		data, _ := json.Marshal(out)
 		b, _ := json.Marshal(packet{Scope: "SOCKET", Func: "CLAIM", Data: data})
 		return b
 	}
@@ -269,6 +276,10 @@ func (p *policy) claim(raw json.RawMessage) []byte {
 		p.nick = n
 		return reply(true, "")
 	case claimTaken:
+		return reply(false, "taken")
+	case claimReserved:
+		p.srv.Logger.Printf("web: %s asked for %q, a BBS user's name; refused", p.ip, n)
+		detail = "bbs"
 		return reply(false, "taken")
 	case claimLimit:
 		return reply(false, "limit")

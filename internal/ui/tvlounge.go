@@ -526,19 +526,12 @@ func (a *App) putNick(f *ansi.Frame, x, row int, nick string, n *chat.Nick, with
 	return x + paintHandle(f, x, row, nick, st, a.theme().TVChat, f.W-x, a.tvColorTrue())
 }
 
-// putStr writes s at (x,row) in CP437 bytes (non-ASCII -> '?'), clipped to the
-// frame width, and returns the next x.
+// putStr writes s at (x,row) in CP437 bytes (see ansi.ToCP437), clipped to
+// the frame width, and returns the next x.
 func putStr(f *ansi.Frame, x, row int, s string, attr ansi.Attr) int {
-	for _, r := range s {
+	for _, c := range []byte(ansi.ToCP437(s, false)) {
 		if x >= f.W {
 			break
-		}
-		c := byte('?')
-		if r < 128 {
-			c = byte(r)
-			if c < 0x20 {
-				c = ' '
-			}
 		}
 		f.SetCell(x, row, c, attr)
 		x++

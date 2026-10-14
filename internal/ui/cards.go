@@ -8,6 +8,7 @@ import (
 
 	"github.com/hmderdoc/shadecell"
 
+	"github.com/hmderdoc/avatar_chat_universal/internal/ansi"
 	"github.com/hmderdoc/avatar_chat_universal/internal/audiolink"
 	"github.com/hmderdoc/avatar_chat_universal/internal/inlineimg"
 	"github.com/hmderdoc/avatar_chat_universal/internal/linkprev"
@@ -280,12 +281,12 @@ func layoutCard(v cardView, width int) cardLayout {
 			return cardLayout{}
 		}
 		if h := cardHost(v.meta); h != "" {
-			l.lines = append(l.lines, cardLine{clip(h, textW), 's'})
+			l.lines = append(l.lines, cardLine{clip(ansi.ToCP437(h, false), textW), 's'})
 		}
-		for _, s := range capLines(wrapText(v.meta.Title, textW), cardTitleRows, textW) {
+		for _, s := range capLines(wrapText(ansi.ToCP437(v.meta.Title, false), textW), cardTitleRows, textW) {
 			l.lines = append(l.lines, cardLine{s, 't'})
 		}
-		for _, s := range capLines(wrapText(v.meta.Description, textW), cardDescRows, textW) {
+		for _, s := range capLines(wrapText(ansi.ToCP437(v.meta.Description, false), textW), cardDescRows, textW) {
 			l.lines = append(l.lines, cardLine{s, 'd'})
 		}
 	}

@@ -28,12 +28,25 @@ type Transcript struct {
 	// oldest row.
 	Scroll int
 
+	// NewBelow counts the messages that arrived below the view while
+	// scrolled back; it clears once the view is back at the latest.
+	NewBelow int
+
+	// What the last Render laid out, so lines arriving while scrolled
+	// back can push Scroll up by their height and the view stays put.
+	lastTotal       int
+	lastW           int
+	lastFirst, lastLast *chat.Message
+
 	// Reserve is how many rows at the bottom of the frame Render leaves
 	// for something drawn over them (the TV lounge's caption bar): the
 	// newest line sits above them.
 	Reserve int
 
 	SelfName string
+	// SelfHost is our BBS; with SelfName it tells our own lines from a web
+	// guest's or another BBS's user of the same name (chat.SameUser).
+	SelfHost string
 
 	// Theme drives bubble + header colors. Required; the App fills this
 	// from its loaded theme.
@@ -207,6 +220,7 @@ func (t *Transcript) Render(messages []*chat.Message) {
 		total += b.height()
 	}
 	viewH := t.Frame.H - t.Reserve
+	t.holdPlace(messages, total, bubbleW)
 	if oldest := total - viewH; t.Scroll > oldest {
 		t.Scroll = oldest
 	}
@@ -223,6 +237,49 @@ func (t *Transcript) Render(messages []*chat.Message) {
 		}
 		t.renderBlock(b, y)
 	}
+	if t.Scroll > 0 {
+		t.paintBackBar(viewH - 1)
+	}
+}
+
+// holdPlace keeps a scrolled-back view on the lines being read when new
+// ones arrive below: Scroll counts rows up from the newest, so it grows by
+// the rows added. It only does so when the oldest message is the same and
+// the width hasn't changed (a trimmed buffer, a new room or a resize has
+// no simple offset; the view then keeps its distance from the bottom).
+func (t *Transcript) holdPlace(messages []*chat.Message, total, width int) {
+	first, last := messages[0], messages[len(messages)-1]
+	if t.Scroll > 0 && first == t.lastFirst && width == t.lastW && last != t.lastLast && total > t.lastTotal {
+		t.Scroll += total - t.lastTotal
+		for i := len(messages) - 1; i >= 0 && messages[i] != t.lastLast; i-- {
+			if messages[i].Nick != nil {
+				t.NewBelow++
+			}
+		}
+	}
+	if t.Scroll == 0 {
+		t.NewBelow = 0
+	}
+	t.lastTotal, t.lastW, t.lastFirst, t.lastLast = total, width, first, last
+}
+
+// paintBackBar marks a scrolled-back view on its bottom row: how far back
+// it is, what arrived since, and how to get back.
+func (t *Transcript) paintBackBar(row int) {
+	if row < 0 {
+		return
+	}
+	text := fmt.Sprintf(" History: %d rows back", t.Scroll)
+	if t.NewBelow > 0 {
+		text += fmt.Sprintf(" | %d new", t.NewBelow)
+	}
+	text += " | End: latest "
+	attr := ansi.Black | ansi.BgLightGray
+	if t.Theme != nil {
+		attr = t.Theme.StripPill
+	}
+	x := max(0, (t.Frame.W-len(text))/2)
+	t.Frame.PrintAt(x, row, []byte(truncate(text, t.Frame.W)), attr)
 }
 
 // PageRows is how far one PgUp/PgDn moves: a page less two rows of overlap,
@@ -258,7 +315,7 @@ func (t *Transcript) buildBlocks(messages []*chat.Message, bubbleW int) []*block
 
 		// Notice / system / /me action: nick is nil or empty.
 		if msg.Nick == nil || msg.Nick.Name == "" {
-			text := msg.Str
+			text := ansi.ToCP437(msg.Str, true)
 			b := &block{notice: true, effectStart: msg.Time}
 			// Detect leading \x02<code> marker for sweep animations.
 			if len(text) >= 2 && text[0] == 0x02 {
@@ -270,7 +327,7 @@ func (t *Transcript) buildBlocks(messages []*chat.Message, bubbleW int) []*block
 			continue
 		}
 
-		left := !strings.EqualFold(msg.Nick.Name, t.SelfName)
+		left := !chat.SameUser(&chat.Nick{Name: t.SelfName, Host: t.SelfHost}, msg.Nick)
 		stamp := relativeStamp(msg.Time)
 
 		// Coalesce with previous block if same sender, same side, AND same
@@ -280,7 +337,7 @@ func (t *Transcript) buildBlocks(messages []*chat.Message, bubbleW int) []*block
 			prev.stamp = stamp
 			prev.style = msg.Nick.Style
 			prev.addRows([]string{""}, false)
-			prev.addRows(wrapText(msg.Str, bubbleW), left && chat.MentionsName(msg.Str, t.SelfName))
+			prev.addRows(wrapText(ansi.ToCP437(msg.Str, false), bubbleW), left && chat.MentionsName(msg.Str, t.SelfName))
 			t.addPictures(prev, msg)
 			t.addCard(prev, msg)
 			t.addAudio(prev, msg)
@@ -293,10 +350,10 @@ func (t *Transcript) buildBlocks(messages []*chat.Message, bubbleW int) []*block
 			speaker: msg.Nick.Name,
 			style:   msg.Nick.Style,
 			stamp:   stamp,
-			host:    msg.Nick.Host,
+			host:    ansi.ToCP437(msg.Nick.Host, false),
 			width:   bubbleW,
 		}
-		b.addRows(wrapText(msg.Str, bubbleW), left && chat.MentionsName(msg.Str, t.SelfName))
+		b.addRows(wrapText(ansi.ToCP437(msg.Str, false), bubbleW), left && chat.MentionsName(msg.Str, t.SelfName))
 		t.addPictures(b, msg)
 		t.addCard(b, msg)
 		t.addAudio(b, msg)

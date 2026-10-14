@@ -213,6 +213,10 @@ func (c *Client) Keys(scope, location string) ([]string, error) {
 func (c *Client) query(p *Packet) (*Packet, error) {
 	c.queryMu.Lock()
 	defer c.queryMu.Unlock()
+	// Anything queued before we ask isn't our answer: acks of earlier
+	// fire-and-forget writes, or an ERROR one of them drew (a server's
+	// "slow down"), which would otherwise fail this query.
+	c.conn.DrainResponses()
 	if err := c.conn.Send(p); err != nil {
 		return nil, err
 	}

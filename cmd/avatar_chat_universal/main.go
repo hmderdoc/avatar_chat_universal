@@ -341,16 +341,43 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	if err := session.Connect(ctx, cfg.MaxHistory); err != nil {
-		fmt.Fprintf(conn, "Could not connect: %v\r\n", err)
-		fmt.Fprintf(conn, "Press any key to exit.\r\n")
-		_, _, _ = input.Next(30 * time.Second)
-		return nil
+	// The chat server may be restarting: keep trying for a couple of
+	// minutes, backing off, with any key giving up.
+	for delay, waited := 2*time.Second, time.Duration(0); ; delay = min(delay*2, 30*time.Second) {
+		err := session.Connect(ctx, cfg.MaxHistory)
+		if err == nil {
+			break
+		}
+		if waited >= 2*time.Minute {
+			fmt.Fprintf(conn, "Could not connect: %v\r\nPress any key to exit.\r\n", err)
+			_, _, _ = input.Next(30 * time.Second)
+			return nil
+		}
+		fmt.Fprintf(conn, "Could not connect: %v\r\nTrying again in %v; press any key to give up.\r\n", err, delay)
+		if _, ok, err := input.Next(delay); ok || err != nil {
+			return nil // a key, or the caller hung up
+		}
+		waited += delay
 	}
 	defer session.Close()
 
+	// Private messages sent while this user had no door running: the ones
+	// newer than when they last left (a day back on a first visit).
+	// pm_seen moves to now on the way in and again on the way out.
+	pmSeen, _ := strconv.ParseInt(userPrefs.Get(user.DisplayName(), "pm_seen"), 10, 64)
+	if pmSeen == 0 {
+		pmSeen = time.Now().Add(-24*time.Hour).UnixMilli()
+	}
+	session.LoadMailbox(pmSeen)
+	markPMsSeen := func() {
+		_ = userPrefs.Set(user.DisplayName(), "pm_seen", strconv.FormatInt(time.Now().UnixMilli(), 10))
+	}
+	markPMsSeen()
+	defer markPMsSeen()
+
 	app := ui.NewApp(conn, input, session, cols, rows, charset)
 	app.ServerAddr = addr
+	app.SetInputMaxLength(cfg.InputMaxLength)
 	app.IdleEnabled = cfg.IdleEnabled
 	if cfg.IdleTimeoutSeconds > 0 {
 		app.IdleTimeout = time.Duration(cfg.IdleTimeoutSeconds) * time.Second

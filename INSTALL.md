@@ -310,8 +310,39 @@ port = 10088
 
 Users on either door, both pointed at your server, share channels.
 
-State is in-memory only for now; restart the server and history is gone.
-Persist-to-disk is on the roadmap.
+Chat history, the room registry (`public_channels`), TV tuner state and
+the names doors and bridges use are saved to `-store` (default
+`chatserver-store.json` in the server's working directory, next to
+`web_claims.txt`), a few seconds after a change and on SIGINT/SIGTERM, and
+loaded at startup. Who's subscribed is not saved; clients subscribe again
+when they reconnect. `-store off` keeps everything in memory, lost on
+restart. A file that can't be parsed is renamed to
+`<file>.bad-<time>`, logged, and the server starts empty.
+
+| Key (INI) | Flag | Default | Meaning |
+| --- | --- | --- | --- |
+| `store` | `-store` | `chatserver-store.json` | Snapshot file; `off` or `""` for memory only. |
+| `max_history` | `-max-history` | `1000` | Entries kept per history list (every PUSH-built array); the oldest go. `0` = no cap. |
+| `rate_burst` | `-rate-burst` | `10` | Flood control: chat messages one web user may send in a burst. `0` turns it off. |
+| `rate_per_sec` | `-rate-per-sec` | `1` | Messages per second a web user may keep sending after the burst. `0` turns it off. |
+| `rate_tcp` | `-rate-tcp` | off | Apply the same limit to TCP connections (doors, bridges) too. |
+| `bbs_name_days` | `-bbs-name-days` | `90` | Days a name a door or bridge used stays refused to new web users (see WEB.md). `0` = only while connected. |
+
+The keys go in the `-config` INI at the top or under `[server]`. Flood
+control counts messages, not packets: a WRITE to a room (or a mailbox)
+pays for the history PUSHes that go with it, and joining, who's-here,
+history reads, the room registry and TV tuner writes are never limited.
+Over the limit the client gets an ERROR, "you're sending messages too
+fast; slow down", and that message is dropped. It applies to web users
+only unless `rate_tcp` is on: one bridge connection carries a whole
+Discord or IRC channel, and the JS door treats any ERROR as a lost
+connection and reconnects, so with `rate_tcp` set `rate_burst` with
+those in mind.
+
+A connection that drops is announced to its rooms as leaving, as if it
+had unsubscribed, unless the same nick and system is still there on
+another connection. A packet line over 131072 bytes drops the
+connection.
 
 The same binary can also store chat attachments for `/upload`
 (`-media-addr :10089 -media-dir ...`, then `upload_url` in the door's

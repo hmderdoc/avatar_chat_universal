@@ -56,6 +56,13 @@
     const ROOM_NAME = /^[A-Za-z0-9_-]{1,32}$/;
     const PM_HISTORY = 200;        // messages read from our own mailbox
     const MAX_THREAD = 300;        // messages kept per private thread
+    // A socket can be dead yet still say OPEN (a laptop slept, a phone
+    // backgrounded the tab). Nothing heard for FRESH_MS and a SOCKET PING
+    // goes first; no reply in PROBE_WAIT and it's dropped for a new one.
+    const FRESH_MS = 20000;
+    const PROBE_WAIT = 5000;
+    const PROBE_EVERY = 25000;     // while the page is visible
+    const SEND_WAIT = 15000;       // a message not through by then failed
 
     const cfg = {
         defaultChannel: "main", systemName: "", maxMessage: 1000, createRooms: false, uploads: false,
@@ -64,6 +71,11 @@
     const state = {
         nick: "", avatar: "", style: "", colors: [], draftColors: [], joined: [], view: "",
         ws: null, open: false, retry: 0, retryTimer: 0, subscribed: new Set(),
+        heard: 0, probeTimer: 0, everClaimed: false,
+        outbox: [],            // messages shown but not yet through, oldest first
+        fenced: null,          // the outbox entry whose PINGs are being answered
+        holdOutbox: 0,         // set while a reconnect's history loads
+        restore: null,         // where the reader was, kept across a reconnect
         messages: [], lastGroup: null, pendingSelf: [], pendingArt: null, busy: false,
         who: new Map(),        // room (lower) -> [{nick, system}]
         unread: new Map(),     // room (lower) -> count
@@ -295,19 +307,27 @@
             // The name first: nothing else is allowed until it's ours.
             send({scope: "SOCKET", func: "CLAIM", data: {nick: state.nick, key: claimKey()}});
         };
-        ws.onmessage = (ev) => receive(ev.data);
+        ws.onmessage = (ev) => {
+            if (state.ws !== ws) return; // one given up on
+            heardFrom();
+            receive(ev.data);
+        };
         ws.onclose = () => {
             if (state.ws !== ws) return;
             state.open = false;
             state.claimed = false;
-            if (state.refused) return; // waits for another nickname
+            if (state.refused) { lostInFlight(); return; } // waits for another nickname
             const wait = Math.min(30000, 1000 * Math.pow(2, state.retry++));
             setStatus("warning", "Disconnected. Reconnecting in " + Math.round(wait / 1000) + "s...");
             state.retryTimer = setTimeout(connect, wait);
+            lostInFlight(); // after, so a "Not sent" shows over the warning
         };
     }
-    // claimed runs once the server has given us our name.
+    // claimed runs once the server has given us our name. On a reconnect
+    // the reader stays where they were: the history reloads under them.
     function claimed() {
+        const at = state.everClaimed && els.messages.querySelector(".avatar-chat-bubble") ? viewAnchor() : null;
+        state.everClaimed = true;
         state.open = true;
         state.claimed = true;
         clearStatus("info");
@@ -315,8 +335,14 @@
         state.joined.forEach(subscribe);
         query("SUBSCRIBE", loc.messages(ownMailbox()), {nick: state.nick, system: cfg.systemName});
         query("SLICE", loc.history(ownMailbox()), {data: {start: -PM_HISTORY}, lock: 1});
-        if (state.pm && state.threads.has(state.pm)) openThread(state.pm);
-        else openView(state.view || state.joined[0] || cfg.defaultChannel);
+        if (state.pm && state.threads.has(state.pm)) {
+            if (at) state.restore = at; // setThreads redraws it
+            else openThread(state.pm);
+        } else openView(state.view || state.joined[0] || cfg.defaultChannel, at);
+        // Messages waiting for this connection go once the history is in,
+        // so it can't draw over them.
+        clearTimeout(state.holdOutbox);
+        state.holdOutbox = setTimeout(releaseOutbox, PROBE_WAIT);
         refreshCounts();
         if (!state.welcomed && needsWelcome() && !els.nickModal.classList.contains("is-open")) openWelcome();
         else offerRooms();
@@ -330,7 +356,9 @@
         state.refused = true;
         if (state.ws) state.ws.close();
         clearStatus("info");
-        askNick(reason === "taken" ? "That name is taken on this server. Pick another."
+        // A BBS user's name comes back "taken" with detail "bbs".
+        askNick(reason === "taken" && data.detail === "bbs" ? "That name belongs to a BBS user. Pick another."
+            : reason === "taken" ? "That name is taken here. Pick another."
             : reason === "limit" ? "Too many new names from your address today. Use one you've had here before, or try again tomorrow."
                 : reason === "invalid" ? "Letters, digits, spaces, - and _ only, up to 25."
                     : "The server couldn't give you that name. Try again.");
@@ -354,6 +382,44 @@
         state.ws = null;
         if (old) old.close();
         connect();
+    }
+
+    // --- liveness -------------------------------------------------------------
+    // Anything from the server shows the socket is alive and answers a probe.
+    function heardFrom() {
+        state.heard = Date.now();
+        if (!state.probeTimer) return;
+        clearTimeout(state.probeTimer);
+        state.probeTimer = 0;
+        flushOutbox();
+    }
+    // probe asks the server for a PONG; nothing back in PROBE_WAIT and the
+    // socket is taken for dead.
+    function probe() {
+        if (!state.claimed || state.probeTimer) return;
+        if (!send({scope: "SOCKET", func: "PING", data: {probe: Date.now()}})) return;
+        state.probeTimer = setTimeout(dropDead, PROBE_WAIT);
+    }
+    // dropDead gives up on a socket that stopped answering (its close may
+    // never come) and opens a new one straight away.
+    function dropDead() {
+        clearTimeout(state.probeTimer);
+        state.probeTimer = 0;
+        state.open = false;
+        state.claimed = false;
+        state.retry = 0;
+        reconnect();
+        lostInFlight(); // after, so a "Not sent" shows over "Connecting..."
+    }
+    // wake: the page is back (shown, online, restored); check the socket
+    // now, or retry a closed one without waiting out the backoff.
+    function wake() {
+        if (document.visibilityState === "hidden" || !state.nick || state.refused) return;
+        if (state.claimed) probe();
+        else if (!state.ws || state.ws.readyState === WebSocket.CLOSED || state.ws.readyState === WebSocket.CLOSING) {
+            state.retry = 0;
+            reconnect();
+        }
     }
 
     function subscribe(room) {
@@ -384,11 +450,11 @@
         if (pkt.scope === "SOCKET") {
             if (pkt.func === "PING") send({scope: "SOCKET", func: "PONG", data: pkt.data});
             else if (pkt.func === "CLAIM") onClaim(pkt.data);
+            else if (pkt.func === "PONG" && pkt.data && pkt.data.send) onSendPong(pkt.data);
             return;
         }
         if (pkt.func === "ERROR") {
             const why = pkt.data && pkt.data.description ? String(pkt.data.description) : "error";
-            if (/nickname/.test(why)) { askNick(why); return; }
             if (/^no public room named (\S+)/.test(why)) {
                 const gone = /^no public room named (\S+)/.exec(why)[1];
                 state.joined = state.joined.filter((r) => lower(r) !== lower(gone));
@@ -397,6 +463,13 @@
                 if (lower(state.view) === lower(gone)) openView(state.joined[0] || cfg.defaultChannel);
                 renderRooms();
             }
+            // Between a send's two PINGs, an ERROR is that send's.
+            const e = state.fenced;
+            if (e) {
+                if (!e.failed) failSend(e, why);
+                return;
+            }
+            if (/nickname/.test(why)) { askNick(why); return; }
             setStatus("error", why);
             return;
         }
@@ -469,9 +542,12 @@
                 addMessage(m, false);
             }
         });
-        if (!state.messages.length) els.messages.appendChild(el("div", "avatar-chat-empty", "No messages yet in #" + state.view + ". Say hello."));
+        if (!state.messages.length && !pendingHere().length) els.messages.appendChild(el("div", "avatar-chat-empty", "No messages yet in #" + state.view + ". Say hello."));
+        showOutbox();
         renderMembers();
-        scrollDown(true);
+        settleView(state.restore);
+        state.restore = null;
+        releaseOutbox();
     }
 
     function addMessage(m, live) {
@@ -494,9 +570,20 @@
             state.lastGroup = g;
         }
         g.time = time;
-        g.content.appendChild(bubble(str, self));
+        const b = bubble(str, self);
+        // Keys to find this message again after the history reloads: the
+        // server stamps its own time, so the loose one leaves time out.
+        b.dataset.loose = lower(name) + "|" + lower(host) + "|" + hashText(str);
+        b.dataset.key = b.dataset.loose + "|" + time;
+        g.content.appendChild(b);
         while (els.messages.childElementCount > KEEP) els.messages.firstElementChild.remove();
         if (live || pinned) scrollDown(pinned || (live && self));
+        return b;
+    }
+    function hashText(str) {
+        let h = 0x811c9dc5;
+        for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
+        return (h >>> 0).toString(36);
     }
 
     function newGroup(nick, name, host, time, self) {
@@ -675,6 +762,28 @@
     function scrollDown(force) {
         if (force) requestAnimationFrame(() => { els.messages.scrollTop = els.messages.scrollHeight; });
     }
+    // viewAnchor is where the reader is: pinned to the bottom, or the
+    // first message in view and how far down the pane its top sits.
+    function viewAnchor() {
+        if (nearBottom()) return {pinned: true};
+        const top = els.messages.getBoundingClientRect().top;
+        const b = Array.from(els.messages.querySelectorAll(".avatar-chat-bubble[data-key]"))
+            .find((n) => n.getBoundingClientRect().bottom > top);
+        if (!b) return {pinned: true};
+        return {key: b.dataset.key, loose: b.dataset.loose, offset: b.getBoundingClientRect().top - top};
+    }
+    // settleView puts the reader back at an anchor once the redraw is
+    // laid out (after addMessage's own scrolls), or at the bottom.
+    function settleView(at) {
+        if (!at || at.pinned) { scrollDown(true); return; }
+        requestAnimationFrame(() => {
+            const list = Array.from(els.messages.querySelectorAll(".avatar-chat-bubble[data-key]"));
+            const b = list.find((n) => n.dataset.key === at.key) || list.filter((n) => n.dataset.loose === at.loose).pop();
+            // Gone from the reloaded history: it was older than all of it.
+            if (!b) { els.messages.scrollTop = 0; return; }
+            els.messages.scrollTop += b.getBoundingClientRect().top - els.messages.getBoundingClientRect().top - at.offset;
+        });
+    }
 
     // A veiled picture shows on the first click.
     els.messages.addEventListener("click", (ev) => {
@@ -709,15 +818,21 @@
     function userCount(room) { return (state.who.get(lower(room)) || []).length; }
     function plural(n) { return n + " user" + (n === 1 ? "" : "s"); }
 
-    function openView(room) {
+    // openView shows room; keep (a reconnect's viewAnchor, same room)
+    // leaves what's on screen until the history comes back.
+    function openView(room, keep) {
         room = String(room || "").replace(/^#/, "");
         if (!ROOM_NAME.test(room)) room = cfg.defaultChannel;
+        if (state.pm || lower(room) !== lower(state.view)) keep = null;
         state.view = room;
         state.pm = "";
         state.unread.delete(lower(room));
-        state.messages = [];
-        state.lastGroup = null;
-        els.messages.replaceChildren(el("div", "avatar-chat-empty", "Loading #" + room + "..."));
+        state.restore = keep || null;
+        if (!keep) {
+            state.messages = [];
+            state.lastGroup = null;
+            els.messages.replaceChildren(el("div", "avatar-chat-empty", "Loading #" + room + "..."));
+        }
         document.title = "#" + room + " - Avatar Chat";
         query("SLICE", loc.history(room), {data: {start: -HISTORY}, lock: 1});
         askWho(room, 0);
@@ -1011,7 +1126,9 @@
         list.forEach((m) => { if (m && typeof m === "object") filePM(m); });
         state.threads.forEach((t, k) => { t.unread = unread.get(k) || 0; });
         if (state.pm) {
-            if (state.threads.has(state.pm)) openThread(state.pm);
+            if (state.threads.has(state.pm)) openThread(state.pm, true);
+            state.restore = null;
+            releaseOutbox();
         }
         renderPrivate();
     }
@@ -1029,21 +1146,26 @@
         openThread(t.key);
         els.input.focus();
     }
-    function openThread(key) {
+    // openThread shows a private thread; reload (setThreads after a
+    // reconnect) keeps the reader where they were.
+    function openThread(key, reload) {
         const t = state.threads.get(key);
         if (!t) return;
+        const at = reload ? state.restore : null;
+        state.restore = null;
         state.pm = key;
         t.unread = 0;
         state.messages = [];
         state.lastGroup = null;
         els.messages.textContent = "";
         t.msgs.forEach((m) => addMessage(m, false));
-        if (!t.msgs.length) els.messages.appendChild(el("div", "avatar-chat-empty", "No messages with " + t.name + " yet. Say hello."));
+        if (!t.msgs.length && !pendingHere().length) els.messages.appendChild(el("div", "avatar-chat-empty", "No messages with " + t.name + " yet. Say hello."));
+        showOutbox();
         document.title = "@" + t.name + " - Avatar Chat";
         renderHeader();
         renderRooms();
         renderPrivate();
-        scrollDown(true);
+        settleView(at);
     }
     function renderThreadHeader() {
         const t = state.threads.get(state.pm);
@@ -1105,26 +1227,17 @@
         return nick;
     }
 
-    // postPM sends text to the open thread: to the peer's web mailbox when
-    // they have one, else their plain name, with a copy in our own.
-    function postPM(text) {
+    // pmOut is a message to the open thread and where it goes: the peer's
+    // web mailbox when they have one, else their plain name, with a copy
+    // in our own.
+    function pmOut(text) {
         const t = state.threads.get(state.pm);
-        if (!t) return false;
-        const nick = ownNick();
+        if (!t) return null;
         const to = {name: t.name, host: t.host};
         if (validMailbox(t.name, t.host, t.mailbox)) to.mailbox = t.mailbox;
-        const msg = {nick, str: text, time: Date.now(), private: {to}};
+        const msg = {nick: ownNick(), str: text, time: Date.now(), private: {to}};
         const target = to.mailbox || t.name;
-        const lp = {data: msg, lock: 2};
-        query("WRITE", loc.messages(target), lp);
-        query("PUSH", loc.history(target), lp);
-        query("PUSH", loc.history(ownMailbox()), lp);
-        t.msgs.push(msg);
-        t.last = msg.time;
-        addMessage(msg, true);
-        renderPrivate();
-        clearStatus("error");
-        return true;
+        return {msg, where: {pm: t.key}, writes: [["WRITE", loc.messages(target)], ["PUSH", loc.history(target)], ["PUSH", loc.history(ownMailbox())]]};
     }
 
     function renderMe() {
@@ -1353,19 +1466,137 @@
         input.setSelectionRange(tab.end, tab.end);
     }
 
-    function postText(text) {
+    // postText shows text as sending and puts it in the outbox. It goes
+    // now if the socket was heard from lately, else after a probe (or the
+    // reconnect a failed probe starts). art is the pending art it came
+    // from, put back if the send fails.
+    function postText(text, art) {
         if (!state.open) { setStatus("error", "Not connected yet."); return false; }
-        if (state.pm) return postPM(text);
-        if (!isJoined(state.view)) joinRoom(state.view);
-        const nick = ownNick();
-        const msg = {nick, str: text, time: Date.now()};
-        const lp = {data: msg, lock: 2};
-        query("WRITE", loc.messages(state.view), lp);
-        query("PUSH", loc.history(state.view), lp);
-        state.pendingSelf.push({str: text, at: Date.now()});
-        addMessage(msg, true);
+        let out;
+        if (state.pm) {
+            out = pmOut(text);
+            if (!out) return false;
+        } else {
+            if (!isJoined(state.view)) joinRoom(state.view);
+            out = {msg: {nick: ownNick(), str: text, time: Date.now()}, where: {room: state.view},
+                writes: [["WRITE", loc.messages(state.view)], ["PUSH", loc.history(state.view)]]};
+        }
+        const e = Object.assign(out, {id: ++outboxSeq, text, art: art || null, phase: "queued", node: null, timer: 0});
+        state.outbox.push(e);
+        showEntry(e, true);
         clearStatus("error");
+        e.timer = setTimeout(() => failSend(e, "the connection isn't back yet."), SEND_WAIT);
+        if (Date.now() - state.heard < FRESH_MS && !state.probeTimer && !state.holdOutbox) transmit(e);
+        else probe();
         return true;
+    }
+
+    // --- the outbox ----------------------------------------------------------
+    // A message is sent between two SOCKET PINGs. The page's packets are
+    // answered in order, so an ERROR after the first PONG and before the
+    // second is this message's (a policy refusal: too long, too fast...),
+    // and the second PONG means it went through. The chat protocol's
+    // WRITE has no reply of its own (timeout -1), so the PONG is the ack.
+    let outboxSeq = 0;
+    function pendingHere() {
+        return state.outbox.filter((e) => (state.pm ? e.where.pm === state.pm : lower(e.where.room) === lower(state.view)));
+    }
+    function showEntry(e, live) {
+        e.node = addMessage(e.msg, live) || null;
+        if (!e.node) return;
+        e.node.classList.add(e.phase === "failed" ? "is-failed" : "is-sending");
+        if (e.phase === "failed") failedNote(e);
+    }
+    // showOutbox redraws the open view's unsent messages under a redraw.
+    function showOutbox() { pendingHere().forEach((e) => showEntry(e, false)); }
+    function releaseOutbox() {
+        if (!state.holdOutbox) return;
+        clearTimeout(state.holdOutbox);
+        state.holdOutbox = 0;
+        flushOutbox();
+    }
+    function flushOutbox() {
+        if (!state.claimed || state.holdOutbox) return;
+        state.outbox.filter((e) => e.phase === "queued").forEach(transmit);
+    }
+    function transmit(e) {
+        if (!send({scope: "SOCKET", func: "PING", data: {send: e.id, at: "before"}})) return;
+        e.phase = "sent";
+        const lp = {data: e.msg, lock: 2};
+        e.writes.forEach((w) => query(w[0], w[1], lp));
+        if (e.where.room) state.pendingSelf.push({str: e.text, at: Date.now()});
+        send({scope: "SOCKET", func: "PING", data: {send: e.id, at: "after"}});
+        // No ack in time (more for a big art payload): the socket is dead.
+        clearTimeout(e.timer);
+        e.timer = setTimeout(() => { if (e.phase !== "done" && e.phase !== "failed") dropDead(); }, PROBE_WAIT + Math.floor(e.text.length / 4));
+    }
+    function onSendPong(d) {
+        const e = state.outbox.find((x) => x.id === d.send) || (state.fenced && state.fenced.id === d.send ? state.fenced : null);
+        if (d.at === "before") { state.fenced = e; return; }
+        if (state.fenced && state.fenced.id === d.send) state.fenced = null;
+        if (!e || e.failed) return;
+        e.phase = "done";
+        clearTimeout(e.timer);
+        state.outbox = state.outbox.filter((x) => x !== e);
+        if (e.node) e.node.classList.remove("is-sending");
+        const t = e.where.pm && state.threads.get(e.where.pm);
+        if (t) {
+            t.msgs.push(e.msg);
+            if (t.msgs.length > MAX_THREAD) t.msgs.shift();
+            t.last = Math.max(t.last, e.msg.time);
+            renderPrivate();
+        }
+    }
+    // lostInFlight: the socket went with messages sent and not acked. They
+    // may or may not have arrived, so they fail rather than go twice.
+    function lostInFlight() {
+        state.fenced = null;
+        state.outbox.filter((e) => e.phase === "sent").forEach((e) => failSend(e, "the connection dropped, so it may not have gone through."));
+    }
+    // failSend: the text goes back in the box when the box is free, else
+    // the bubble stays, marked, and a click puts it back later.
+    function failSend(e, why) {
+        if (e.phase === "done" || e.phase === "failed") return;
+        clearTimeout(e.timer);
+        e.failed = true;
+        e.phase = "failed";
+        const back = putBack(e);
+        if (back) state.outbox = state.outbox.filter((x) => x !== e);
+        else if (e.node) {
+            e.node.classList.replace("is-sending", "is-failed");
+            failedNote(e);
+        }
+        if (e.where.room) state.pendingSelf = state.pendingSelf.filter((p) => p.str !== e.text);
+        why = String(why).replace(/[.\s]*$/, ".");
+        setStatus("error", "Not sent: " + why + (back ? " Your message is back in the box." : " It's marked in the chat; click it to edit and resend."));
+    }
+    function putBack(e) {
+        if (state.pendingArt || els.input.value.trim()) return false;
+        if (e.art) setPending(e.art);
+        else els.input.value = e.text;
+        dropNode(e);
+        return true;
+    }
+    function failedNote(e) {
+        e.node.title = "Not sent. Click to put it back in the box.";
+        e.node.onclick = () => {
+            if (!putBack(e)) { setStatus("error", "Send or clear what's in the box first."); return; }
+            state.outbox = state.outbox.filter((x) => x !== e);
+            clearStatus("error");
+            els.input.focus();
+        };
+    }
+    function dropNode(e) {
+        const b = e.node;
+        e.node = null;
+        state.messages = state.messages.filter((m) => m !== e.msg);
+        if (!b) return;
+        const group = b.closest(".avatar-chat-group");
+        b.remove();
+        if (group && !group.querySelector(".avatar-chat-bubble")) {
+            if (state.lastGroup && state.lastGroup.content.parentNode === group) state.lastGroup = null;
+            group.remove();
+        }
     }
 
     function fromName() { return (cfg.systemName && state.nick) ? cfg.systemName + ":" + state.nick : state.nick || cfg.systemName; }
@@ -1385,7 +1616,7 @@
         state.busy = true;
         AvatarArt.buildBitmapPayload(art.cells, art.width, art.height, fromName()).then((payload) => {
             if (payload.length > 32000) throw new Error("That art is too big to send (BITMAP messages are capped at 32,000 characters).");
-            if (postText(payload)) setPending(null);
+            if (postText(payload, art)) setPending(null);
         }).catch((e) => setStatus("error", String(e.message || e))).then(() => { state.busy = false; });
     }
 
@@ -1830,6 +2061,20 @@
     });
 
     setInterval(() => { if (state.open) refreshCounts(); }, COUNTS_EVERY);
+
+    // A socket that died while the page slept or hid is found when it's
+    // back, and checked now and then while it's shown. A tick that comes
+    // late means the machine slept: check at once.
+    let lastTick = Date.now();
+    setInterval(() => {
+        const now = Date.now(), slept = now - lastTick > 15000;
+        lastTick = now;
+        if (document.visibilityState === "hidden" || !state.claimed) return;
+        if (slept || now - state.heard >= PROBE_EVERY) probe();
+    }, 5000);
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("online", wake);
+    window.addEventListener("pageshow", (ev) => { if (ev.persisted) wake(); });
 
     // --- start ---------------------------------------------------------------------
     state.style = load("style");

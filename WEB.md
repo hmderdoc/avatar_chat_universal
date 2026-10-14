@@ -92,6 +92,12 @@ web mailbox instead.
   server holds it, by a random key the page keeps in localStorage. Another
   browser asking for the same name is told it's taken on this server. New
   names are capped per address per day (`web_claims_per_ip_day`).
+- **BBS users' names are kept for them.** When the server hosts the chat,
+  a name a door or bridge is using, or used in the last `bbs_name_days`
+  (default 90), can't be claimed by a new browser; the page says it's
+  taken (the CLAIM reply carries `detail: "bbs"`). A browser that claimed
+  the name before keeps it. In relay mode the upstream's users can't be
+  seen, so this check is off.
 - **A web user's mailbox is `<name>@<origin>`,** where origin is
   `system_name` with everything outside `A-Z a-z 0-9 _ -` turned into
   `_` (so `My BBS` gives `alice@My_BBS`). Their messages carry it as

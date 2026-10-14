@@ -241,6 +241,12 @@ func (a *App) escape() bool {
 		a.Session.Notice("video stopped")
 		return false
 	}
+	// A half-typed line: Esc clears it, and only an empty line's Esc quits.
+	if a.inputLine.Value() != "" {
+		a.inputLine.Reset()
+		a.dirty = true
+		return false
+	}
 	return true
 }
 
@@ -248,7 +254,7 @@ func (a *App) clickHit(h hit) {
 	switch h.Kind {
 	case hitSpeaker:
 		if !strings.EqualFold(h.Ref, a.selfName()) {
-			a.inputLine.SetValue("/msg " + h.Ref + " ")
+			a.inputLine.SetValue(msgPrefix(h.Ref))
 		}
 	case hitPicture:
 		a.openImageViewer()
@@ -267,7 +273,20 @@ func (a *App) clickHit(h hit) {
 // the scroll position and the chat state; open lists and the image viewer
 // close, since they were laid out for the old size.
 func (a *App) Resize(cols, rows int) {
-	if cols < minCols || rows < minRows || (cols == a.Width && rows == a.Height) {
+	// Too small to lay out: say so instead of leaving the old layout to be
+	// mangled, and keep everything as it was for when it grows back.
+	if cols < minCols || rows < minRows {
+		if !a.tooSmall {
+			a.tooSmall, a.tooSmallShown = true, false
+			a.dirty = true
+		}
+		return
+	}
+	if a.tooSmall {
+		a.tooSmall = false
+		a.forceFullRedraw()
+	}
+	if cols == a.Width && rows == a.Height {
 		return
 	}
 	if a.imageViewer != nil {
@@ -289,14 +308,18 @@ func (a *App) Resize(cols, rows int) {
 // pauseMouse turns reporting off for a full-screen sub-program (editors,
 // pickers, Zmodem) that reads keys itself, and returns the undo.
 func (a *App) pauseMouse() func() {
+	// The sub-program reads plain keys, so pastes go back to unbracketed.
+	a.finishFrame()
+	_, _ = a.Conn.Write([]byte(ansi.PasteOff))
 	if !a.mouseOn {
-		return func() {}
+		return func() { _, _ = a.Conn.Write([]byte(ansi.PasteOn)) }
 	}
 	a.setMouse(false)
 	a.mousePaused = true
 	return func() {
 		a.mousePaused = false
 		a.setMouse(true)
+		_, _ = a.Conn.Write([]byte(ansi.PasteOn))
 	}
 }
 

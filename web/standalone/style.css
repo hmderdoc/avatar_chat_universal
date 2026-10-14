@@ -116,6 +116,22 @@ body {
     image-rendering: pixelated;
 }
 
+/* ---- a message of ours not through yet, or refused ---- */
+.avatar-chat-web .avatar-chat-bubble.is-sending {
+    opacity: 0.55;
+}
+.avatar-chat-web .avatar-chat-group.is-self .avatar-chat-bubble.is-failed {
+    border-color: var(--ac-error);
+    cursor: pointer;
+}
+.avatar-chat-web .avatar-chat-bubble.is-failed::after {
+    content: "Not sent";
+    display: block;
+    margin-top: 0.25rem;
+    font-size: 0.75rem;
+    color: var(--ac-error);
+}
+
 /* ---- the member card ---- */
 .avatar-chat-web .sa-card-body {
     display: flex;

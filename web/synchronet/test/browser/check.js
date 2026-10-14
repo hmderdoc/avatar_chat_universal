@@ -3,7 +3,9 @@
 // veil, link cards, escaping, the write token, live events, the style
 // editor, the one-button composer (attach, drop, paste), the ANSI editor,
 // the avatar chooser and editor, a chunked upload, rooms (sidebar, picker,
-// join / create / leave) and the page styles.
+// join / create / leave), the page styles, following the room while
+// scrolled to the bottom (and not while reading history), one send per
+// Enter and the hidden tab's unread count.
 //
 //   PLAYWRIGHT=/path/to/node_modules/playwright node test/browser/check.js <port> [screenshot dir]
 const { chromium } = require(process.env.PLAYWRIGHT || "playwright");
@@ -415,6 +417,59 @@ function check(cond, name, detail) {
   check(players.indexOf("VIDEO https://files.example/clip?x=1") >= 0, "a link that served a video shows a video player", JSON.stringify(players));
   const dlTitle = await page.$$eval(".avatar-chat-card-title", (els) => els.map((e) => e.textContent));
   check(dlTitle.indexOf("Song.mp3") >= 0, "the card is titled with the file name", JSON.stringify(dlTitle));
+
+  // Scrolling: new messages follow a reader at the bottom, never one
+  // reading history; an unchanged transcript is not rebuilt; their own
+  // send follows the room again.
+  const gap = () => page.$eval("#avatar-chat-messages", (e) => e.scrollHeight - e.clientHeight - e.scrollTop);
+  for (let i = 0; i < 30; i++) await fetch(BASE + "/__say?text=" + encodeURIComponent("scroll line " + i));
+  await page.waitForTimeout(1200);
+  check(await gap() <= 32, "at the bottom, new messages follow", String(await gap()));
+  const veilSrc = await page.$eval(".avatar-chat-rich-image.is-veiled", (e) => e.getAttribute("href")).catch(() => "");
+  if (veilSrc) await page.$eval(".avatar-chat-rich-image.is-veiled", (e) => e.click());
+  const readAt = () => page.$eval("#avatar-chat-messages", (box) => {
+    const top = box.getBoundingClientRect().top;
+    const b = Array.from(box.querySelectorAll(".avatar-chat-bubble, .avatar-chat-system")).find((e) => e.getBoundingClientRect().bottom > top);
+    return b ? { text: b.textContent, delta: Math.round(b.getBoundingClientRect().top - top) } : null;
+  });
+  await page.$eval("#avatar-chat-messages", (e) => { e.scrollTop = Math.floor(e.scrollHeight / 3); });
+  await page.waitForTimeout(300);
+  const before = await readAt();
+  for (let i = 0; i < 3; i++) await fetch(BASE + "/__say?text=" + encodeURIComponent("while reading " + i));
+  await page.waitForTimeout(1000);
+  const after = await readAt();
+  check(before && after && before.text === after.text && Math.abs(before.delta - after.delta) <= 2 && await gap() > 32,
+    "scrolled up: new messages keep the reader's place", JSON.stringify([before, after]));
+  check(!!veilSrc && await page.$('.avatar-chat-rich-image.is-veiled[href="' + veilSrc + '"]') === null, "a revealed picture stays revealed through a rebuild", veilSrc);
+  await page.$eval("#avatar-chat-messages .avatar-chat-bubble", (e) => { e.__kept = true; });
+  await page.evaluate(() => document.getElementById("avatar-chat-status-retry").click());
+  await page.waitForTimeout(1200);
+  check(await page.$eval("#avatar-chat-messages .avatar-chat-bubble", (e) => e.__kept === true), "an unchanged history does not rebuild the transcript");
+  check(JSON.stringify(await readAt()) === JSON.stringify(after), "and the reader stays put", JSON.stringify(await readAt()));
+
+  // Enter twice while the send is out posts it once; the send pins again
+  await page.route("**/api/avatarchat.ssjs", async (route) => {
+    if (route.request().method() === "POST") await new Promise((r) => setTimeout(r, 700));
+    await route.continue();
+  });
+  await page.fill("#avatar-chat-input", "only once");
+  await page.press("#avatar-chat-input", "Enter");
+  await page.press("#avatar-chat-input", "Enter");
+  await page.waitForTimeout(1600);
+  await page.unroute("**/api/avatarchat.ssjs");
+  st = await (await fetch(BASE + "/__state")).json();
+  check(st.posts.filter((x) => x.action === "send" && x.q.message === "only once").length === 1, "Enter during a send does not send it twice");
+  check(await page.$eval("#avatar-chat-input", (e) => e.value) === "", "the box clears after the send");
+  check(await gap() <= 32, "your own send scrolls back to the bottom", String(await gap()));
+
+  // a hidden tab counts what arrives in its title
+  await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); });
+  await fetch(BASE + "/__say?text=away1");
+  await fetch(BASE + "/__say?text=away2");
+  await page.waitForTimeout(800);
+  check(await page.title() === "(2) mock", "hidden: unread count in the title", await page.title());
+  await page.evaluate(() => { delete document.hidden; document.dispatchEvent(new Event("visibilitychange")); });
+  check(await page.title() === "mock", "visible again: the title is back", await page.title());
 
   // A PM to a standalone web user goes to its mailbox; the page never
   // shows the mailbox string.

@@ -93,8 +93,12 @@ the old bundle.
 
 ## Install
 
-From a checkout of this repository, build the bundle (or use the copy
-already built in `dist/`):
+Release tarballs include a prebuilt bundle. From the extracted tarball,
+enter `web/synchronet` and skip to the copy command below; Node.js is not
+needed to install it.
+
+From a source checkout, build the bundle (or use the copy already built
+in `dist/`):
 
 ```sh
 cd xtrn/avatar_chat_universal/web/synchronet

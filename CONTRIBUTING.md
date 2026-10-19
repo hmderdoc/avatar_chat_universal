@@ -12,7 +12,7 @@ go test ./...           # should be green from a fresh clone
 make build              # produces ./avatar_chat_universal + ./avatar_chat_server
 ```
 
-You need Go 1.22+. Standalone mode (`./avatar_chat_universal -user
+You need Go 1.25+. Standalone mode (`./avatar_chat_universal -user
 alice`) lets you test the door against the public chat server without
 spinning up Synchronet — useful for everything except the BBS-drop-file
 codepaths.

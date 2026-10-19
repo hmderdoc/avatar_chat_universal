@@ -7,6 +7,8 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-18
+
 ### Added
 
 - server: **history survives a restart.** `avatar_chat_server` saves its
@@ -133,8 +135,8 @@ versioning follows loose [SemVer](https://semver.org/) (see
   host:port` relays each browser to someone else's chat server instead of
   running a local one. Browser packets are limited to what the page needs,
   stamped with the user's nick and `system_name`, and capped
-  (`web_max_conns`, `web_max_per_ip`, `fetch_per_minute`). No accounts:
-  the page has no private messages or MOTD. WEB.md covers it.
+  (`web_max_conns`, `web_max_per_ip`, `fetch_per_minute`). WEB.md covers
+  setup, claimed names and the private web mailboxes described above.
 - **Synchronet web app** in `web/synchronet`, moved from the old JS door's
   bundle (`bbs_avatar_chat`) and caught up with the door: handle styles
   shown and edited, inline pictures with the NSFW veil, audio and video
@@ -325,6 +327,10 @@ versioning follows loose [SemVer](https://semver.org/) (see
   is consumed instead of landing in the input line as two typed O's.
 
 ### Changed
+
+- Release tarballs include `WEB.md`, the prebuilt Synchronet web bundle
+  and its installation guide, and the bridge systemd service examples.
+- Building from source requires Go 1.25 or newer.
 
 - door: **the bottom bar is gone**; the chat gains its row. Its pills
   (`/join`, `/part`, `/me`, `/msg`, `/r`, `/clear`, `/quit`, `/theme`) and
@@ -731,7 +737,8 @@ relative to a clean checkout.
   displays bitmaps that other clients post but there's no built-in
   encoder yet.
 
-[Unreleased]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.2.1...v0.2.2
 [0.1.2]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.1.0...v0.1.2
 [0.1.0]: https://github.com/hmderdoc/avatar_chat_universal/releases/tag/v0.1.0

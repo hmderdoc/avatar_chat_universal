@@ -56,8 +56,10 @@ Grab the tarball matching your platform from the
 | `avatar_chat_universal_darwin_arm64.tar.gz`       | Apple Silicon macOS                           |
 
 Each tarball contains the door binary, the server binary, bridge binaries, the
-default `avatar_chat.ini` / bridge INI files, the `themes/futurewave.ini`, and
-the docs.
+default `avatar_chat.ini` / bridge INI files, all bundled themes, bridge systemd
+service examples, the prebuilt Synchronet web bundle in
+`web/synchronet/dist/webv4/`, and the docs. The server embeds the standalone
+web page; see [WEB.md](WEB.md) to enable it.
 
 ### Build from source
 

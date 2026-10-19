@@ -1,6 +1,6 @@
 {
   "name": "avatar_chat_synchronet_web",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Avatar Chat page for a Synchronet webv4 site: SSJS APIs on the BBS, browser page, live events",
   "private": true,
   "scripts": {

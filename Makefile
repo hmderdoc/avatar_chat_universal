@@ -34,6 +34,7 @@ DIST_FILES := \
 	README.md \
 	INSTALL.md \
 	MEDIA.md \
+	WEB.md \
 	CONFIG.md \
 	THEMING.md \
 	BRIDGES.md \
@@ -41,6 +42,10 @@ DIST_FILES := \
 	SCREENSAVER.md \
 	CONTRIBUTING.md \
 	CHANGELOG.md \
+	avatar-chat-discord-bridge.service \
+	avatar-chat-telegram-bridge.service \
+	avatar-chat-matrix-bridge.service \
+	avatar-chat-slack-bridge.service \
 	LICENSE
 
 .PHONY: all
@@ -101,6 +106,11 @@ dist-%: splash
 	cp telegram_bridge.ini.example $(OUT)/telegram_bridge.ini
 	cp matrix_bridge.ini.example $(OUT)/matrix_bridge.ini
 	cp slack_bridge.ini.example $(OUT)/slack_bridge.ini
+	# Ready-to-install Synchronet webv4 files; no Node toolchain needed.
+	mkdir -p $(OUT)/web/synchronet/dist $(OUT)/web/synchronet/editor
+	cp -R web/synchronet/dist/webv4 $(OUT)/web/synchronet/dist/
+	cp web/synchronet/README.md $(OUT)/web/synchronet/
+	cp web/synchronet/editor/NOTICE.md $(OUT)/web/synchronet/editor/
 	# Bundled themes -- futurewave is the default; sysops copy + edit.
 	cp themes/*.ini $(OUT)/themes/
 	# Stub READMEs for the directories sysops fill with their own content.

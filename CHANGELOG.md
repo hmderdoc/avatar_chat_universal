@@ -7,6 +7,14 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ## [Unreleased]
 
+### Added
+
+- docs: **PROTOCOL.md**, the chat wire protocol (transport, packets,
+  operations, locations, message and avatar shapes, markers, mailboxes,
+  keepalive) for writing another client or bridge; written for the
+  native PS3 client, [avatar_chat_ps3](https://github.com/hmderdoc/avatar_chat_ps3).
+  Shipped in the release tarballs.
+
 ## [0.3.0] - 2026-10-18
 
 ### Added

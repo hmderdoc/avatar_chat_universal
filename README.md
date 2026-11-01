@@ -167,6 +167,9 @@ app scopes and Socket Mode setup.
   webv4 page: install, settings, uploads, moving from the old JS door.
 - [SCREENSAVER.md](SCREENSAVER.md) — idle animations, ANSI gallery setup,
   idle-interleave behavior.
+- [PROTOCOL.md](PROTOCOL.md) — the chat wire protocol, for writing another
+  client or bridge (the [PS3 client](https://github.com/hmderdoc/avatar_chat_ps3)
+  is built from it).
 
 ## Status
 

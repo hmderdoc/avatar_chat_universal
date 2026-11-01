@@ -40,6 +40,7 @@ DIST_FILES := \
 	BRIDGES.md \
 	AVATARS.md \
 	SCREENSAVER.md \
+	PROTOCOL.md \
 	CONTRIBUTING.md \
 	CHANGELOG.md \
 	avatar-chat-discord-bridge.service \

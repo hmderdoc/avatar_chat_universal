@@ -7,6 +7,15 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ## [Unreleased]
 
+### Fixed
+
+- config: the shipped `avatar_chat.ini` no longer sets `bbs_id = futureland.today`.
+  That line named the hub's own BBS as the identity of *every* install that
+  did not edit it, so their users appeared to come from futureland.today.
+  `bbs_id` is now blank and the documented fallback applies (drop-file BBSID
+  + sysop name). Set it to your own stable slug as CONFIG.md describes.
+  `avatar_chat.local.ini` is git-ignored for a BBS's own launch config.
+
 ## [0.3.0] - 2026-10-18
 
 ### Added

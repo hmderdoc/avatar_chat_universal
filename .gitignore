@@ -49,3 +49,6 @@ moebius_chat/*.ans
 
 # avatar_chat_server store snapshot (and its .tmp / .bad-* files)
 chatserver-store.json*
+
+# This BBS's own launch config (hub over loopback); the shipped avatar_chat.ini stays generic
+avatar_chat.local.ini

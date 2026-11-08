@@ -214,6 +214,14 @@ func (f *Frame) ClearCell(x, y int) {
 	f.cur[y][x] = Cell{Char: ' ', Attr: f.fillAttr}
 }
 
+// PutCell stores a whole cell (as returned by CellAt) at (x, y).
+func (f *Frame) PutCell(x, y int, c Cell) {
+	if x < 0 || y < 0 || x >= f.W || y >= f.H {
+		return
+	}
+	f.cur[y][x] = c
+}
+
 // CellAt returns the cell at (x, y) in the frame's local coordinate space,
 // or a zero Cell when out of bounds. Useful for cross-package animations
 // (e.g. the idle ANSI gallery) that need to read the contents of a Frame

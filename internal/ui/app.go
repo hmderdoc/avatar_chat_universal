@@ -212,6 +212,7 @@ type App struct {
 
 	// TV lounge config (see internal/ui/tvlounge.go).
 	TVColor     string // "truecolor" (default) or "16"
+	tvGate      *telnetvision.Gate // camera-noise gate for the lounge video
 	// AudioOK says the caller's terminal plays SyncTERM Audio APCs (the
 	// startup probe answered); TVAudio lets the lounge use it.
 	AudioOK bool

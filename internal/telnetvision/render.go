@@ -31,6 +31,58 @@ type RenderOpts struct {
 	// Ramp selects the glyph set when Mode==1 (wire byte f[6]): 0 = ASCII
 	// " .:-=+*#%@", 1 = CP437 shade blocks " ░▒▓█".
 	Ramp byte
+
+	// Gate, when set, skips camera noise: a cell whose two source pixels
+	// stayed within Gate.Threshold per channel of what the caller already
+	// shows keeps its previous cell, so the compositor sends nothing for it.
+	Gate *Gate
+}
+
+// Gate remembers, per target cell, the source colours behind what the caller
+// currently sees and the cell drawn from them. It compares against that
+// displayed value (not the previous frame), so slow drift still repaints once
+// it passes the threshold. Ported from the telnetvision door's noise gate.
+type Gate struct {
+	Threshold int
+	key       [7]int
+	src       [][6]uint8
+	cells     []ansi.Cell
+	valid     []bool
+}
+
+// DefaultGateThreshold matches the telnetvision door's default delta.
+const DefaultGateThreshold = 10
+
+// Reset forgets every remembered cell, so the next frame paints in full.
+func (g *Gate) Reset() {
+	for i := range g.valid {
+		g.valid[i] = false
+	}
+}
+
+func (g *Gate) prepare(k [7]int, n int) {
+	if g.key == k && len(g.valid) == n {
+		return
+	}
+	g.key = k
+	g.src = make([][6]uint8, n)
+	g.cells = make([]ansi.Cell, n)
+	g.valid = make([]bool, n)
+}
+
+// remember records what was just drawn at cell i (nil-safe).
+func (g *Gate) remember(i int, px []byte, tp, bp int, dst *ansi.Frame, x, y int) {
+	if g == nil {
+		return
+	}
+	g.src[i] = [6]uint8{px[tp], px[tp+1], px[tp+2], px[bp], px[bp+1], px[bp+2]}
+	g.cells[i] = dst.CellAt(x, y)
+	g.valid[i] = true
+}
+
+func near(a, b uint8, thr int) bool {
+	d := int(a) - int(b)
+	return d <= thr && d >= -thr
 }
 
 // rampGlyphs returns the brightness ramp for telnetvision "ramp" mode (Mode==1),
@@ -64,6 +116,14 @@ func (fr *Frame) RenderTo(dst *ansi.Frame, ox, oy, w, h int, opts RenderOpts) {
 	if opts.Mode == 1 {
 		ramp = rampGlyphs(opts.Ramp)
 	}
+	gate := opts.Gate
+	if gate != nil {
+		tc := 0
+		if opts.Truecolor {
+			tc = 1
+		}
+		gate.prepare([7]int{ox, oy, w, h, tc, int(opts.Mode), int(opts.Ramp)}, w*h)
+	}
 	for ty := 0; ty < h; ty++ {
 		sy := ty * fr.Rows / h
 		for tx := 0; tx < w; tx++ {
@@ -75,6 +135,16 @@ func (fr *Frame) RenderTo(dst *ansi.Frame, ox, oy, w, h int, opts RenderOpts) {
 			}
 			tr, tg, tb := int(fr.Pixels[tp]), int(fr.Pixels[tp+1]), int(fr.Pixels[tp+2])
 			br, bg, bb := int(fr.Pixels[bp]), int(fr.Pixels[bp+1]), int(fr.Pixels[bp+2])
+			ci := ty*w + tx
+			if gate != nil && gate.valid[ci] {
+				s := &gate.src[ci]
+				thr := gate.Threshold
+				if near(s[0], fr.Pixels[tp], thr) && near(s[1], fr.Pixels[tp+1], thr) && near(s[2], fr.Pixels[tp+2], thr) &&
+					near(s[3], fr.Pixels[bp], thr) && near(s[4], fr.Pixels[bp+1], thr) && near(s[5], fr.Pixels[bp+2], thr) {
+					dst.PutCell(ox+tx, oy+ty, gate.cells[ci])
+					continue
+				}
+			}
 			if ramp != nil {
 				// Average the two source rows (a ramp glyph carries one cell,
 				// not a top/bottom split) and map luma -> glyph, like the
@@ -95,6 +165,7 @@ func (fr *Frame) RenderTo(dst *ansi.Frame, ox, oy, w, h int, opts RenderOpts) {
 					// FG only; background stays black (no iCE bg).
 					dst.SetCell(ox+tx, oy+ty, ramp[gi], ansi.Attr(idx&0x0f))
 				}
+				gate.remember(ci, fr.Pixels, tp, bp, dst, ox+tx, oy+ty)
 				continue
 			}
 			if opts.Truecolor {
@@ -117,6 +188,7 @@ func (fr *Frame) RenderTo(dst *ansi.Frame, ox, oy, w, h int, opts RenderOpts) {
 				attr := ansi.Attr(top&0x0f) | (ansi.Attr(bot&0x07) << 4)
 				dst.SetCell(ox+tx, oy+ty, halfBlock, attr)
 			}
+			gate.remember(ci, fr.Pixels, tp, bp, dst, ox+tx, oy+ty)
 		}
 	}
 }

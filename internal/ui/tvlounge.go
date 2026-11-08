@@ -260,6 +260,9 @@ func (a *App) drawLounge() {
 		fr = src.Latest()
 	}
 	if fr != nil {
+		if a.tvGate == nil {
+			a.tvGate = &telnetvision.Gate{Threshold: telnetvision.DefaultGateThreshold}
+		}
 		fr.RenderTo(bg, 0, 0, bg.W, videoH, telnetvision.RenderOpts{
 			Truecolor:  a.tvColorTrue(),
 			Shade:      true,
@@ -269,6 +272,7 @@ func (a *App) drawLounge() {
 			// paint as a cheap FG-only glyph ramp instead of half-blocks.
 			Mode: fr.Mode,
 			Ramp: fr.Ramp,
+			Gate: a.tvGate,
 		})
 	} else {
 		label := "the channel"

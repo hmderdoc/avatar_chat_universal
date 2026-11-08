@@ -11,6 +11,13 @@
 // Only a terminal that answers it gets audio: SyncTERM, and the futureland
 // connection shim and fTelnet fork that also answer it.
 //
+// Format probes ride along (Q;libsndfileFormat;<major>;<subtype>, reply
+// ESC [ = 7 ; 101 ; <major> ; <subtype> ; 0|1 n): a caller whose libsndfile
+// decodes WAV holding IMA ADPCM or u-law gets PCM clips re-encoded to it — a
+// quarter / half the bytes of 16-bit PCM at the same rate and duration, so
+// the queue ledger is unchanged. A build that predates the query ignores it
+// and keeps getting 16-bit PCM WAV.
+//
 // Ported from the telnetvision door (door/audio.go, whose sequencing comes
 // from lameboy's apc_audio.rs) and run open-loop, like the futureland
 // shell's port (fshell_ts src/chat/apc_audio.ts): this door reads keys
@@ -44,6 +51,17 @@ const (
 	// Probe is the feature query.
 	Probe = "\x1b_SyncTERM:Q;libsndfile\x1b\\"
 
+	formatFeatureID = 101 // DSR id of a libsndfileFormat reply
+	sfMajorWAV      = 1
+	sfSubIMAADPCM   = 0x12
+	sfSubULaw       = 0x10
+
+	// FormatProbe asks about WAV/IMA ADPCM and WAV/u-law. It goes out BEFORE
+	// Probe: the terminal answers in order, so by the time the feature reply
+	// is in, any format replies are too, and Detect waits no longer.
+	FormatProbe = "\x1b_SyncTERM:Q;libsndfileFormat;1;18\x1b\\" +
+		"\x1b_SyncTERM:Q;libsndfileFormat;1;16\x1b\\"
+
 	// A gap longer than this means the terminal ran (or will run) dry; the
 	// next clip is led by a silence prime so the cushion rebuilds.
 	resumeGap = 300 * time.Millisecond
@@ -58,6 +76,12 @@ const (
 	CodecWAV  = 2
 )
 
+// Formats are the compressed WAV encodings the caller's terminal decodes.
+type Formats struct {
+	IMAADPCM bool
+	ULaw     bool
+}
+
 // Config is the tunable surface; Defaults are telnetvision's.
 type Config struct {
 	Channel    int    // 2..15
@@ -68,12 +92,18 @@ type Config struct {
 	VolumeDB   int    // A;Volume set once at Start
 	ResyncSecs int    // blind tail-cap interval (0 = off)
 	Prefix     string // cache file name prefix, so two sessions never share names
+
+	// Formats the terminal said it decodes (from Detect), and the most
+	// compressed codec allowed: "adpcm" (then u-law, then PCM), "ulaw", or
+	// "pcm" to always send 16-bit PCM.
+	Formats Formats
+	Codec   string
 }
 
 // Defaults returns telnetvision's tuning on channel ch.
 func Defaults(ch int, prefix string) Config {
 	return Config{Channel: ch, SlotStart: 100, SlotCount: 100, MaxQueued: 6, Prebuffer: 3,
-		VolumeDB: -6, ResyncSecs: 60, Prefix: prefix}
+		VolumeDB: -6, ResyncSecs: 60, Prefix: prefix, Codec: "adpcm"}
 }
 
 func (c Config) clamp() Config {
@@ -117,13 +147,13 @@ type TimedReader interface {
 	ReadTimeout(p []byte, d time.Duration) (int, error)
 }
 
-// Detect sends the feature probe and waits up to timeout for the reply.
-// It must run before the door's input decoder starts reading. Bytes that
-// were not part of the reply (keys typed meanwhile) come back in leftover
-// for the caller to replay. No reply means no audio.
-func Detect(w io.Writer, r TimedReader, timeout time.Duration) (supported bool, leftover []byte) {
-	if _, err := io.WriteString(w, Probe); err != nil {
-		return false, nil
+// Detect sends the format and feature probes and waits up to timeout for
+// the feature reply. It must run before the door's input decoder starts
+// reading. Bytes that were not part of a reply (keys typed meanwhile) come
+// back in leftover for the caller to replay. No reply means no audio.
+func Detect(w io.Writer, r TimedReader, timeout time.Duration) (supported bool, formats Formats, leftover []byte) {
+	if _, err := io.WriteString(w, FormatProbe+Probe); err != nil {
+		return false, Formats{}, nil
 	}
 	deadline := time.Now().Add(timeout)
 	buf := make([]byte, 0, 64)
@@ -138,14 +168,46 @@ func Detect(w io.Writer, r TimedReader, timeout time.Duration) (supported bool, 
 			buf = append(buf, scratch[:n]...)
 			if avail, start, end, found := FeatureReply(buf, featureID); found {
 				rest := append(append([]byte{}, buf[:start]...), buf[end:]...)
-				return avail, rest
+				formats, rest = formatReplies(rest)
+				return avail, formats, rest
 			}
 		}
 		if err != nil {
 			break
 		}
 	}
-	return false, buf
+	formats, buf = formatReplies(buf)
+	return false, formats, buf
+}
+
+// formatReplies pulls every ESC [ = 7 ; 101 ; <major> ; <subtype> ; <0|1> n
+// out of buf, returning what they said and the bytes around them.
+func formatReplies(buf []byte) (Formats, []byte) {
+	var f Formats
+	out := buf[:0:0]
+	for i := 0; i < len(buf); {
+		if buf[i] == 0x1B && i+1 < len(buf) && buf[i+1] == '[' {
+			j := i + 2
+			for j < len(buf) && buf[j] != 'n' && buf[j] != 0x1B && j-i < 64 {
+				j++
+			}
+			if j < len(buf) && buf[j] == 'n' {
+				if vals, ok := dsrValues(buf[i+2 : j]); ok && len(vals) == 4 && vals[0] == formatFeatureID {
+					if vals[1] == sfMajorWAV && vals[2] == sfSubIMAADPCM {
+						f.IMAADPCM = vals[3] != 0
+					}
+					if vals[1] == sfMajorWAV && vals[2] == sfSubULaw {
+						f.ULaw = vals[3] != 0
+					}
+					i = j + 1
+					continue
+				}
+			}
+		}
+		out = append(out, buf[i])
+		i++
+	}
+	return f, out
 }
 
 // FeatureReply finds ESC [ = 7 ; <id> ; <state> n in buf, tolerating noise
@@ -173,8 +235,8 @@ func FeatureReply(buf []byte, id int) (avail bool, start, end int, found bool) {
 	return false, 0, 0, false
 }
 
-// dsrPairs decodes "=7;a;b;c;d" into [a b] [c d].
-func dsrPairs(params []byte) ([][2]int, bool) {
+// dsrValues decodes "=7;a;b;c;..." into [a b c ...].
+func dsrValues(params []byte) ([]int, bool) {
 	if len(params) < 2 || params[0] != '=' || params[1] != '7' {
 		return nil, false
 	}
@@ -196,6 +258,15 @@ func dsrPairs(params []byte) ([][2]int, bool) {
 			return nil, false
 		}
 		vals = append(vals, v)
+	}
+	return vals, true
+}
+
+// dsrPairs decodes "=7;a;b;c;d" into [a b] [c d].
+func dsrPairs(params []byte) ([][2]int, bool) {
+	vals, ok := dsrValues(params)
+	if !ok {
+		return nil, false
 	}
 	var pairs [][2]int
 	for k := 0; k+1 < len(vals); k += 2 {
@@ -290,12 +361,16 @@ func (s *Session) Push(w io.Writer, m Chunk, now time.Time) error {
 			return err
 		}
 	}
-	file := m.Payload
+	file, codec := m.Payload, m.Codec
 	if m.Codec == CodecRaw {
-		file = EncodeWAV(m.Payload, int(m.SampleRate), int(m.Channels))
+		file, codec = s.encode(m.Payload, int(m.SampleRate), int(m.Channels)), CodecWAV
+	} else if m.Codec == CodecWAV && s.compressing() {
+		if pcm, rate, ch, ok := wavPCM16(m.Payload); ok {
+			file = s.encode(pcm, rate, ch)
+		}
 	}
 	if !s.primed || s.fill != nil {
-		s.fill = append(s.fill, heldChunk{file: file, codec: m.Codec, durMs: dur})
+		s.fill = append(s.fill, heldChunk{file: file, codec: codec, durMs: dur})
 		s.fillLast = now
 		if len(s.fill) < s.cfg.Prebuffer {
 			return nil
@@ -309,7 +384,7 @@ func (s *Session) Push(w io.Writer, m Chunk, now time.Time) error {
 			return err
 		}
 	}
-	if err := s.emit(w, file, m.Codec); err != nil {
+	if err := s.emit(w, file, codec); err != nil {
 		return err
 	}
 	s.emittedMs += dur
@@ -385,7 +460,7 @@ func (s *Session) primeSilence(w io.Writer, now time.Time) error {
 	}
 	n := int(s.lastRate) * ch * 2 * int(silMs) / 1000
 	n -= n % (2 * ch)
-	if err := s.emit(w, EncodeWAV(make([]byte, n), int(s.lastRate), ch), CodecWAV); err != nil {
+	if err := s.emit(w, s.encode(make([]byte, n), int(s.lastRate), ch), CodecWAV); err != nil {
 		return err
 	}
 	s.emittedMs += silMs
@@ -409,6 +484,37 @@ func (s *Session) flushFill(w io.Writer, now time.Time) error {
 	s.lastEmpty = now
 	s.fill = nil
 	return nil
+}
+
+// compressing reports whether clips go out as something smaller than PCM.
+func (s *Session) compressing() bool {
+	return s.CodecName() != "wav-pcm16"
+}
+
+// CodecName names what encode sends (for logs).
+func (s *Session) CodecName() string {
+	f := s.cfg.Formats
+	switch {
+	case s.cfg.Codec == "adpcm" && f.IMAADPCM:
+		return "wav-ima-adpcm"
+	case (s.cfg.Codec == "adpcm" || s.cfg.Codec == "ulaw") && f.ULaw:
+		return "wav-ulaw"
+	}
+	return "wav-pcm16"
+}
+
+// encode wraps interleaved S16LE PCM in the smallest WAV this caller plays.
+// None of the codecs changes the sample rate or count, so the ledger's
+// durations stay exact (at 22050 Hz an IMA block fits every clip length the
+// door uses, so no padding either).
+func (s *Session) encode(pcm []byte, rate, channels int) []byte {
+	switch s.CodecName() {
+	case "wav-ima-adpcm":
+		return encodeWAVIMA(pcm, rate, channels)
+	case "wav-ulaw":
+		return encodeWAVULaw(pcm, rate, channels)
+	}
+	return EncodeWAV(pcm, rate, channels)
 }
 
 // emit writes one Store/Load/Queue triple as a single contiguous write, so a

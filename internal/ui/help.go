@@ -101,7 +101,7 @@ func (a *App) openHelp() {
 	a.modalFrame = ansi.NewFrame(0, 0, a.Width, usable, a.theme().ModalBg)
 	a.modalFrame.Charset = a.Charset
 	a.modal = &HelpModal{Frame: a.modalFrame, Theme: a.theme(), sections: a.helpSections()}
-	_ = ansi.ClearScreen(a.Conn)
+	a.clearScreen()
 	a.dirty = true
 }
 

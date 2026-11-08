@@ -33,8 +33,9 @@ type Player struct {
 // NewPlayer returns a player for src on the links channel. Blind resyncs
 // are off: the door is the clock for a file, so there is no producer drift
 // to cap, and a music track should not skip every minute.
-func NewPlayer(title string, src Source) *Player {
+func NewPlayer(title string, src Source, formats apcaudio.Formats) *Player {
 	cfg := apcaudio.Defaults(Channel, "al")
+	cfg.Formats = formats
 	cfg.ResyncSecs = 0
 	cfg.MaxQueued = 10
 	return &Player{Title: title, src: src, sess: apcaudio.NewSession(cfg),

@@ -112,7 +112,7 @@ func (a *App) openTVFeed() {
 	a.tvConsumer.WantAudio = a.AudioOK && a.TVAudio
 	a.tvConsumer.Start()
 	if a.tvConsumer.WantAudio {
-		a.tvAudio = apcaudio.NewSession(apcaudio.Defaults(2, "tv"))
+		a.tvAudio = apcaudio.NewSession(a.audioConfig("tv"))
 		_ = a.tvAudio.Start(&a.audioOut)
 	}
 }
@@ -201,7 +201,8 @@ func (a *App) showLoungeHistory() {
 	a.tvShowTranscript = true
 	a.transcript.Scroll = 0
 	a.tvTranscriptShownAt = time.Now()
-	a.forceFullRedraw()
+	// The overlay is the compositor's middle layer: the dirty-diff repaints
+	// just the cells it covers. No clear — that would resend the whole video.
 	a.dirty = true
 }
 
@@ -223,7 +224,6 @@ func (a *App) hideLoungeHistory() {
 	}
 	a.tvShowTranscript = false
 	a.transcript.Scroll = 0
-	a.forceFullRedraw()
 	a.dirty = true
 }
 
@@ -627,4 +627,12 @@ func (a *App) nickAttr(nick string) ansi.Attr {
 		}
 	}
 	return fg | best
+}
+
+// audioConfig is the TV / video audio session config on channel 2, sending
+// the smallest WAV codec the caller's terminal decodes.
+func (a *App) audioConfig(prefix string) apcaudio.Config {
+	cfg := apcaudio.Defaults(2, prefix)
+	cfg.Formats = a.AudioFormats
+	return cfg
 }

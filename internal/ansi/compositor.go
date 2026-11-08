@@ -2,7 +2,6 @@ package ansi
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 )
 
@@ -88,7 +87,7 @@ func (c *Compositor) Render(w io.Writer) error {
 	}
 
 	var buf bytes.Buffer
-	scratch := make([]byte, 0, 4)
+	enc := newWireEncoder(&buf, c.Charset)
 	c.Spans = c.Spans[:0]
 
 	for r := 0; r < H; r++ {
@@ -110,19 +109,9 @@ func (c *Compositor) Render(w io.Writer) error {
 		}
 		c.Spans = append(c.Spans, Span{Row: r, First: firstChange, Last: lastChange})
 
-		// Emit cursor move + cells.
-		fmt.Fprintf(&buf, "\x1b[%d;%dH", base.Y+r+1, base.X+firstChange+1)
-		var prevSGR string
-		var primed bool
-		for col := firstChange; col <= lastChange; col++ {
-			cell := composed[col]
-			if sgr := cell.SGR(); !primed || sgr != prevSGR {
-				buf.WriteString(sgr)
-				prevSGR = sgr
-				primed = true
-			}
-			buf.Write(encodeCellBytes(cell.Char, c.Charset, scratch))
-		}
+		// Emit the changed cells (hopping unchanged ones inside the span).
+		prev, init := c.last[r], c.initialized
+		enc.span(base.Y+r+1, base.X+1, composed, func(col int) bool { return !init || composed[col] != prev[col] }, firstChange, lastChange)
 		copy(c.last[r], composed)
 	}
 

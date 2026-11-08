@@ -2,6 +2,7 @@ package apcaudio
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"strings"
@@ -53,17 +54,79 @@ func (errReader) ReadTimeout(p []byte, d time.Duration) (int, error) { return 0,
 
 func TestDetect(t *testing.T) {
 	var out bytes.Buffer
-	ok, rest := Detect(&out, &script{chunks: [][]byte{[]byte("x\x1b[=7;"), []byte("100;1ny")}}, time.Second)
-	if !ok || string(rest) != "xy" || out.String() != Probe {
-		t.Fatalf("ok=%v rest=%q wrote %q", ok, rest, out.String())
+	ok, f, rest := Detect(&out, &script{chunks: [][]byte{[]byte("x\x1b[=7;"), []byte("100;1ny")}}, time.Second)
+	if !ok || f != (Formats{}) || string(rest) != "xy" || out.String() != FormatProbe+Probe {
+		t.Fatalf("ok=%v formats=%+v rest=%q wrote %q", ok, f, rest, out.String())
 	}
-	ok, rest = Detect(&out, &script{chunks: [][]byte{[]byte("typed")}}, 120*time.Millisecond)
+	ok, _, rest = Detect(&out, &script{chunks: [][]byte{[]byte("typed")}}, 120*time.Millisecond)
 	if ok || string(rest) != "typed" {
 		t.Fatalf("silent terminal: ok=%v rest=%q", ok, rest)
 	}
-	if ok, _ := Detect(&out, errReader{}, time.Second); ok {
+	if ok, _, _ := Detect(&out, errReader{}, time.Second); ok {
 		t.Fatal("a read error means no audio")
 	}
+}
+
+// A SyncTERM that knows libsndfileFormat answers the format probes first
+// (they were sent first); the replies are consumed, never replayed as keys.
+func TestDetectFormats(t *testing.T) {
+	var out bytes.Buffer
+	ok, f, rest := Detect(&out, &script{chunks: [][]byte{
+		[]byte("a\x1b[=7;101;1;18;1n\x1b[=7;101;"), []byte("1;16;0nb\x1b[=7;100;1n"),
+	}}, time.Second)
+	if !ok || !f.IMAADPCM || f.ULaw || string(rest) != "ab" {
+		t.Fatalf("ok=%v formats=%+v rest=%q", ok, f, rest)
+	}
+}
+
+// Clips go out in the best format the terminal decodes and the config
+// allows; durations (the ledger) are untouched.
+func TestSessionEncodesForTheTerminal(t *testing.T) {
+	for _, tc := range []struct {
+		codec   string
+		formats Formats
+		tag     uint16
+	}{
+		{"adpcm", Formats{IMAADPCM: true, ULaw: true}, 0x11},
+		{"adpcm", Formats{ULaw: true}, 7},
+		{"ulaw", Formats{IMAADPCM: true, ULaw: true}, 7},
+		{"pcm", Formats{IMAADPCM: true, ULaw: true}, 1},
+		{"adpcm", Formats{}, 1},
+	} {
+		cfg := Defaults(2, "tv")
+		cfg.Codec, cfg.Formats, cfg.Prebuffer = tc.codec, tc.formats, 1
+		s := NewSession(cfg)
+		var w bytes.Buffer
+		now := time.Unix(1000, 0)
+		if err := s.Push(&w, chunk(80), now); err != nil {
+			t.Fatal(err)
+		}
+		file := storedFile(t, w.Bytes())
+		if got := binary.LittleEndian.Uint16(file[20:]); got != tc.tag {
+			t.Errorf("%s %+v: format tag %#x, want %#x", tc.codec, tc.formats, got, tc.tag)
+		}
+		if s.LeadMs(now) != 80 {
+			t.Errorf("%s %+v: lead %d, want 80", tc.codec, tc.formats, s.LeadMs(now))
+		}
+	}
+}
+
+// storedFile decodes the first cached clip (ESC _ SyncTERM:C;S;name;<b64>).
+func storedFile(t *testing.T, out []byte) []byte {
+	t.Helper()
+	s := string(out)
+	i := strings.Index(s, "SyncTERM:C;S;")
+	if i < 0 {
+		t.Fatalf("no store in %q", s)
+	}
+	s = s[i+len("SyncTERM:C;S;"):]
+	s = s[strings.Index(s, ";")+1:]
+	s = s[:strings.Index(s, "\x1b")]
+	b, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
 
 func chunk(ms uint32) Chunk {

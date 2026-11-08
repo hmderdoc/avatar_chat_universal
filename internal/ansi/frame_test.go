@@ -14,7 +14,7 @@ func TestFrameInitialRenderFullPaint(t *testing.T) {
 	}
 	out := buf.String()
 	// Expect two cursor moves (one per row) and 8 space chars + SGR + ESC[H.
-	if !strings.Contains(out, "\x1b[1;1H") || !strings.Contains(out, "\x1b[2;1H") {
+	if !strings.Contains(out, "\x1b[1H") || !strings.Contains(out, "\x1b[2H") {
 		t.Errorf("expected row cursor moves, got %q", out)
 	}
 	spaces := strings.Count(out, " ")

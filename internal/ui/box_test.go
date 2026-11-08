@@ -33,12 +33,24 @@ func vtGrid(out []byte, w, h int) [][]byte {
 			}
 			params := string(out[i+2 : j])
 			switch out[j] {
-			case 'H':
-				y, x = 0, 0
-				if p := strings.Split(params, ";"); len(p) == 2 {
-					r, _ := strconv.Atoi(p[0])
-					col, _ := strconv.Atoi(p[1])
-					y, x = r-1, col-1
+			case 'H': // CUP: missing or empty params default to 1
+				p := strings.Split(params, ";")
+				r, col := 1, 1
+				if len(p) > 0 && p[0] != "" {
+					r, _ = strconv.Atoi(p[0])
+				}
+				if len(p) > 1 && p[1] != "" {
+					col, _ = strconv.Atoi(p[1])
+				}
+				y, x = r-1, col-1
+			case 'C': // CUF
+				n := 1
+				if params != "" {
+					n, _ = strconv.Atoi(params)
+				}
+				x += n
+				if x > w-1 {
+					x = w - 1
 				}
 			case 'J':
 				if params == "2" {

@@ -278,7 +278,7 @@ var rgbCyclePalette = [3]byte{4, 2, 1}
 // returns, last == cur and subsequent renders only emit changed regions.
 func (f *Frame) Render(w io.Writer) error {
 	var buf bytes.Buffer
-	scratch := make([]byte, 0, 4)
+	enc := newWireEncoder(&buf, f.Charset)
 	for r := 0; r < f.H; r++ {
 		firstC, lastC := -1, -1
 		if f.first {
@@ -296,18 +296,8 @@ func (f *Frame) Render(w io.Writer) error {
 		if firstC < 0 {
 			continue
 		}
-		fmt.Fprintf(&buf, "\x1b[%d;%dH", f.Y+r+1, f.X+firstC+1)
-		var prevSGR string
-		var primed bool
-		for c := firstC; c <= lastC; c++ {
-			cell := f.cur[r][c]
-			if sgr := cell.SGR(); !primed || sgr != prevSGR {
-				buf.WriteString(sgr)
-				prevSGR = sgr
-				primed = true
-			}
-			buf.Write(encodeCellBytes(cell.Char, f.Charset, scratch))
-		}
+		cur, last, first := f.cur[r], f.last[r], f.first
+		enc.span(f.Y+r+1, f.X+1, cur, func(c int) bool { return first || cur[c] != last[c] }, firstC, lastC)
 	}
 	if buf.Len() == 0 {
 		return nil

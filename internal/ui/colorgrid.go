@@ -244,6 +244,7 @@ func (a *App) pickColour(p *settingsPanel) {
 		}
 	}()
 	for {
+		a.finishFrame()
 		_ = g.draw(th, a.Charset, a.Width, a.Height).Render(a.Conn)
 		_ = a.parkCursor(a.Conn)
 		var k ansi.Key

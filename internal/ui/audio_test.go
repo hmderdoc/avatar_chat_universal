@@ -52,3 +52,22 @@ func TestSilenceOnExitFinishesFrameThenFlushes(t *testing.T) {
 		t.Fatalf("exit wrote %q", got)
 	}
 }
+
+// A clear-screen (modal open/close, forceFullRedraw) must not land inside a
+// frame the pacer has only half sent: the rest of the frame goes first.
+func TestClearScreenFinishesInFlightFrame(t *testing.T) {
+	c := &nbConn{n: 3}
+	a := &App{Conn: c}
+	a.pending = []byte("\x1b[12;40H\x1b[0;37;40mFRAME")
+	if err := a.flushPending(); err != nil {
+		t.Fatal(err)
+	}
+	a.clearScreen()
+	want := "\x1b[12;40H\x1b[0;37;40mFRAME\x1b[2J\x1b[H"
+	if got := c.String(); got != want {
+		t.Fatalf("wire = %q, want %q", got, want)
+	}
+	if a.frameInFlight() {
+		t.Fatal("frame still marked in flight after clearScreen")
+	}
+}

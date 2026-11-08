@@ -439,6 +439,7 @@ func (a *App) drawSettings(p *settingsPanel, av avatar.Avatar) {
 		keys = "S save   Esc cancel (unsaved changes)"
 	}
 	p.hints = drawHints(f, 3, h-2, truncate(keys, w-4), hot, hint{"S save", charKey('s')}, hint{"Esc cancel", escKey})
+	a.finishFrame()
 	_ = f.Render(a.Conn)
 	_ = a.parkCursor(a.Conn)
 }

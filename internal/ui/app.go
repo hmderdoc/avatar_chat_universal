@@ -216,6 +216,9 @@ type App struct {
 	// startup probe answered); TVAudio lets the lounge use it.
 	AudioOK bool
 	TVAudio bool
+	// AudioFormats are the compressed WAV codecs the startup probe found;
+	// every audio session sends the smallest of them (apcaudio.Config).
+	AudioFormats apcaudio.Formats
 	TVPopupSecs int    // how long a message popup lingers (5-15, default 10)
 	TVAvatars   bool   // show avatars in popups (default off; video competes)
 
@@ -1665,6 +1668,7 @@ func (a *App) confirmUpload() bool {
 		}
 		frame.PrintAt(2, 1+i, []byte(truncate(ln.text, w-4)), ln.attr)
 	}
+	a.finishFrame()
 	if err := frame.Render(a.Conn); err != nil {
 		return false
 	}
@@ -1727,7 +1731,7 @@ func (a *App) openRoster(users []string) {
 		}
 	}
 	a.modal = roster
-	_ = ansi.ClearScreen(a.Conn)
+	a.clearScreen()
 	a.dirty = true
 }
 
@@ -1743,7 +1747,7 @@ func (a *App) openChannels() {
 	cm := NewChannelsModal(a.modalFrame, a.Session.Rooms())
 	cm.Theme = a.theme()
 	a.modal = cm
-	_ = ansi.ClearScreen(a.Conn)
+	a.clearScreen()
 	a.dirty = true
 }
 
@@ -1786,7 +1790,7 @@ func (a *App) openImageViewer() {
 	if len(images) > 0 {
 		a.Session.MarkBitmapViewed(a.imageViewer.CurrentIndex())
 	}
-	_ = ansi.ClearScreen(a.Conn)
+	a.clearScreen()
 	a.dirty = true
 }
 
@@ -1873,7 +1877,7 @@ func orDefault(t *theme.Theme) *theme.Theme {
 // forceFullRedraw clears the screen and marks every frame for repaint.
 // Used when transitioning out of any modal.
 func (a *App) forceFullRedraw() {
-	_ = ansi.ClearScreen(a.Conn)
+	a.clearScreen()
 	for _, f := range []*ansi.Frame{a.headerFrame, a.actionFrame, a.bgAnimFrame, a.transcriptFrame, a.fgAnimFrame, a.inputFrame} {
 		f.ForceRedraw()
 	}
@@ -1882,6 +1886,14 @@ func (a *App) forceFullRedraw() {
 		a.imageViewer.ForceRedraw()
 	}
 	a.dirty = true
+}
+
+// clearScreen clears the terminal once the in-flight frame has gone out: a
+// clear written while a paced frame is half sent would land inside one of
+// its escape sequences on a slow link.
+func (a *App) clearScreen() {
+	a.finishFrame()
+	_ = ansi.ClearScreen(a.Conn)
 }
 
 // splitFields splits on whitespace runs, similar to strings.Fields, without

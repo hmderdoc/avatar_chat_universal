@@ -241,7 +241,7 @@ func (a *App) audioTick(now time.Time) {
 			a.Session.Notice(fmt.Sprintf("/play: %v", r.err))
 			break
 		}
-		al.player = audiolink.NewPlayer(audiolink.Name(r.url), r.src)
+		al.player = audiolink.NewPlayer(audiolink.Name(r.url), r.src, a.AudioFormats)
 		al.playing = r.url
 		_ = al.player.Start(&a.audioOut)
 		a.Session.Notice("playing " + al.player.Title + " (/stop to stop)")

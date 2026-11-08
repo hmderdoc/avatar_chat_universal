@@ -131,15 +131,15 @@ func TestAudioWantedGating(t *testing.T) {
 	cfg := config.Default()
 	var src io.Reader
 	// A terminal that is not a CTerm is never sent the probe.
-	if audioWanted(cfg, &termprobe.Result{}, nil, &src) {
+	if ok, _ := audioWanted(cfg, &termprobe.Result{}, nil, &src); ok {
 		t.Fatal("non-CTerm terminal got audio")
 	}
 	cfg.TVAudio, cfg.AudioLinks = "off", "off"
-	if audioWanted(cfg, &termprobe.Result{CTerm: "1.320"}, nil, &src) {
+	if ok, _ := audioWanted(cfg, &termprobe.Result{CTerm: "1.320"}, nil, &src); ok {
 		t.Fatal("audio off everywhere still enabled it")
 	}
 	cfg.TVAudio = "on"
-	if !audioWanted(cfg, nil, nil, &src) {
+	if ok, _ := audioWanted(cfg, nil, nil, &src); !ok {
 		t.Fatal("tv_audio = on should trust the sysop")
 	}
 }

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hmderdoc/avatar_chat_universal/internal/apcaudio"
 )
 
 // decodeAll reads a whole source and returns its samples.
@@ -122,7 +124,7 @@ func (c *constSource) Read(p []byte) (int, error) {
 
 // The player keeps about a second queued, paced by the clock, and finishes.
 func TestPlayerPacesAndFinishes(t *testing.T) {
-	p := NewPlayer("t", &constSource{left: 22050 * 2 * 3}) // 3 s
+	p := NewPlayer("t", &constSource{left: 22050 * 2 * 3}, apcaudio.Formats{}) // 3 s
 	var w bytes.Buffer
 	t0 := time.Unix(1000, 0)
 	p.Start(&w)

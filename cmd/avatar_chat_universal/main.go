@@ -149,8 +149,8 @@ func run() error {
 	// fTelnet fork, the futureland connection shim) is asked at all, so no
 	// other terminal is sent an APC it might print. Same before-the-input-
 	// pump rule as the probes above.
-	audioOK := audioWanted(cfg, probe, conn, &inputSrc)
-	logLine(*dataDir, fmt.Sprintf("audio: %v (tv_audio=%s audio_links=%s)", audioOK, cfg.TVAudio, cfg.AudioLinks))
+	audioOK, audioFormats := audioWanted(cfg, probe, conn, &inputSrc)
+	logLine(*dataDir, fmt.Sprintf("audio: %v formats=%+v (tv_audio=%s audio_links=%s)", audioOK, audioFormats, cfg.TVAudio, cfg.AudioLinks))
 
 	input := ansi.NewInput(inputSrc)
 
@@ -396,6 +396,7 @@ func run() error {
 	app.FigletMove = cfg.FigletMove
 	app.AnsiGalleryFiles = scanAnsiGallery(cfg.AnsiGalleryDir)
 	app.IdleInterleaveAnsi = cfg.IdleInterleaveAnsi
+	app.AudioFormats = audioFormats
 	if cfg.TVColor != "" {
 		app.TVColor = cfg.TVColor
 		app.AudioOK = audioOK
@@ -996,19 +997,20 @@ func standaloneUser(userOverride, bbsOverride string) *dropfile.User {
 // mode of "on" anywhere trusts the sysop; all "off" never asks; otherwise
 // the libsndfile probe runs when the terminal looks like a CTerm (or when
 // no terminal probe ran to say otherwise). Bytes typed during the probe are
-// replayed through *src.
-func audioWanted(cfg *config.Config, probe *termprobe.Result, conn termio.Conn, src *io.Reader) bool {
+// replayed through *src. formats are the compressed WAV codecs the terminal
+// said it decodes (none when the probe was skipped: plain PCM then).
+func audioWanted(cfg *config.Config, probe *termprobe.Result, conn termio.Conn, src *io.Reader) (bool, apcaudio.Formats) {
 	tv, links := cfg.TVAudio, cfg.AudioLinks
 	if tv == "off" && links == "off" {
-		return false
+		return false, apcaudio.Formats{}
 	}
 	if tv == "on" || links == "on" {
-		return true
+		return true, apcaudio.Formats{}
 	}
 	if probe != nil && probe.CTerm == "" {
-		return false
+		return false, apcaudio.Formats{}
 	}
-	ok, rest := apcaudio.Detect(conn, termprobe.DeadlineReader(conn), 500*time.Millisecond)
+	ok, formats, rest := apcaudio.Detect(conn, termprobe.DeadlineReader(conn), 500*time.Millisecond)
 	if len(rest) > 0 {
 		if rc, isReplay := (*src).(*replayConn); isReplay {
 			rc.pending = append(rc.pending, rest...)
@@ -1016,7 +1018,7 @@ func audioWanted(cfg *config.Config, probe *termprobe.Result, conn termio.Conn, 
 			*src = &replayConn{Conn: conn, pending: rest}
 		}
 	}
-	return ok
+	return ok, formats
 }
 
 // logLine appends one line to termprobe.log next to the probe result.

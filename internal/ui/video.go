@@ -260,7 +260,7 @@ func (a *App) startVideo(r videoResult) {
 	vs.player = p
 	vs.playing = r.url
 	if wantAudio && hasAudio {
-		a.tvAudio = apcaudio.NewSession(apcaudio.Defaults(2, "vd"))
+		a.tvAudio = apcaudio.NewSession(a.audioConfig("vd"))
 		_ = a.tvAudio.Start(&a.audioOut)
 	}
 	a.tvShowTranscript = false

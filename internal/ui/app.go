@@ -213,6 +213,15 @@ type App struct {
 	// TV lounge config (see internal/ui/tvlounge.go).
 	TVColor     string // "truecolor" (default) or "16"
 	tvGate      *telnetvision.Gate // camera-noise gate for the lounge video
+	// VideoColor is the user's video depth setting (videocolor.go);
+	// OnVideoColorSave stores a change made in /settings.
+	VideoColor       string
+	OnVideoColorSave func(v string) error
+	vgov             videoGovernor
+	// The frame in flight carries truecolor video: when it started, and
+	// whether the link pushed back while writing it.
+	videoFrameAt    time.Time
+	videoFrameBound bool
 	// AudioOK says the caller's terminal plays SyncTERM Audio APCs (the
 	// startup probe answered); TVAudio lets the lounge use it.
 	AudioOK bool
@@ -2168,6 +2177,11 @@ func (a *App) paceFrame() error {
 	// array; renderBuf is reset on the next compose) and start draining it.
 	a.pending = append(a.pending[:0], a.renderBuf.Bytes()...)
 	a.pendingOff = 0
+	// Auto video colour watches how fast truecolor video frames drain.
+	a.videoFrameAt, a.videoFrameBound = time.Time{}, false
+	if len(a.pending) >= videoMinSample && a.loungeActive() && a.videoTrue() && normVideoColor(a.VideoColor) == videoColorAuto {
+		a.videoFrameAt = time.Now()
+	}
 	return a.flushPending()
 }
 
@@ -2185,11 +2199,24 @@ func (a *App) flushPending() error {
 	if !a.frameInFlight() {
 		return nil
 	}
+	want := len(a.pending) - a.pendingOff
 	n, err := a.writeConn(a.pending[a.pendingOff:])
 	if err != nil {
 		return err
 	}
 	a.pendingOff += n
+	if !a.videoFrameAt.IsZero() {
+		if n < want {
+			a.videoFrameBound = true
+		}
+		if !a.frameInFlight() {
+			now := time.Now()
+			if a.vgov.frameDone(now, now.Sub(a.videoFrameAt), a.videoFrameBound) {
+				a.dirty = true
+			}
+			a.videoFrameAt = time.Time{}
+		}
+	}
 	return nil
 }
 

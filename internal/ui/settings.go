@@ -89,6 +89,10 @@ type settingsPanel struct {
 	theme        *theme.Theme
 	themeChanged bool
 
+	// video is the video colour setting shown; stored only on S.
+	video        string
+	videoChanged bool
+
 	hints hintLine // the key line's actions, for clicks
 }
 
@@ -147,6 +151,7 @@ func (a *App) runSettings() settingsResult {
 	p := newSettingsPanel(name, current)
 	p.changed = carried
 	p.theme = a.theme()
+	p.video = normVideoColor(a.VideoColor)
 	if a.pendingTheme != nil {
 		p.theme = a.pendingTheme
 		p.themeChanged = p.theme.Name != a.themeName()
@@ -263,9 +268,25 @@ func (a *App) runSettings() settingsResult {
 					p.status = err.Error()
 				}
 			}
+		case 'v', 'V':
+			dir := 1
+			if k.Rune == 'V' {
+				dir = -1
+			}
+			p.video = nextVideoColor(p.video, dir)
+			p.videoChanged = p.video != normVideoColor(a.VideoColor)
 		case 's', 'S':
 			if p.changed {
 				a.saveStyle(p)
+			}
+			if p.videoChanged {
+				a.VideoColor = p.video
+				a.vgov = videoGovernor{}
+				if a.OnVideoColorSave != nil {
+					if err := a.OnVideoColorSave(p.video); err != nil {
+						a.Session.Notice(fmt.Sprintf("/settings: %v", err))
+					}
+				}
 			}
 			if p.themeChanged {
 				if err := a.SetUserTheme(p.theme.Name, true); err != nil {
@@ -335,7 +356,7 @@ func (a *App) drawSettings(p *settingsPanel, av avatar.Avatar) {
 	if w > a.Width-2 {
 		w = a.Width - 2
 	}
-	h := 21
+	h := 22
 	if h > a.Height-1 {
 		h = a.Height - 1
 	}
@@ -420,22 +441,24 @@ func (a *App) drawSettings(p *settingsPanel, av avatar.Avatar) {
 		f.PrintAt(px+1, 13, []byte(ps[1:]), bg)
 		px += len(ps) + 2
 	}
-	rule(15, "Theme")
+	rule(15, "Display")
 	themeLine := fmt.Sprintf("Theme: %-16s (set by the sysop)", th.Name)
 	if a.UserThemes {
 		themeLine = fmt.Sprintf("Theme: %-16s c/C change (this panel previews it)", th.Name)
 	}
 	f.PrintAt(3, 16, []byte(truncate(themeLine, w-4)), bg)
+	videoLine := fmt.Sprintf("Video: %-32s v/V change", a.videoColorStatus(p.video))
+	f.PrintAt(3, 17, []byte(truncate(videoLine, w-4)), bg)
 	note := "Changes apply in this chat."
 	if a.BoardWide {
-		note = "Avatar and handle style are BBS-wide; the theme is this door's."
+		note = "Avatar and handle style are BBS-wide; the theme and video are this door's."
 	}
-	f.PrintAt(3, 17, []byte(truncate(note, w-4)), th.ModalOK)
+	f.PrintAt(3, 18, []byte(truncate(note, w-4)), th.ModalOK)
 	if p.status != "" {
-		f.PrintAt(3, 18, []byte(truncate(p.status, w-4)), th.ModalHint)
+		f.PrintAt(3, 19, []byte(truncate(p.status, w-4)), th.ModalHint)
 	}
 	keys := "S save   Esc cancel"
-	if p.changed || p.themeChanged {
+	if p.changed || p.themeChanged || p.videoChanged {
 		keys = "S save   Esc cancel (unsaved changes)"
 	}
 	p.hints = drawHints(f, 3, h-2, truncate(keys, w-4), hot, hint{"S save", charKey('s')}, hint{"Esc cancel", escKey})

@@ -472,6 +472,14 @@ func run() error {
 		}
 		return userPrefs.Set(user.DisplayName(), "mouse", v)
 	}
+	// Video colour: Auto unless the user picked one in /settings.
+	app.VideoColor = userPrefs.Get(user.DisplayName(), "video_color")
+	app.OnVideoColorSave = func(v string) error {
+		if v == "auto" {
+			v = ""
+		}
+		return userPrefs.Set(user.DisplayName(), "video_color", v)
+	}
 	app.BoardWide = boardWide
 	app.StartInSettings = startInSettings
 	app.OnStyleSave = func(st *nickstyle.Style) error {

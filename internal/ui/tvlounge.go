@@ -51,10 +51,11 @@ func (a *App) tvColorTrue() bool {
 // probed from the terminal at startup (see cmd/avatar_chat_universal); this is
 // the manual override — bound to both /tvcolor and Ctrl-T while in the lounge.
 func (a *App) toggleTVColor() {
-	if a.tvColorTrue() {
+	if a.videoTrue() {
 		a.TVColor = "16"
 	} else {
 		a.TVColor = "truecolor"
+		a.vgov.reduced = false // Auto gets another try at truecolor
 	}
 	a.forceFullRedraw()
 	a.dirty = true
@@ -186,6 +187,9 @@ func (a *App) tvTick() {
 	}
 	now := time.Now()
 	a.pumpTVAudio(now)
+	if a.vgov.tick(now) {
+		a.dirty = true
+	}
 	if now.Sub(a.tvLastTick) < time.Second/tvFPS {
 		return
 	}
@@ -264,7 +268,7 @@ func (a *App) drawLounge() {
 			a.tvGate = &telnetvision.Gate{Threshold: telnetvision.DefaultGateThreshold}
 		}
 		fr.RenderTo(bg, 0, 0, bg.W, videoH, telnetvision.RenderOpts{
-			Truecolor:  a.tvColorTrue(),
+			Truecolor:  a.videoTrue(),
 			Shade:      true,
 			Saturation: 1.8,
 			Dither:     true,

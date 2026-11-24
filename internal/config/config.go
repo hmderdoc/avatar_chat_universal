@@ -188,7 +188,7 @@ func Load(path string) (*Config, error) {
 			continue
 		}
 		key := strings.TrimSpace(trim[:eq])
-		val := strings.TrimSpace(trim[eq+1:])
+		val := stripTrailingComment(strings.TrimSpace(trim[eq+1:]))
 		cfg.Raw[key] = val
 
 		switch key {
@@ -342,6 +342,21 @@ func atoiOr(s string, def int) int {
 
 // splitPipe parses a pipe-separated list. Unlike splitCSV, tokens preserve
 // their original casing (figlet messages care about it).
+// stripTrailingComment drops a "; comment" after a value, so a line from
+// the shipped ini such as `image_sixel = on        ; auto | on | off`
+// reads as "on" once its leading ";" is removed. Only a ";" after
+// whitespace starts a comment: one inside a value (a URL, a pipe list)
+// is kept. A value that is only a comment (`image_cache_dir =   ; ...`)
+// is empty.
+func stripTrailingComment(val string) string {
+	for i := 0; i < len(val); i++ {
+		if val[i] == ';' && (i == 0 || val[i-1] == ' ' || val[i-1] == '\t') {
+			return strings.TrimSpace(val[:i])
+		}
+	}
+	return val
+}
+
 func splitPipe(s string) []string {
 	parts := strings.Split(s, "|")
 	out := make([]string, 0, len(parts))

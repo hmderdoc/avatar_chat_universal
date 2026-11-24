@@ -7,7 +7,8 @@ have room for.
 
 Schema: classic INI-style `key = value` lines. No section headers
 required (we ignore them if present). Lines beginning with `;` or `#` are
-comments. Whitespace around `=` is tolerated. Most keys are optional —
+comments, and so is anything from a `;` that follows whitespace to the
+end of a line (`image_sixel = on   ; auto | on | off` reads as `on`). Whitespace around `=` is tolerated. Most keys are optional —
 defaults shown below.
 
 ---

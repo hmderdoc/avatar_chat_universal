@@ -7,8 +7,44 @@ versioning follows loose [SemVer](https://semver.org/) (see
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-24
+
+### Added
+
+- door: **Video color setting.** `/settings` > Display > Video: Auto,
+  Truecolor or 16, stored per user. Auto paints truecolor and drops to 16
+  colors for 3 s whenever truecolor video frames take over 250 ms to
+  drain on a link that pushes back, then tries truecolor again after a
+  backoff (1 min, doubling up to 10). Fast links never drop. The
+  terminal's capability (`tv_color`, Ctrl-T) is still the limit.
+- door: TV and video audio go out as IMA ADPCM or u-law when SyncTERM
+  says it can decode them, and as PCM otherwise.
+
+### Changed
+
+- door: smaller TV/video output. Frames use partial SGR, cursor-forward
+  hops and shorter cursor moves, and draw exactly the same picture
+  (tv_static 127 -> 25 KB/s, aurora 83 -> 22, gallery ~22 -> 12). A cell
+  whose camera pixels stay within 10 per channel of what the caller
+  already has is not resent, so a still scene with sensor noise costs
+  nothing.
+
 ### Fixed
 
+- door: running standalone on a local terminal, the terminal probe gave
+  up before reading a reply, so every terminal looked like a 16-color one
+  with no sixel and no audio (termprobe.log: `0 replies`, `raw ""`).
+  stdin is now made pollable on Unix terminals for the probe and restored
+  on exit. Windows consoles still get no probe replies.
+- config: a trailing `; comment` after a value is now ignored. Removing
+  the leading `;` from a shipped example such as
+  `; image_sixel = auto        ; auto | on | off` used to give the value
+  `auto        ; auto | on | off`, which is not a valid setting, so the
+  key silently kept its default. Only a `;` after whitespace starts a
+  comment, so one inside a value (a URL) is kept.
+- door: a clear-screen finishes the paced frame already being sent, so
+  it can no longer land inside a half-sent escape sequence. Turning lounge
+  history on or off no longer repaints the whole video.
 - config: the shipped `avatar_chat.ini` no longer sets `bbs_id = futureland.today`.
   That line named the hub's own BBS as the identity of *every* install that
   did not edit it, so their users appeared to come from futureland.today.
@@ -746,7 +782,8 @@ relative to a clean checkout.
   displays bitmaps that other clients post but there's no built-in
   encoder yet.
 
-[Unreleased]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.2.1...v0.2.2
 [0.1.2]: https://github.com/hmderdoc/avatar_chat_universal/compare/v0.1.0...v0.1.2
